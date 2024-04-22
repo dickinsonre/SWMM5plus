@@ -320,6 +320,12 @@ else:
 if print_plots:
     os.system('mkdir '+ plot_dir)  
 
+
+swmm5plus_link_Qmax = []
+swmm5plus_node_Hmax = []
+swmm5c_link_Qmax = []
+swmm5c_node_Hmax = []
+
 # Loop through all of the data set names 
 for x in all_dset_names:
     
@@ -347,6 +353,10 @@ for x in all_dset_names:
         index = get_index_from_data_array(z,'Depth')
         # extract the depths from the swmm5_plus .h5 file
         swmmF_link_Y = z[:,index] * Yf
+
+        # append the peak flowrate
+        swmm5plus_link_Qmax.append(np.max(swmmF_link_Q)) 
+        swmm5c_link_Qmax.append(np.max(swmmC_link_Q))
 
         # extract the timestamp
         time = z[:,0]
@@ -471,6 +481,10 @@ for x in all_dset_names:
         # extract the timestamp
         time = z[:,0]
 
+        # append the peak flowrate
+        swmm5plus_node_Hmax.append(np.max(swmmF_node_H)) 
+        swmm5c_node_Hmax.append(np.max(swmmC_node_H))
+
         array_len_H = len(swmmC_node_H)
 
         # --- RMSE of head
@@ -532,6 +546,43 @@ for x in all_dset_names:
             plt.savefig(H_plot_name,bbox_inches = 'tight',pad_inches=0, format='png')
             plt.close() 
 
+if print_plots:
+    peak_comp_plot_name = plot_dir+'/'+'SWMM5plus_vs_SWMM-C_peak_comparison.png'
+    plt.figure(4)
+    fig, axs = plt.subplots(1,2, figsize=(12,6))
+    fig.suptitle("SWMM5+ vs SWMM-C")
+
+    xmax = np.max([swmm5c_node_Hmax,swmm5plus_node_Hmax])
+    xmin = np.min([swmm5c_node_Hmax,swmm5plus_node_Hmax])
+    buffer = 0.1* (xmax - xmin)
+
+    axs[0].text(xmin,xmax,'(a)')
+    axs[0].scatter(swmm5c_node_Hmax, swmm5plus_node_Hmax, marker='s')
+    axs[0].set_xlabel('SWMM-C node head '+Yunit)
+    axs[0].set_ylabel('SWMM5+ node head '+Yunit)
+    axs[0].axline([0, 0], [1, 1], color='k', linewidth=2, linestyle='--')
+    axs[0].set_xlim(xmin-buffer, xmax+buffer)
+    axs[0].set_ylim(xmin-buffer, xmax+buffer)
+
+    xmax = np.max([swmm5c_link_Qmax,swmm5plus_link_Qmax])
+    xmin = np.min([swmm5c_link_Qmax,swmm5plus_link_Qmax])
+    buffer = 0.1* (xmax - xmin)
+
+    axs[1].text(xmin,xmax,'(b)')
+    axs[1].scatter(swmm5c_link_Qmax,swmm5plus_link_Qmax, marker='s')
+    axs[1].set_xlabel('SWMM-C link flowrate '+Qunit)
+    axs[1].set_ylabel('SWMM5+ link flowrate '+Qunit)
+    axs[1].axline([0, 0], [1, 1], color='k', linewidth=2, linestyle='--', label='1:1 line')
+    axs[1].legend(loc='lower right',facecolor='white',framealpha=1.0)
+    axs[1].set_xlim(xmin-buffer, xmax+buffer)
+    axs[1].set_ylim(xmin-buffer, xmax+buffer)
+
+    plt.tight_layout()
+    plt.savefig(peak_comp_plot_name,bbox_inches = 'tight',pad_inches=0, format='png')
+    plt.close() 
+
+
+
 print(' ')
 if(len(list_of_errors) == 0):
     print("no links or nodes are out of rangee given % tolerance", Qtolerance, Ytolerance, Htolerance)
@@ -555,3 +606,4 @@ else:
     print(' ')
     # sys.stderr.write(",\n".join(list_of_errors))
     exit(1)
+

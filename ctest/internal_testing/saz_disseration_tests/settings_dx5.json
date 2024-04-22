@@ -1,0 +1,33 @@
+{
+    "JSON_FoundFileYN" : true,
+    "JSON_CheckAllInputYN" : false,
+    "CaseName" : {
+        "Long"  : "level02_test",
+        "Short" : "level02_test"
+    },
+    "Junction" : {
+        "ForceNodesJM" : true
+    },
+    "Solver" : {
+        "PreissmannSlot" : {
+            "Method"         : "DynamicSlot",
+            "TargetCelerity" : 100.0,
+            "Alpha"          : 2.0,
+            "DecayRate"      : 1.0
+        }
+    },
+    "Adjust" : {
+        "Head" : {
+            "ApplyYN"  : false,
+            "Approach" : "vshape_surcharge"
+        }
+    },
+    "Discretization" : {
+        "NominalElemLength" : 5.00
+    },    
+    "Output" : {
+        "Report" : {
+            "useCSV"    : false
+        }
+    }
+}
