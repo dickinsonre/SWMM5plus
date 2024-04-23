@@ -932,7 +932,6 @@ contains
             node%YN(ii,nYN_hasFlapGate)     = .false.
             node%YN(ii,nYN_isLinkFlow)      = .false.
             
-
             !% --- check for node inflows
             node%YN(ii, nYN_has_extInflow) = (interface_get_nodef_attribute(ii, api_nodef_has_extInflow) == 1)
             node%YN(ii, nYN_has_dwfInflow) = (interface_get_nodef_attribute(ii, api_nodef_has_dwfInflow) == 1)
@@ -1035,274 +1034,277 @@ contains
                         node%I(ii, ni_node_type) = nJm
                 end select
             end if 
+
+            !% --- select nJM nodes that can be represented as element faces (nJ2)
+            call init_node_nJ2_nJM (ii)
             
-            !% --- nJ2 strictly:
-            !%     a) has one upstream and one downstream link and
-            !%     b) cannot be a subcatchment outlet  
-            !%     c) cannot have two upstream and no downstream links or vice versa
-            !%     d) cannot required a node inflow and have an upstream conduit
-            if (node%I(ii,ni_node_type)  ==  nJ2) then
-                if ((node%I(ii,ni_N_link_u)   >   oneI)         &
-                     .or.                                       &
-                     (node%I(ii,ni_N_link_d)   >   oneI)        &
-                     .or.                                       &
-                     (node%I(ii,ni_routeFrom) .ne. nullvalueI)  &
-                    )  then
-                    !% ... switching to a 2 link nJm junction type'
-                    node%I(ii, ni_node_type) = nJm
-                else
-                    !% --- no action
-                end if
+            ! !% --- nJ2 strictly:
+            ! !%     a) has one upstream and one downstream link and
+            ! !%     b) cannot be a subcatchment outlet  
+            ! !%     c) cannot have two upstream and no downstream links or vice versa
+            ! !%     d) cannot required a node inflow and have an upstream conduit
+            ! if (node%I(ii,ni_node_type)  ==  nJ2) then
+            !     if ((node%I(ii,ni_N_link_u)   >   oneI)         &
+            !          .or.                                       &
+            !          (node%I(ii,ni_N_link_d)   >   oneI)        &
+            !          .or.                                       &
+            !          (node%I(ii,ni_routeFrom) .ne. nullvalueI)  &
+            !         )  then
+            !         !% ... switching to a 2 link nJm junction type'
+            !         node%I(ii, ni_node_type) = nJm
+            !     else
+            !         !% --- no action
+            !     end if
 
-                !% --- case where upstream pipe has nodal flows must be nJM
-                linkUp => node%I(ii,ni_Mlink_u1)
-                if (linkUp .ne. nullvalueI) then
-                    if ( (link%I(linkUp,li_geometry) == lPipe)      &
-                        .and.                                       &
-                            (node%YN(ii,nYN_has_extInflow)          &
-                            .or.                                    &
-                             node%YN(ii,nYN_has_dwfInflow)          &
-                            )                                       &
-                        ) then 
-                        node%I(ii, ni_node_type) = nJm
-                    else 
-                        !% --- no action
-                    end if
-                else 
-                    !% --- no action
-                end if
-            else 
-                !% --- no action 
-            end if
+            !     !% --- case where upstream pipe has nodal flows must be nJM
+            !     linkUp => node%I(ii,ni_Mlink_u1)
+            !     if (linkUp .ne. nullvalueI) then
+            !         if ( (link%I(linkUp,li_geometry) == lPipe)      &
+            !             .and.                                       &
+            !                 (node%YN(ii,nYN_has_extInflow)          &
+            !                 .or.                                    &
+            !                  node%YN(ii,nYN_has_dwfInflow)          &
+            !                 )                                       &
+            !             ) then 
+            !             node%I(ii, ni_node_type) = nJm
+            !         else 
+            !             !% --- no action
+            !         end if
+            !     else 
+            !         !% --- no action
+            !     end if
+            ! else 
+            !     !% --- no action 
+            ! end if
 
-            !% ==========================================================================
-            !% --- Further discrimination between 2-element junctions that are nJ2
-            !%     and those that are classed nJm. Note that all defined STORAGE 
-            !%     junctions are already set to nJm, so this only applies to junctions 
-            !%     defined in SWMM input file without explicit storage
-            !%  
-            !%     The following "or" conditions must be met for an nJ2:
-            !%     1. at least one connected element is open-channel AND ponding_Area = 0 AND
-            !%        the OverflowDepth = 0
-            !%     2. both elements are NOT open channel AND the junction extra
-            !%        surcharge depth == Junction.InfiniteExtraDepthValue 
-            !%        (i.e., no possible overflow or ponding)
-            !%     3. Downstream link may NOT be a Type1 Pump
-            !%     In addition, the offsets of connected links must be zero, unless
-            !%     the connected link is a weir or orifice (their offset has a different
-            !%     meaning.)
-            !%     Key point is that nJ2 cannot have overflow or ponding, so if
-            !%     at least one side is open channel and ponding area = 0 and the
-            !%     surcharge extra depth = 0 it is treated as open channel 
-            !%     (i.e., overflow occurs in the adjacent channel element) so
-            !%     it can be nJ2.  If both sides are closed types (conduit, weir,
-            !%     i.e., not open channel) then the junction must also be
-            !%     be closed; thus if a value (other than InfiniteExtraDepthValue)
-            !%     is provided for the extra surcharge, then the junction must be treated
-            !%     as an nJm rather than nJ2. That is, setting the Surcharge Extra Depth
-            !%     to the InfiniteExtraDepthValue implies a non-vented connection that
-            !%     can be treated as a face.
-            !%     In general, existence of non-zero offsets require an nJm unless 
-            !%     the offset is associated with a weir or orifice
+            ! !% ==========================================================================
+            ! !% --- Further discrimination between 2-element junctions that are nJ2
+            ! !%     and those that are classed nJm. Note that all defined STORAGE 
+            ! !%     junctions are already set to nJm, so this only applies to junctions 
+            ! !%     defined in SWMM input file without explicit storage
+            ! !%  
+            ! !%     The following "or" conditions must be met for an nJ2:
+            ! !%     1. at least one connected element is open-channel AND ponding_Area = 0 AND
+            ! !%        the OverflowDepth = 0
+            ! !%     2. both elements are NOT open channel AND the junction extra
+            ! !%        surcharge depth == Junction.InfiniteExtraDepthValue 
+            ! !%        (i.e., no possible overflow or ponding)
+            ! !%     3. Downstream link may NOT be a Type1 Pump
+            ! !%     In addition, the offsets of connected links must be zero, unless
+            ! !%     the connected link is a weir or orifice (their offset has a different
+            ! !%     meaning.)
+            ! !%     Key point is that nJ2 cannot have overflow or ponding, so if
+            ! !%     at least one side is open channel and ponding area = 0 and the
+            ! !%     surcharge extra depth = 0 it is treated as open channel 
+            ! !%     (i.e., overflow occurs in the adjacent channel element) so
+            ! !%     it can be nJ2.  If both sides are closed types (conduit, weir,
+            ! !%     i.e., not open channel) then the junction must also be
+            ! !%     be closed; thus if a value (other than InfiniteExtraDepthValue)
+            ! !%     is provided for the extra surcharge, then the junction must be treated
+            ! !%     as an nJm rather than nJ2. That is, setting the Surcharge Extra Depth
+            ! !%     to the InfiniteExtraDepthValue implies a non-vented connection that
+            ! !%     can be treated as a face.
+            ! !%     In general, existence of non-zero offsets require an nJm unless 
+            ! !%     the offset is associated with a weir or orifice
 
-            if (node%I(ii, ni_node_type) == nJ2) then
-                !% --- local aliases for the upstream and downstream links. These should
-                !%     be guaranteed to be in the u1 and d1 positions
-                linkUp => node%I(ii,ni_Mlink_u1)
-                linkDn => node%I(ii,ni_Mlink_d1)
+            ! if (node%I(ii, ni_node_type) == nJ2) then
+            !     !% --- local aliases for the upstream and downstream links. These should
+            !     !%     be guaranteed to be in the u1 and d1 positions
+            !     linkUp => node%I(ii,ni_Mlink_u1)
+            !     linkDn => node%I(ii,ni_Mlink_d1)
                     
-                !% --- phantom nodes will always be a nJ2
-                if  (node%YN(ii,nYN_is_phantom_node)) then
-                    !% --- no action: retain nJ2
+            !     !% --- phantom nodes will always be a nJ2
+            !     if  (node%YN(ii,nYN_is_phantom_node)) then
+            !         !% --- no action: retain nJ2
 
-                !% --- special channels and conduits that allow nJ2
-                !%     note the "meters_per_ft" conditional is to allow an input file
-                !%     in CFS to use the infinite depth value in the settings to be
-                !%     interpreted as feet.
-                elseif  ( ( (link%I(linkUp,li_link_type) .eq. lChannel)                     &
-                            .or.                                                            &
-                            (link%I(linkDn,li_link_type) .eq. lChannel)                     &
-                          )                                                                 &
-                          .and.                                                             &
-                          (node%R(ii,nr_PondedArea) == zeroR)                               &
-                          .and.                                                             &
-                          (  (node%R(ii,nr_OverflowHeightAboveCrown) == zeroR)              & 
-                              .or.                                                          &
-                             (node%R(ii,nr_OverflowHeightAboveCrown)                        &
-                               == setting%Junction%InfiniteExtraDepthValue)                 &
-                             .or.                                                           &
-                             ( (node%R(ii,nr_OverflowHeightAboveCrown)                              &
-                                  < setting%Junction%InfiniteExtraDepthValue*meters_per_ft + 0.01d0) &
-                              .and.                                                                 &
-                              (node%R(ii,nr_OverflowHeightAboveCrown)                               &
-                                  > setting%Junction%InfiniteExtraDepthValue*meters_per_ft - 0.01d0) &
-                             )                                                                      & 
-                          )                                                                         &
-                        ) then
-                        !% retain nJ2 OPEN CHANNEL FACE
-                        !% --- if either link is an open channel AND the ponded area
-                        !%     is zero then the junction is an nJ2 face where any
-                        !%     overflow is handled by adjacent channel (i.e. lost). Otherwise 
-                        !%     reverts to nJm element with its own overflow/ponding. 
-                        !%     Note that if ponding is OFF but the ponded area
-                        !%     is defined, then the element is treated as nJm with
-                        !%     overflow above the Surcharge Extra Depth
-                        !% --- no action: retain nJ2
+            !     !% --- special channels and conduits that allow nJ2
+            !     !%     note the "meters_per_ft" conditional is to allow an input file
+            !     !%     in CFS to use the infinite depth value in the settings to be
+            !     !%     interpreted as feet.
+            !     elseif  ( ( (link%I(linkUp,li_link_type) .eq. lChannel)                     &
+            !                 .or.                                                            &
+            !                 (link%I(linkDn,li_link_type) .eq. lChannel)                     &
+            !               )                                                                 &
+            !               .and.                                                             &
+            !               (node%R(ii,nr_PondedArea) == zeroR)                               &
+            !               .and.                                                             &
+            !               (  (node%R(ii,nr_OverflowHeightAboveCrown) == zeroR)              & 
+            !                   .or.                                                          &
+            !                  (node%R(ii,nr_OverflowHeightAboveCrown)                        &
+            !                    == setting%Junction%InfiniteExtraDepthValue)                 &
+            !                  .or.                                                           &
+            !                  ( (node%R(ii,nr_OverflowHeightAboveCrown)                              &
+            !                       < setting%Junction%InfiniteExtraDepthValue*meters_per_ft + 0.01d0) &
+            !                   .and.                                                                 &
+            !                   (node%R(ii,nr_OverflowHeightAboveCrown)                               &
+            !                       > setting%Junction%InfiniteExtraDepthValue*meters_per_ft - 0.01d0) &
+            !                  )                                                                      & 
+            !               )                                                                         &
+            !             ) then
+            !             !% retain nJ2 OPEN CHANNEL FACE
+            !             !% --- if either link is an open channel AND the ponded area
+            !             !%     is zero then the junction is an nJ2 face where any
+            !             !%     overflow is handled by adjacent channel (i.e. lost). Otherwise 
+            !             !%     reverts to nJm element with its own overflow/ponding. 
+            !             !%     Note that if ponding is OFF but the ponded area
+            !             !%     is defined, then the element is treated as nJm with
+            !             !%     overflow above the Surcharge Extra Depth
+            !             !% --- no action: retain nJ2
 
-                elseif ( (link%I(linkUp,li_link_type) .ne. lChannel)         &
-                         .and.                                               &
-                         (link%I(linkDn,li_link_type) .ne. lChannel)         &
-                         .and.                                               &
-                         (( (node%R(ii,nr_OverflowHeightAboveCrown)                              &
-                                < setting%Junction%InfiniteExtraDepthValue + 0.01d0)             &
-                            .and.                                                                &
-                            (node%R(ii,nr_OverflowHeightAboveCrown)                              &
-                                > setting%Junction%InfiniteExtraDepthValue - 0.01d0)             &
-                            )                                                                    &   
-                           .or.                                              &
-                           ( (node%R(ii,nr_OverflowHeightAboveCrown)                               &
-                                < setting%Junction%InfiniteExtraDepthValue*meters_per_ft + 0.01d0) &
-                            .and.                                                                  &
-                            (node%R(ii,nr_OverflowHeightAboveCrown)                                &
-                                > setting%Junction%InfiniteExtraDepthValue*meters_per_ft - 0.01d0) &
-                            )                                                                      & 
-                          )                                                                        &
-                          ) then
-                        !% nJ2 CLOSED CONDUIT FACE
-                        !% --- if both links are NOT open channel AND the OverflowDepth
-                        !%     is equal to the InfiniteExtraDepthValue, then this is retained 
-                        !%     as an nJ2 (unvented)  face. Otherwise switched to a vented nJM element.
-                        !%     HACK -- if 1000 ft is put in a CFS input file or 1000 m in an SI
-                        !%     input file this is treated as infinite depth.
-                        !%  
+            !     elseif ( (link%I(linkUp,li_link_type) .ne. lChannel)         &
+            !              .and.                                               &
+            !              (link%I(linkDn,li_link_type) .ne. lChannel)         &
+            !              .and.                                               &
+            !              (( (node%R(ii,nr_OverflowHeightAboveCrown)                              &
+            !                     < setting%Junction%InfiniteExtraDepthValue + 0.01d0)             &
+            !                 .and.                                                                &
+            !                 (node%R(ii,nr_OverflowHeightAboveCrown)                              &
+            !                     > setting%Junction%InfiniteExtraDepthValue - 0.01d0)             &
+            !                 )                                                                    &   
+            !                .or.                                              &
+            !                ( (node%R(ii,nr_OverflowHeightAboveCrown)                               &
+            !                     < setting%Junction%InfiniteExtraDepthValue*meters_per_ft + 0.01d0) &
+            !                 .and.                                                                  &
+            !                 (node%R(ii,nr_OverflowHeightAboveCrown)                                &
+            !                     > setting%Junction%InfiniteExtraDepthValue*meters_per_ft - 0.01d0) &
+            !                 )                                                                      & 
+            !               )                                                                        &
+            !               ) then
+            !             !% nJ2 CLOSED CONDUIT FACE
+            !             !% --- if both links are NOT open channel AND the OverflowDepth
+            !             !%     is equal to the InfiniteExtraDepthValue, then this is retained 
+            !             !%     as an nJ2 (unvented)  face. Otherwise switched to a vented nJM element.
+            !             !%     HACK -- if 1000 ft is put in a CFS input file or 1000 m in an SI
+            !             !%     input file this is treated as infinite depth.
+            !             !%  
                         
-                        !% --- no action: retain nJ2
+            !             !% --- no action: retain nJ2
 
-                elseif  (( (link%I(linkUp,li_link_type) .eq. lWeir)         &
-                          .or.                                              &
-                           (link%I(linkDn,li_link_type) .eq. lWeir)         &
-                         )                                                  &
-                        .and. (.not. setting%Weir%ForceWeirNodesToJM)       &
-                        ) then          
-                        !% nJ2 Weir face 
-                        !% --- an nJ2 weir face is retained without as long as
-                        !%     the force is not in place. Note that nodes with
-                        !%     storage already have nJM, so this does not affect
-                        !%     them 
+            !     elseif  (( (link%I(linkUp,li_link_type) .eq. lWeir)         &
+            !               .or.                                              &
+            !                (link%I(linkDn,li_link_type) .eq. lWeir)         &
+            !              )                                                  &
+            !             .and. (.not. setting%Weir%ForceWeirNodesToJM)       &
+            !             ) then          
+            !             !% nJ2 Weir face 
+            !             !% --- an nJ2 weir face is retained without as long as
+            !             !%     the force is not in place. Note that nodes with
+            !             !%     storage already have nJM, so this does not affect
+            !             !%     them 
                         
-                        !% no action: retain nJ2
+            !             !% no action: retain nJ2
 
-                elseif  (( (link%I(linkUp,li_link_type) .eq. lOrifice)         &
-                            .or.                                               &
-                           (link%I(linkDn,li_link_type) .eq. lOrifice)         &
-                           )                                                   &
-                          .and. (.not. setting%Orifice%ForceOrificeNodesToJM)  &
-                         ) then    
-                        !% nJ2 Orifice face 
-                        !% --- an nJ2 orifice face is retained without as long as
-                        !%     the force is not in place. Note that nodes with
-                        !%     storage already have nJM, so this does not affect
-                        !%     them 
+            !     elseif  (( (link%I(linkUp,li_link_type) .eq. lOrifice)         &
+            !                 .or.                                               &
+            !                (link%I(linkDn,li_link_type) .eq. lOrifice)         &
+            !                )                                                   &
+            !               .and. (.not. setting%Orifice%ForceOrificeNodesToJM)  &
+            !              ) then    
+            !             !% nJ2 Orifice face 
+            !             !% --- an nJ2 orifice face is retained without as long as
+            !             !%     the force is not in place. Note that nodes with
+            !             !%     storage already have nJM, so this does not affect
+            !             !%     them 
                         
-                        !% no action: retain nJ2
+            !             !% no action: retain nJ2
  
-                else
-                    !% --- switch to nJm
+            !     else
+            !         !% --- switch to nJm
 
-                    node%I(ii, ni_node_type) = nJm
+            !         node%I(ii, ni_node_type) = nJm
 
-                    ! write(*,*) '...NOTE: ',trim(node%Names(ii)%str),' is held as nJM node rather than nJ2 (faces).'
-                    ! write(*,*) '   This occurs because the input SurchargeDepth is less than the InfiniteDepthValue'
-                    ! write(*,*) '   Input SurcharegeDepth is ',node%R(ii,nr_OverflowHeightAboveCrown)
-                    ! write(*,*) '   InfiniteDepthValue is    ',setting%Junction%InfiniteExtraDepthValue
-                end if
+            !         ! write(*,*) '...NOTE: ',trim(node%Names(ii)%str),' is held as nJM node rather than nJ2 (faces).'
+            !         ! write(*,*) '   This occurs because the input SurchargeDepth is less than the InfiniteDepthValue'
+            !         ! write(*,*) '   Input SurcharegeDepth is ',node%R(ii,nr_OverflowHeightAboveCrown)
+            !         ! write(*,*) '   InfiniteDepthValue is    ',setting%Junction%InfiniteExtraDepthValue
+            !     end if
 
-                !% --- regardless of the above, if either link up or down is a
-                !%     multi-barrel link, then the node must be an nJm node
-                if  (  (link%I(linkUp,li_barrels) > oneI)     &
-                        .or.                                  &
-                        (link%I(linkDn,li_barrels) > oneI)    &
-                    ) then       
-                    node%I(ii, ni_node_type) = nJm   
+            !     !% --- regardless of the above, if either link up or down is a
+            !     !%     multi-barrel link, then the node must be an nJm node
+            !     if  (  (link%I(linkUp,li_barrels) > oneI)     &
+            !             .or.                                  &
+            !             (link%I(linkDn,li_barrels) > oneI)    &
+            !         ) then       
+            !         node%I(ii, ni_node_type) = nJm   
                     
-                end if
+            !     end if
 
-                !% --- regardless of the above, if the downstream link is
-                !%     at type 1 pump, then the node must be nJm
-                if (  (link%I(linkDn,li_link_type) .eq. lPump)      &
-                       .and.                                        &
-                      (link%I(linkDn,li_link_sub_type)  .eq. lType1Pump) &
-                    ) then
-                    node%I(ii, ni_node_type) = nJm 
-                end if
+            !     !% --- regardless of the above, if the downstream link is
+            !     !%     at type 1 pump, then the node must be nJm
+            !     if (  (link%I(linkDn,li_link_type) .eq. lPump)      &
+            !            .and.                                        &
+            !           (link%I(linkDn,li_link_sub_type)  .eq. lType1Pump) &
+            !         ) then
+            !         node%I(ii, ni_node_type) = nJm 
+            !     end if
 
-                !% --- regardless of the above, if either link up or down
-                !%     is a culvert then the node must be nJm
-                if (    (link%I(linkUp,li_culvertCode) > 0)      &
-                        .or.                                     &
-                        (link%I(linkDn,li_culvertCode) > 0)      &
-                    ) then
-                    node%I(ii, ni_node_type) = nJm             
-                end if   
+            !     !% --- regardless of the above, if either link up or down
+            !     !%     is a culvert then the node must be nJm
+            !     if (    (link%I(linkUp,li_culvertCode) > 0)      &
+            !             .or.                                     &
+            !             (link%I(linkDn,li_culvertCode) > 0)      &
+            !         ) then
+            !         node%I(ii, ni_node_type) = nJm             
+            !     end if   
 
             
-                !% --- further check on offsets for any nJ2 that passed the prior
-                !%     restrictions. In general, we have an nJm if there are 
-                !%     any offsets, except if the offset is a weir or orifice.
-                if (link%R(linkUp,lr_OutletOffset) .ne. zeroR) then
-                    !% --- offsets are OK for upstream weir or orifice links  
-                    if (  (link%I(linkUp,li_link_type) .eq. lWeir)       &
-                        .or.                                          &
-                        (link%I(linkUp,li_link_type) .eq. lOrifice)    &
-                        ) then    
-                        !% --- retain nJ2
-                    else
-                        !% --- switch to nJm
-                        node%I(ii, ni_node_type) = nJm
-                    end if
-                end if
+            !     !% --- further check on offsets for any nJ2 that passed the prior
+            !     !%     restrictions. In general, we have an nJm if there are 
+            !     !%     any offsets, except if the offset is a weir or orifice.
+            !     if (link%R(linkUp,lr_OutletOffset) .ne. zeroR) then
+            !         !% --- offsets are OK for upstream weir or orifice links  
+            !         if (  (link%I(linkUp,li_link_type) .eq. lWeir)       &
+            !             .or.                                          &
+            !             (link%I(linkUp,li_link_type) .eq. lOrifice)    &
+            !             ) then    
+            !             !% --- retain nJ2
+            !         else
+            !             !% --- switch to nJm
+            !             node%I(ii, ni_node_type) = nJm
+            !         end if
+            !     end if
 
 
-                if (link%R(linkDn,lr_InletOffset) .ne. zeroR) then
-                    !% --- offsets are OK for downstream weir or orifice links  
-                    if (  (link%I(linkDn,li_link_type) .eq. lWeir)       &
-                        .or.                                          &
-                        (link%I(linkDn,li_link_type) .eq. lOrifice)    &
-                        ) then    
-                        !% --- retain nJ2
-                    else
-                        !% --- switch to nJm
-                        node%I(ii, ni_node_type) = nJm
-                    end if
-                end if 
+            !     if (link%R(linkDn,lr_InletOffset) .ne. zeroR) then
+            !         !% --- offsets are OK for downstream weir or orifice links  
+            !         if (  (link%I(linkDn,li_link_type) .eq. lWeir)       &
+            !             .or.                                          &
+            !             (link%I(linkDn,li_link_type) .eq. lOrifice)    &
+            !             ) then    
+            !             !% --- retain nJ2
+            !         else
+            !             !% --- switch to nJm
+            !             node%I(ii, ni_node_type) = nJm
+            !         end if
+            !     end if 
 
-                !% --- force some or all of the nJ2 to nJm (used for debugging)
-                !% --- global forcing of all nodes
-                if (setting%Junction%ForceNodesJM ) then
-                    !% --- switch to nJm 
-                    node%I(ii, ni_node_type) = nJm
-                else
-                    !% -- forcing of weir-adjacent nodes, only
-                    if ( ((link%I(linkDn,li_link_type) .eq. lWeir) &
-                          .or.                                     &
-                          (link%I(linkUp,li_link_type) .eq. lWeir) &
-                         ) .and.                                   &
-                         (setting%Weir%ForceWeirNodesToJM)         &
-                        ) then 
-                        node%I(ii,ni_node_type) = nJm
-                    end if
-                    !% -- forcing of orifice-adjacent nodes, only
-                    if ( ((link%I(linkDn,li_link_type) .eq. lOrifice)  &
-                          .or.                                         &
-                          (link%I(linkUp,li_link_type) .eq. lOrifice)  &
-                         ) .and.                                       &
-                         (setting%Orifice%ForceOrificeNodesToJM)      &
-                        ) then 
-                        node%I(ii,ni_node_type) = nJm
-                    end if
-                end if
+            !     !% --- force some or all of the nJ2 to nJm (used for debugging)
+            !     !% --- global forcing of all nodes
+            !     if (setting%Junction%ForceNodesJM ) then
+            !         !% --- switch to nJm 
+            !         node%I(ii, ni_node_type) = nJm
+            !     else
+            !         !% -- forcing of weir-adjacent nodes, only
+            !         if ( ((link%I(linkDn,li_link_type) .eq. lWeir) &
+            !               .or.                                     &
+            !               (link%I(linkUp,li_link_type) .eq. lWeir) &
+            !              ) .and.                                   &
+            !              (setting%Weir%ForceWeirNodesToJM)         &
+            !             ) then 
+            !             node%I(ii,ni_node_type) = nJm
+            !         end if
+            !         !% -- forcing of orifice-adjacent nodes, only
+            !         if ( ((link%I(linkDn,li_link_type) .eq. lOrifice)  &
+            !               .or.                                         &
+            !               (link%I(linkUp,li_link_type) .eq. lOrifice)  &
+            !              ) .and.                                       &
+            !              (setting%Orifice%ForceOrificeNodesToJM)      &
+            !             ) then 
+            !             node%I(ii,ni_node_type) = nJm
+            !         end if
+            !     end if
 
-            end if
+            ! end if
 
             !% --- end nJ2, nJm processing
             !% ==========================================================================
@@ -1495,6 +1497,326 @@ contains
 
 
     end subroutine init_linknode_arrays
+!%
+!%==========================================================================
+!%==========================================================================
+!%  
+    subroutine init_node_nJ2_nJM (ii)
+        !% -----------------------------------------------------------------
+        !% Description
+        !% Sets the nJM nodes that can be represented as nJ2 faces
+        !%
+        !% Base level
+        !%     a) has one upstream and one downstream link and
+        !%     b) cannot be a subcatchment outlet  
+        !%     c) cannot have two upstream and no downstream links or vice versa
+        !%     d) cannot required a node inflow and have an upstream conduit
+        !%
+        !% --- Further discrimination between 2-element junctions that are nJ2
+        !%     and those that are classed nJm. Note that all defined STORAGE 
+        !%     junctions are already set to nJm, so this only applies to junctions 
+        !%     defined in SWMM input file without explicit storage
+        !%  
+        !%     The following "or" conditions must be met for an nJ2:
+        !%     1. at least one connected element is open-channel AND ponding_Area = 0 AND
+        !%        the OverflowDepth = 0
+        !%     2. both elements are NOT open channel AND the junction extra
+        !%        surcharge depth == Junction.InfiniteExtraDepthValue 
+        !%        (i.e., no possible overflow or ponding)
+        !%     3. Downstream link may NOT be a Type1 Pump
+        !%     In addition, the offsets of connected links must be zero, unless
+        !%     the connected link is a weir or orifice (their offset has a different
+        !%     meaning.)
+        !%     Key point is that nJ2 cannot have overflow or ponding, so if
+        !%     at least one side is open channel and ponding area = 0 and the
+        !%     surcharge extra depth = 0 it is treated as open channel 
+        !%     (i.e., overflow occurs in the adjacent channel element) so
+        !%     it can be nJ2.  If both sides are closed types (conduit, weir,
+        !%     i.e., not open channel) then the junction must also be
+        !%     be closed; thus if a value (other than InfiniteExtraDepthValue)
+        !%     is provided for the extra surcharge, then the junction must be treated
+        !%     as an nJm rather than nJ2. That is, setting the Surcharge Extra Depth
+        !%     to the InfiniteExtraDepthValue implies a non-vented connection that
+        !%     can be treated as a face.
+        !%     In general, existence of non-zero offsets require an nJm unless 
+        !%     the offset is associated with a weir or orifice
+        !% -----------------------------------------------------------------
+        !% Declarations
+            integer, intent(in) :: ii
+            integer, pointer :: linkUp, linkDn
+        !% -----------------------------------------------------------------
+        !% Aliases 
+            !% These should be guaranteed to be in the u1 and d1 positions
+            linkUp => node%I(ii,ni_Mlink_u1)
+            linkDn => node%I(ii,ni_Mlink_d1)
+        !% -----------------------------------------------------------------
+        !% Preliminaries
+        !% --- this procedure only handles nJ2
+            if (node%I(ii,ni_node_type)  .ne.  nJ2) return  
+
+            if ((linkUp == nullvalueI) .or. (linkDn == nullvalueI) ) then    
+                print *, 'CODE ERROR: unexpected null link'
+                print *, ii, trim(reverseKey(node%I(ii,ni_node_type)))
+                call util_crashpoint(73098744)
+            end if
+        !% -----------------------------------------------------------------
+
+        !% --- phantom nodes will always be a nJ2 
+        !%     as they cut a pipe or channel that should be identical
+        !%     on either side.
+        if  (node%YN(ii,nYN_is_phantom_node)) then
+            !% --- no action: retain nJ2
+            return
+        else
+            !% --- continue
+        end if
+
+        !% --- force some or all of the nJ2 to nJm (used for debugging)
+        !% --- global forcing of all nodes
+        if (setting%Junction%ForceNodesJM ) then
+            node%I(ii, ni_node_type) = nJm
+            return
+        else
+            !% -- forcing nJM of weir-adjacent nJ2 nodes, only
+            if ( ((link%I(linkDn,li_link_type) .eq. lWeir)  &
+                   .or.                                     &
+                  (link%I(linkUp,li_link_type) .eq. lWeir)  &
+                  ) .and.                                   &
+                  (setting%Weir%ForceWeirNodesToJM)         &
+                ) then 
+                node%I(ii,ni_node_type) = nJm
+                return
+            else 
+                !% --- continue    
+            end if
+            !% -- forcing nJM of orifice-adjacent nJ2 nodes, only
+            if ( ((link%I(linkDn,li_link_type) .eq. lOrifice)  &
+                    .or.                                       &
+                  (link%I(linkUp,li_link_type) .eq. lOrifice)  &
+                  ).and.                                       &
+                  (setting%Orifice%ForceOrificeNodesToJM)      &
+                ) then 
+                node%I(ii,ni_node_type) = nJm
+                return
+            else 
+                !% --- continue
+            end if
+        end if
+
+        !% --- if subcatchment outlet at nJ2 node we require nJM
+        if (node%I(ii,ni_routeFrom) .ne. nullvalueI) then
+            node%I(ii, ni_node_type) = nJm
+            return !% finished with this junction
+        else 
+            !% --- continue
+        end if
+
+        !% --- check for nJM based on number of links
+        !%     this should be a redundant check.    
+        if ((node%I(ii,ni_N_link_u)   >   oneI)        &
+            .or.                                       &
+            (node%I(ii,ni_N_link_d)   >   oneI)        &
+            )  then
+            !% --- switching to a nJm junction type'
+            node%I(ii, ni_node_type) = nJm
+            return !% finished with this junction
+        else
+            !% --- continue
+        end if
+
+        !% --- Set junctions with inflows and upstream pipes to nJM
+        !%     i.e., we are not (at this time) allowing pipe lateral inflows
+        if ( (link%I(linkUp,li_geometry) == lPipe)      &
+            .and.                                       &
+                (node%YN(ii,nYN_has_extInflow)          &
+                .or.                                    &
+                 node%YN(ii,nYN_has_dwfInflow)          &
+                )                                       &
+            ) then 
+            node%I(ii, ni_node_type) = nJm
+            return  !% finished with this junction
+        else 
+            !% --- continue 
+        end if
+
+        !% --- if upstream link is a phantom link and this
+        !%     node has inflows, then
+        !%     force nJM to prevent having a lateral inflow
+        !%     into a phantom link
+        if (link%YN(linkUp,lYN_isPhantomLink) .and. &
+            (node%YN(ii,nYN_has_extInflow)          &
+            .or.                                    &
+             node%YN(ii,nYN_has_dwfInflow)          &
+            )) then 
+            node%I(ii, ni_node_type) = nJm
+            return  !% finished with this junction
+        else
+            !% --- continue
+        end if
+
+        !% --- if either link up or down is a
+        !%     multi-barrel link, then the node must be an nJm node
+        if  (   (link%I(linkUp,li_barrels) > oneI)     &
+                .or.                                   &
+                (link%I(linkDn,li_barrels) > oneI)     &
+            ) then       
+            node%I(ii, ni_node_type) = nJm   
+            return
+        else
+            !% --- continue
+        end if
+
+        !% --- if either link up or down
+        !%     is a culvert then the node must be nJm
+        if (    (link%I(linkUp,li_culvertCode) > 0)      &
+                .or.                                     &
+                (link%I(linkDn,li_culvertCode) > 0)      &
+            ) then
+            node%I(ii, ni_node_type) = nJm   
+            return 
+        else
+            !% --- continue         
+        end if   
+
+        !% --- if the downstream link is
+        !%     a type 1 pump, then the node must be nJm
+        if (  (link%I(linkDn,li_link_type) .eq. lPump)          &
+                .and.                                            &
+              (link%I(linkDn,li_link_sub_type)  .eq. lType1Pump) &
+            ) then
+            node%I(ii, ni_node_type) = nJm 
+            return
+        else
+            !% --- continue
+        end if
+
+        !% --- set nJM if junction can overflow
+        if (((node%R(ii,nr_OverflowHeightAboveCrown)                                  &
+                < setting%Junction%InfiniteExtraDepthValue + 0.01d0)                  &
+             .and.                                                                    &
+             (node%R(ii,nr_OverflowHeightAboveCrown)                                  &
+                > setting%Junction%InfiniteExtraDepthValue - 0.01d0)                  &
+            )                                                                         &   
+            .or.                                                                      &
+            ( (node%R(ii,nr_OverflowHeightAboveCrown)                                 &
+                   < setting%Junction%InfiniteExtraDepthValue*meters_per_ft + 0.01d0) &
+                .and.                                                                 &
+                (node%R(ii,nr_OverflowHeightAboveCrown)                               &
+                   > setting%Junction%InfiniteExtraDepthValue*meters_per_ft - 0.01d0) &
+            ) ) then 
+            !% --- continue, junction cannot overflow
+        else
+            !% --- junction can overflow, must be nJM
+            node%I(ii, ni_node_type) = nJm
+            return
+        end if
+
+        !% --- only nJ2 junction that cannot overflw reaches here
+
+        !% --- further check on offsets for any nJ2 that passed the prior
+        !%     restrictions. In general, we have an nJm if there are 
+        !%     any offsets, except if the offset is a weir or orifice.
+        !%     Note that this is irrelevant if the ForceOrificeNodesToJM = true
+        !%     or the ForceWeirNodesToJM = true as code will not reach here.
+        if (link%R(linkUp,lr_OutletOffset) .ne. zeroR) then
+            !% --- offsets are OK for upstream weir or orifice links  
+            if ((link%I(linkUp,li_link_type) .eq. lWeir)       &
+                .or.                                           &
+                (link%I(linkUp,li_link_type) .eq. lOrifice)    &
+                ) then    
+                !% --- continue
+            else
+                !% --- switch to nJm
+                node%I(ii, ni_node_type) = nJm
+                return
+            end if
+        end if
+
+        if (link%R(linkDn,lr_InletOffset) .ne. zeroR) then
+            !% --- offsets are OK for downstream weir or orifice links  
+            if ((link%I(linkDn,li_link_type) .eq. lWeir)       &
+                .or.                                           &
+                (link%I(linkDn,li_link_type) .eq. lOrifice)    &
+                ) then    
+                !% --- continue
+            else
+                !% --- switch to nJm
+                node%I(ii, ni_node_type) = nJm
+                return
+            end if
+        end if 
+  
+        !% --- two channels can be connected by nJ2
+        !% --- if either link is an open channel AND node cannot overflow
+        !%     (i.e., code reaches here)
+        !%     then the junction is an nJ2 face where any
+        !%     overflow is handled by adjacent channel (i.e. lost). Otherwise 
+        !%     reverts to nJm element with its own overflow/ponding. 
+        !%     Note that if ponding is OFF but the ponded area
+        !%     is defined, then the element is treated as nJm with
+        !%     overflow above the Surcharge Extra Depth
+        if  ((link%I(linkUp,li_link_type) .eq. lChannel)                     &
+                .or.                                                         &
+             (link%I(linkDn,li_link_type) .eq. lChannel)                     &
+            ) then 
+            return !% retain nJ2 
+        else
+            !% --- continue
+        end if
+
+        !% --- code reaches here only if both upstream and downstream links
+        !%     are NOT open channel and junction cannot overflow
+
+        !% nJ2 CLOSED CONDUIT FACE
+        !% --- if both links are NOT open channel AND cannot overflow, then this is retained 
+        !%     as an nJ2 (unvented) face. 
+        if ( (link%I(linkUp,li_link_type) .ne. lChannel)        &
+            .and.                                               &
+            (link%I(linkDn,li_link_type)  .ne. lChannel)        &
+            ) then
+            return !% retain nJ2
+        else
+            !% --- continue
+        end if
+
+        ! !% nJ2 Weir face (relevant for channel connections to weirs)
+        ! !% --- an nJ2 weir face is retained without as long as
+        ! !%     the force is not in place. Note that nodes with
+        ! !%     storage already have nJM, so this does not affect
+        ! !%     them 
+        ! if  (( (link%I(linkUp,li_link_type) .eq. lWeir)         &
+        !       .or.                                              &
+        !        (link%I(linkDn,li_link_type) .eq. lWeir)         &
+        !      )                                                  &
+        !     .and. (.not. setting%Weir%ForceWeirNodesToJM)       &
+        !     ) then 
+        !     !% --- no action: retain nJ2
+        !     return
+        ! else
+        !     !% --- continue
+        ! end if       
+        
+        ! !% nJ2 Orifice face  (relevant for channel connections to orifice)
+        ! !% --- an nJ2 orifice face is retained without as long as
+        ! !%     the force is not in place. Note that nodes with
+        ! !%     storage already have nJM, so this does not affect
+        ! !%     them 
+        ! if  (( (link%I(linkUp,li_link_type) .eq. lOrifice)         &
+        !         .or.                                               &
+        !        (link%I(linkDn,li_link_type) .eq. lOrifice)         &
+        !        )                                                   &
+        !       .and. (.not. setting%Orifice%ForceOrificeNodesToJM)  &
+        !     ) then    
+        !     return !% no action: retain nJ2
+        ! else
+        !     !% --- continue
+        ! end if
+
+        !% --- any case that reaches here must be nJM
+            !% --- overflow must use nJM
+        node%I(ii, ni_node_type) = nJm
+        
+    end subroutine init_node_nJ2_nJM
 !%
 !%==========================================================================
 !%==========================================================================

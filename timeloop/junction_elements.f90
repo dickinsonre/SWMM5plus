@@ -39,9 +39,9 @@ module junction_elements
     public :: junction_first_step
     public :: junction_second_step
 
-    integer :: printJM =30
-    integer :: printJB =31
-    integer :: stepCut = 52100
+    integer :: printJM =18
+    integer :: printJB =19
+    integer :: stepCut = 575
 
     contains
 !%==========================================================================
@@ -84,7 +84,9 @@ module junction_elements
             !% --- update the velocities for the new inflows.
             call face_update_velocities (fp_JB_IorS)
         end if
-           
+        
+        ! call util_utest_CLprint ('------- jjj.02 after face_update velocities...')
+
         !% AT THIS POINT: JB-ADJACENT FACES NOW CONTAIN EITHER 
         !% (1) Diag fluxes or (2) CC inflows or (3) old data.
         !% However, the JB element fluxes are inconsistent with faces
@@ -110,6 +112,8 @@ module junction_elements
             call face_pull_facedata_to_JBelem (ep_JM, fr_Velocity_u, er_Velocity, .false.)
         end if
 
+        ! call util_utest_CLprint ('------- jjj.03 after face_pull...')
+
         !% --- store junction-adjacent element data on face so that no-neighbor principal
         !%     is not violated.
         !%     QUESTION -- SHOULD THIS BE IN THE RK ITERATION FOR UPDATES?
@@ -119,10 +123,14 @@ module junction_elements
             call lljunction_push_adjacent_CC_elemdata_to_face ()
         end if
 
+        ! call util_utest_CLprint ('------- jjj.04 after lljunction_push_adjacent')
+
         !% --- push JB adjacent diag data to faces
         if (npack_elemP(ep_Diag_JBadjacent) > 0) then
             call face_push_diag_adjacent_data_to_face (ep_Diag_JBadjacent)
         end if
+
+        ! call util_utest_CLprint ('------- jjj.05 after face_push_diag')
 
         !% ==============================================================
         !% --- face sync
@@ -138,7 +146,9 @@ module junction_elements
         !% --- compute inflow-based flow data for the JM
         if (N_nJM > 0) then
             call lljunction_main_velocity (ep_JM)
+            ! call util_utest_CLprint ('------- jjj.06 after lljunction_main_velocity')
             call lljunction_main_energyhead (ep_JM)
+            ! call util_utest_CLprint ('------- jjj.07 after lljunction_main_energyhead')
         end if
 
         !% --- JB ENERGY EQUATION compute flows/velocities on JB/CC outflow elements/faces from 
@@ -146,7 +156,7 @@ module junction_elements
         !%     TO BE MOVED TO junction_branch_element_flowrates?
         if (N_nJM > 0) then 
             call lljunction_branch_velocity ()
-            ! call util_utest_CLprint ('------- jjj.08 after lljunction_branch_energy_outflow')
+            ! call util_utest_CLprint ('------- jjj.08 after lljunction_branch_velocity')
         end if
 
         !% --- force the changed JB element flowrate and velocity alues to the faces for upstream (true)
@@ -674,10 +684,10 @@ module junction_elements
             end if
 
             ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
-            !         print *, 'AAAA JB flowrate ',elemR(printJB,er_Flowrate)
-            !         print *, 'plan area        ',elemSR(JMidx,esr_JM_Present_PlanArea)
-            !         print *, 'slot width       ',elemR(JMidx,er_SlotWidth)
-            !         print *, 'length           ',elemR(JMidx,er_Length)
+            !         print *, '***AAAA JB flowrate ',elemR(printJB,er_Flowrate)
+            ! !         print *, 'plan area        ',elemSR(JMidx,esr_JM_Present_PlanArea)
+            ! !         print *, 'slot width       ',elemR(JMidx,er_SlotWidth)
+            ! !         print *, 'length           ',elemR(JMidx,er_Length)
             ! end if
 
             ! !% --- 20230913 -- presently sets large values
@@ -690,12 +700,17 @@ module junction_elements
             elemSR(JMidx,esr_JM_Present_PlanArea) = lljunction_main_plan_area(JMidx)
 
             ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
-            !     print *, 'A2222 JB flowrate ',elemR(printJB,er_Flowrate)
-            !     print *, 'plan area        ',elemSR(JMidx,esr_JM_Present_PlanArea)
+            !     print *, '***BBBB JB flowrate ',elemR(printJB,er_Flowrate)
+            ! !     print *, 'plan area        ',elemSR(JMidx,esr_JM_Present_PlanArea)
             ! end if
 
             !% --- set the overflow/ponding heads
             call lljunction_main_overflow_conditions (JMidx)
+
+            ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
+            !     print *, '***CCCC JB flowrate ',elemR(printJB,er_Flowrate)
+            ! !     print *, 'plan area        ',elemSR(JMidx,esr_JM_Present_PlanArea)
+            ! end if
 
             ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
             ! !     print *, 'overflow depth: ',elemSR(JMidx,esr_JM_OverflowDepth)
@@ -715,11 +730,20 @@ module junction_elements
             call lljunction_main_netFlowrate &
                  (JMidx, Qnet, canOverflowOrPond, isOverflow, isPonding)
 
+                ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
+                !     print *, '***DDDD JB flowrate ',elemR(printJB,er_Flowrate)
+                ! !     print *, 'plan area        ',elemSR(JMidx,esr_JM_Present_PlanArea)
+                ! end if
+
             !% --- fix flowrates if drying junction
             if ((elemR(JMidx,er_Volume_N0) + Qnet*dt) < setting%ZeroValue%Volume) then
                 call lljunction_main_dryingfix (JMidx, Qnet)     
             end if
 
+            ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
+            !     print *, '***EEE JB flowrate ',elemR(printJB,er_Flowrate)
+            ! !     print *, 'plan area        ',elemSR(JMidx,esr_JM_Present_PlanArea)
+            ! end if
 
                 !  if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
                 !     print *, ''
@@ -755,7 +779,7 @@ module junction_elements
                 isOverflow, isPonding, .false., .false.)
 
                 ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
-                !     print *, 'DDDD JB flowrate ',elemR(printJB,er_Flowrate)
+                !     print *, '***DDDD JB flowrate ',elemR(printJB,er_Flowrate)
                 ! end if
 
             !% --- Limit head increase for cases of in/out of surcharge or overflow
@@ -831,8 +855,8 @@ module junction_elements
                  isCrossingIntoSurcharge, isCrossingOutofSurcharge)
 
 
-                !  if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
-                !     print *, 'EEEE JB flowrate ',elemR(printJB,er_Flowrate)
+                ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
+                !     print *, '***EEEE JB flowrate ',elemR(printJB,er_Flowrate)
                 ! end if
 
                 ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 

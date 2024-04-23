@@ -627,6 +627,7 @@ module define_indexes
         enumerator ::  esi_JB_air_pocket_index 
         enumerator ::  esi_JB_Main_Index               !% elem idx of the junction main for this branch
         enumerator ::  esi_JB_IsUpstream               !% 1 if this is an upstream branch, 0 if downstream
+        !enumerator ::  esi_JB_InflowSign                 !% +1 if this is an inflow, -1 for outflow
         enumerator ::  esi_JB_lastplusone !% must be last enum item
     end enum
     integer, parameter :: Ncol_elemSI_junction = esi_JB_lastplusone-1
@@ -719,6 +720,10 @@ module define_indexes
         enumerator ::  esr_JM_ExternalPondedDepth
         enumerator ::  esr_JM_ExternalPondedHead
         enumerator ::  esr_JM_ExternalPondedHeadDiff
+        enumerator ::  esr_JM_FlowrateTotalIn
+        enumerator ::  esr_JM_FlowrateTotalOut
+        enumerator ::  esr_JM_HeadMax !% maximum head of surrounding elements
+        enumerator ::  esr_JM_HeadMin !% minimum head of surrounding elements
         enumerator ::  esr_JM_PondedVolumeTotal
         enumerator ::  esr_JM_MinHeadForOverflowPonding
         enumerator ::  esr_JM_OverflowHeightAboveCrown
@@ -728,6 +733,8 @@ module define_indexes
         enumerator ::  esr_JM_OverflowDepth
         enumerator ::  esr_JM_Present_PlanArea
         enumerator ::  esr_JM_StorageRate
+        enumerator ::  esr_JM_VolumeOutflowLimit
+        enumerator ::  esr_JM_VolumeInflowLimit
         enumerator ::  esr_JB_Air_Volume
         enumerator ::  esr_JB_Kfactor
         enumerator ::  esr_JB_fa !% constant factor in dQdH

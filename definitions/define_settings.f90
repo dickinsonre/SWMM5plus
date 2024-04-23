@@ -434,23 +434,13 @@ module define_settings
 
     !% setting%Discretization
     type DiscretizationType
-        !logical :: StopOnLengthAdjustTF = .false.  !% Can be used to force code to stop if link lengths are adjusted.
         !% NOTE Channel overflow not tested and is disabled as of 20230508
         logical :: AllowChannelOverflowTF = .false. !% if true, then open channels (CC) can overflow (lose water) NOT IN EPA SWMM
-        !logical :: AdjustLinkLengthForJunctionBranchYN = .false.          !% OBSOLETE DO NOT USE TRUE -- if true then JB (junction branch) length is subtracted from link length
-        !real(8) :: JunctionBranchLengthFactor  = 1.d0    !% MUST USE 1.0   !% fraction of NominalElemLength used for JB
-        ! real(8) :: MinElemLengthFactor = 0.5d0           !% define the minimum allowable fraction of an element size to help with the cfl
-        !integer :: MinElemLengthMethod = ElemLengthAdjust
-        !logical :: UseNominalElemLength = .true.
         integer :: Method               = EqualElements      !% EqualElements, UnequalElements
         integer :: SmallElementHandling = EquivalentOrifice  !% EquivalentOrifice, LengthenLink, FailLimiter, AllowSmallLinks
-       ! logical :: LimitByMinLinkLengthTF = .true.       ! NOT A USER SETTING
-        !% replaced 20231025brh logical :: DistributeOpenChannelInflowsTF = .false.
-        real(8) :: NominalElemLength   = 10.0d0
-        integer :: MinElementPerLink   = 3               !% force a minimum number of elements per link
-        !logical :: UseEquivalentOrifice = .false.        !% replace small conduits with equivalent orifice
-        !real(8) :: EquivalentOrificeDischargeCoeff = 0.6 !% discharge coefficient of the equivalent orifice
-        real(8) :: MinLinkLength      = 10.0d0            !% elements below the larger of min link length or nominalElementPerLink * MinElementPerLink cause error or are replaced with equivalent orifice
+        real(8) :: NominalElemLength    = 10.0d0
+        integer :: MinElementPerLink    = 3               !% force a minimum number of elements per link
+        real(8) :: MinLinkLength        = 10.0d0            !% elements below the larger of min link length or nominalElementPerLink * MinElementPerLink cause error or are replaced with equivalent orifice
         real(8) :: FullConduitTopwidthDepthFraction = 0.95d0  !% fraction of full depth used for full topwidth
     end type DiscretizationType
 
@@ -508,12 +498,11 @@ module define_settings
         !% short term fix would be allow nJ2 wherever there are no inflows
         !% long term fix requires fixing bug that causes spikes when an inflow is into an conduit/channel
         !% rather than a node.  Test on calumet_20yr_120min_noOverflow_R18.inp
-        logical :: ForceNodesJM = .true.  !% forces CC nodes between two conduits to be nJM rather than nJ2 faces
-        !%                                 !% note CC nodes will only be nJ2 faces if SurchargeDepth = InfinitExtraDepthValue
-                                           !% ONLY SET TRUE FOR ALGORITHM TESTING
+        logical :: ForceNodesJM = .true.   !% forces all nJ2 nodes (other than phantom) to nJM
         !% NOTE ForceStorage must be true as of 20230507. Future extension may include junction solution that does
         !% not require the minimum surface area of the ImpliedStorage type
         logical :: ForceStorage = .true.        !% forces nJM junctions without explicit storage to have implied storage
+        logical :: ForceInfiniteExtraDepth = .false. !% true forces all nJM surcharge tdepth InfiniteExtraDepth
         integer :: HeadMethodJB = linear_interp !% {use_JM / linear_interp} methods for head on JB, recommend linear_interp 
         integer :: FunStorageN  = 10            !% number of curve entries for functional storage   
         real(8) :: kFactor      = 0.5d0         !% default entrance/exit losses at junction branch (use 0.5 )
@@ -1402,6 +1391,11 @@ contains
         call json%get('Junction.ForceStorage', logical_value, found)
         if (found) setting%Junction%ForceStorage = logical_value
         if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Junction.ForceStorage not found'
+
+        !%                       Junction.ForceInfiniteExtraDepth
+        call json%get('Junction.ForceInfiniteExtraDepth', logical_value, found)
+        if (found) setting%Junction%ForceInfiniteExtraDepth = logical_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Junction.ForceInfiniteExtraDepth not found'
 
         !%                       Junction.FunStorageN
         call json%get('Junction.FunStorageN', integer_value, found)

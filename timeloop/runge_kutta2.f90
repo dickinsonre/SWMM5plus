@@ -30,6 +30,7 @@ module runge_kutta2
     use adjust
     use diagnostic_elements
     use air_entrapment
+    use storage_geometry, only: storage_volume_from_depth_singular
     use utility_crash
     use utility_unit_testing, only: util_utest_CLprint, util_utest_checkIsNan
 
@@ -40,7 +41,7 @@ module runge_kutta2
     public :: rk2_toplevel
 
     integer :: printIdx = 49
-    integer :: stepcut = 73594
+    integer :: stepcut = 13452
     contains
 !%==========================================================================
 !% PUBLIC
@@ -103,6 +104,8 @@ module runge_kutta2
             !% --- Half-timestep advance on CC for U and UVolume
             call rk2_step_CC (istep)  
 
+                ! call util_utest_CLprint('CCC after rk2_step_CC')
+
             !% --- Update all CC aux variables
             !%     Note, these updates CANNOT depend on face values
             !%     Through geometry, this sets Preissmann Slot variables
@@ -110,12 +113,12 @@ module runge_kutta2
                 ep_CC, ep_CC_Open_Elements, ep_CC_Closed_Elements, &
                 .true., .false., dummyIdx)
 
-                !call util_utest_CLprint('DDDD after update auxiliary CC')
+                ! call util_utest_CLprint('DDDD after update auxiliary CC')
 
             !% --- zero and small depth adjustment for elements
             call adjust_element_toplevel (CC)
             
-                !call util_utest_CLprint('EEEE after adjust element toplevel CC')
+                ! call util_utest_CLprint('EEEE after adjust element toplevel CC')
 
             !% --- JUNCTION 1st Step setup, 2nd Step compute
             if (N_nJM > 0) then 
@@ -126,13 +129,13 @@ module runge_kutta2
                         thisP => elemP(1:Npack, ep_JB)
                         call update_interpweights_JB (thisP, Npack, .false.)
 
-                        !call util_utest_CLprint('FFF after update interpweights JB')
+                        ! call util_utest_CLprint('FFF after update interpweights JB')
                     end if
                 else if (istep == 2) then 
-                    !call util_utest_CLprint('TTTT before junction second step')
+                    ! call util_utest_CLprint('TTTT before junction second step')
                     !% --- conservative storage advance for junction, second step
                     call junction_second_step ()
-                    !call util_utest_CLprint('UUUU after junction second step')
+                    ! call util_utest_CLprint('UUUU after junction second step')
                 end if
             end if  
 
@@ -141,7 +144,7 @@ module runge_kutta2
             sync all
             call face_interpolation(fp_noBC_IorS, .true., .true., .true., .false., .true.) 
 
-            !call util_utest_CLprint('GGG after face interpolation')
+            ! call util_utest_CLprint('GGG after face interpolation')
 
             if (N_diag > 0) then 
                 !% --- update flowrates for aa diagnostic elements
@@ -151,7 +154,7 @@ module runge_kutta2
                 call face_push_elemdata_to_face (ep_Diag, fr_Flowrate, er_Flowrate, elemR, .false.)
             end if
 
-            !call util_utest_CLprint('HHH after diagnostic')
+            ! call util_utest_CLprint('HHH after diagnostic')
 
             !% --- face sync
             !%     sync all the images first. then copy over the data between
@@ -198,11 +201,13 @@ module runge_kutta2
             call face_shared_face_sync (fp_noBC_IorS, [fr_flowrate,fr_Velocity_d,fr_Velocity_u])
             sync all
 
-            !call util_utest_CLprint('PPPP before junction first step')
+            ! call util_utest_CLprint('PPPP before junction first step')
 
             !% --- Filter flowrates to remove grid-scale checkerboard
             !% 20240209brh moved before junction first step
             call adjust_Vfilter (istep)
+
+            ! call util_utest_CLprint('QQQQ after V filter')
 
             !% --- JUNCTION -- first step compute
             if (istep == 1) then 
@@ -211,33 +216,31 @@ module runge_kutta2
                 !%     those that do not have junctions as it contains a sync
                 call junction_first_step ()
 
-                !call util_utest_CLprint('QQQQ after junction first step')
+                ! call util_utest_CLprint('RRRR after junction first step')
             end if
-
-            ! call util_utest_CLprint('RRRR after V filter')
 
             if (istep == 1) then 
                 !% -- fluxes at end of first RK2 step are the conservative fluxes enforced
                 !%    in second step
                 call rk2_store_conservative_fluxes (ALL) 
 
-                !call util_utest_CLprint('SSSS end of RK2 first step')
+                ! call util_utest_CLprint('SSSS end of RK2 first step')
             else 
                 !%  --- no action 
             end if
 
-            !call util_utest_CLprint('XXXX before air entrapment')
+            ! call util_utest_CLprint('XXXX before air entrapment')
 
             !% Air entrapment modeling
             if (setting%AirTracking%UseAirTrackingYN) then
                 call air_entrapment_toplevel (istep)
             end if 
 
-            !call util_utest_CLprint('YYYY after air entrapment')
+            ! call util_utest_CLprint('YYYY after air entrapment, END OF RK STEP')
 
         end do
 
-        !call util_utest_CLprint('ZZZZ end RK2')
+        ! call util_utest_CLprint('ZZZZ end RK2')
 
         !% HACK --- this needs to be setup for multiple images and moved to the utility_debug
         if (setting%Debug%isGlobalVolumeBalance) then

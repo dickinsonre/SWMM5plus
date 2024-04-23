@@ -3671,7 +3671,7 @@ contains
         !% --- junction main depth and head from initial conditions
         elemR(JMidx,er_Depth)     = node%R(thisJunctionNode,nr_InitialDepth)
 
-        !% --- zero depths eat nJm
+        !% --- set near-zero depths as initial condition for sufficiently  small depths
         if (elemR(JMidx,er_Depth) .le. setting%ZeroValue%Depth) then
             elemR(JMidx,er_Depth) = setting%ZeroValue%Depth  * 0.99d0 
         end if
@@ -3713,13 +3713,19 @@ contains
         end if
 
         !% --- Set the extra head above the crown for maximum surcharge at Junction
-        elemSR(JMidx,esr_JM_OverflowHeightAboveCrown)      &
-            = node%R(thisJunctionNode,nr_OverflowHeightAboveCrown)
+        if (setting%Junction%ForceInfiniteExtraDepth) then 
+            !% --- force all junctions to infinite (prevent overflow/ponding)
+            elemSR(JMidx,esr_JM_OverflowHeightAboveCrown) = setting%Junction%InfiniteExtraDepthValue
+        else  
+            !% --- use node overflow/ponding overflow height
+            elemSR(JMidx,esr_JM_OverflowHeightAboveCrown)      &
+                = node%R(thisJunctionNode,nr_OverflowHeightAboveCrown)
+        end if    
 
         !% --- Set the overflow and surcharge conditions
         !% --- check for infinite extra depth 
-        !%     if infinite marker (1000) is used, then no oveflow allowed
-        !%     applies to both 1000 m and 1000 ft as input.
+        !%     if InfiniteExtraDepthValue (e.g. 999) is used, then no oveflow allowed
+        !%     applies to both 999 m and 999 ft as input.
         if  ( ( (elemSR(JMidx,esr_JM_OverflowHeightAboveCrown)                &
                 .le. 1.001d0 * setting%Junction%InfiniteExtraDepthValue)           &
                 .and.                                                              &

@@ -16,6 +16,7 @@ module junction_lowlevel
     use face, only: face_push_elemdata_to_face
     use geometry, only: geo_depth_from_volume_by_element_CC
     use geometry_lowlevel, only: llgeo_head_from_depth_pure
+    use storage_geometry, only: storage_volume_from_depth_singular
     use update, only: update_Froude_number_element, update_wavespeed_element, update_auxiliary_variables_CC
     use utility_crash, only: util_crashpoint
 
@@ -23,6 +24,7 @@ module junction_lowlevel
 
     private
 
+    !public :: lljunction_branch_flow_direction
     public :: lljunction_branch_velocity
     !public :: lljunction_branch_energy_outflow_OLD 
     public :: lljunction_branch_dQdH
@@ -45,7 +47,7 @@ module junction_lowlevel
     public :: lljunction_main_dQdHoverflow
     ! public :: lljunction_main_dQdHstorage
     public :: lljunction_main_energyhead
-    !public :: lljunction_main_head_bounds
+    public :: lljunction_main_head_bounds
     ! public :: lljunction_main_iscrossing_overflow_or_ponding
     ! public :: lljunction_main_iscrossing_surcharge
     public :: lljunction_main_netFlowrate
@@ -59,65 +61,68 @@ module junction_lowlevel
     !public :: lljunction_main_update_storage_rate 
     public :: lljunction_main_velocity
     public :: lljunction_main_volume_from_storageRate
+    public :: lljunction_main_volume_change_limits
 
     public :: lljunction_push_inflows_from_CC_to_JB_face
     public :: lljunction_push_adjacent_CC_elemdata_to_face
 
 
-    integer :: printJM = 135
-    integer :: printJB = 136
+    integer :: printJM = 18
+    integer :: printJB = 19
     
-    integer :: stepCut = 57000
+    integer :: stepCut = 575
     contains
 !%==========================================================================
 !% PUBLIC
 !%==========================================================================
 !%    
-subroutine lljunction_branch_velocity ()
-    !%-----------------------------------------------------------------
+    subroutine lljunction_branch_velocity ()
+        !%-----------------------------------------------------------------
         !% Description:
         !% Computes an energy-equation outflow for each outflow junction 
         !% branch. This is needed to ensure that zero outflow do not 
         !% become stuck.
         !%-----------------------------------------------------------------
         !% Declarations:
-        integer, pointer :: JBidx, JMidx, Npack, thisP(:)
-        integer, pointer :: fidx
-        real(8), pointer :: HeadJM, HeadAdj
-        real(8), pointer :: DepthAdj, ZbottomJB, Ke
-        real(8), pointer :: VelocityJM, VelocityAdj, grav
-        real(8), pointer :: BlendingFactor, ReverseDhFactor
-        real(8), pointer :: EnergyHeadJM, EnergyHeadAdj
-        real(8) :: deltaH, deltaE, bsign, eFlowrate, eVelocity, VelHead
-        real(8) :: deltaEjmZ, deltaEAdjZ, VelHeadJM
-        integer :: ii
-        logical :: isOutflow, isUpstream
+            integer, pointer :: JBidx, JMidx, NpackJB, NpackJM, thisJB(:), thisJM(:)
+            integer, pointer :: fidx
+            real(8), pointer :: HeadJM, HeadAdj
+            real(8), pointer :: DepthAdj, ZbottomJB, Ke
+            real(8), pointer :: VelocityJM, VelocityAdj, grav
+            real(8), pointer :: BlendingFactor, ReverseDhFactor
+            real(8), pointer :: EnergyHeadAdj, VolChangeLimit, NetOutFlowrateJM
+            real(8) :: deltaH, deltaE, bsign, eFlowrate, eVelocity, VelHead
+            real(8) :: deltaEjmZ, deltaEAdjZ, VelHeadJM, EnergyHeadJM
+            integer :: ii, tBidx
+            logical :: isOutflow, isUpstream
 
         !%------------------------------------------------------------------
         !% Aliases
-            Npack => npack_elemP(ep_JB)
+            NpackJB => npack_elemP(ep_JB)
+            NpackJM => npack_elemP(ep_JM)
             grav  => setting%Constant%gravity
             BlendingFactor => setting%Junction%BlendingFactor
             ReverseDhFactor=> setting%Junction%ReverseDhFactor
         !%------------------------------------------------------------------
         !% Preliminaries
-            if (Npack < 1) return   
+            if (NpackJM < 1) return   
         !%------------------------------------------------------------------
 
-        thisP => elemP(1:Npack,ep_JB)
+        thisJB => elemP(1:NpackJB,ep_JB)
+        thisJM => elemP(1:NpackJM,ep_JM)
 
         !% --- cycle through branches
-        do ii=1,Npack 
-            JBidx => thisP(ii)
+        do ii=1,NpackJB 
+            JBidx => thisJB(ii)
             if (elemSI(JBidx,esi_JB_Exists) .ne. oneI) cycle 
 
-            JMidx        => elemSI(JBidx,esi_JB_Main_Index)
-            HeadJM       => elemR (JMidx,er_Head)
-            EnergyHeadJM => elemR (JMidx,er_EnergyHead)
-            VelocityJM   => elemR (JMidx,er_Velocity)           
+            JMidx            => elemSI(JBidx,esi_JB_Main_Index)
+            HeadJM           => elemR (JMidx,er_Head)
+            EnergyHeadJM     =  elemR (JMidx,er_EnergyHead) !% use = so it can be changed for in/out flow
+            VelocityJM       => elemR (JMidx,er_Velocity)           
             
-            ZbottomJB    => elemR (JBIdx,er_Zbottom)
-            Ke           => elemSR(JBidx,esr_JB_Kfactor)
+            ZbottomJB        => elemR (JBIdx,er_Zbottom)
+            Ke               => elemSR(JBidx,esr_JB_Kfactor)
 
             VelHeadJM  = (VelocityJM**2) / (twoR * grav) !% always > 0
             
@@ -131,6 +136,10 @@ subroutine lljunction_branch_velocity ()
                 !% --- use face adjacent velocity to determine in/outflow
                 if (faceR(fidx,fr_Velocity_Adjacent) .le. zeroR) then 
                     isOutflow = .true. 
+                    if (VelocityJM > zeroR) then 
+                        !% --- energy head JM is downstream (opposite direction), so discount kinetic energy
+                        EnergyHeadJM = HeadJM 
+                    end if
                 else
                     isOutflow = .false.
                 end if
@@ -142,6 +151,10 @@ subroutine lljunction_branch_velocity ()
                 !% --- use face adjacent velocity to determine in/outflow
                 if (faceR(fidx,fr_Velocity_Adjacent) .ge. zeroR) then 
                     isOutflow = .true. 
+                    if (VelocityJM < zeroR) then 
+                        !% --- energy head JM is upstream (opposite direction), so discount kinetic energy
+                        EnergyHeadJM = HeadJM 
+                    end if
                 else
                     isOutflow = .false.
                 end if
@@ -153,6 +166,13 @@ subroutine lljunction_branch_velocity ()
             deltaE     = EnergyHeadJM  - EnergyHeadAdj 
             deltaEjmZ  = EnergyHeadJM  - ZbottomJB
             deltaEAdjZ = EnergyHeadAdj - ZbottomJB
+
+            ! if ((setting%Time%Step > stepCut) .and. (JMidx .eq. printJM))  then 
+            !     print *, ' JBidx ', JBidx, ' ; bsign ',bsign
+            !     print *, ' is Out ',isOutflow, ';  isUpstream ',isUpstream
+            !     print *, deltaE, deltaEjmZ, deltaEAdjZ
+            !     print *, ' '
+            ! end if   
 
             if (isOutflow) then 
                 if (deltaEjmZ .le. zeroR) then 
@@ -192,6 +212,15 @@ subroutine lljunction_branch_velocity ()
                             !% --- retain VelHead
                         end if
                     end if
+
+                    ! if ((setting%Time%Step > stepCut) .and. (JMidx .eq. printJM))  then 
+                    !     print *, ' '
+                    !     print *, 'head adj - zbottomJB', HeadAdj - ZbottomJB
+                    !     print *, 'E head, Hadj, VelHeadJM '
+                    !     print *, EnergyHeadJM, HeadAdj, VelHeadJM
+                    !     print *, 'Vel Head ', VelHead
+                    !     print *, ' '
+                    ! end if
                 end if
             else
                 !% --- inflow
@@ -230,14 +259,21 @@ subroutine lljunction_branch_velocity ()
                 end if
             end if
 
-
             !% --- velocity and flowrate implied by energy arguments
             eVelocity = - bsign * sign(oneR,VelHead) * sqrt(abs(VelHead) * twoR * grav)  
             eFlowrate = eVelocity * elemR(JBidx,er_AreaVelocity)  
 
+            ! if ((setting%Time%Step > stepCut) .and. (JMidx .eq. printJM))  then 
+            !     print *, 'eVel, eFlow AA',eVelocity, eFlowrate
+            ! end if
+
             !% --- blend energy flowrate with flowrate stored in JB branch
             elemR(JBidx,er_Flowrate) =  (oneR - BlendingFactor) * eFlowrate                &
                                               + BlendingFactor  * elemR(JBidx,er_Flowrate)   
+
+            ! if ((setting%Time%Step > stepCut) .and. (JMidx .eq. printJM))  then 
+            !     print *, ' Vel,  Flow DD',elemR(JBidx,er_Velocity), elemR(JBidx,er_Flowrate)
+            ! end if
 
             !% --- compute the velocity
             if (elemR(JBidx,er_AreaVelocity) > setting%ZeroValue%Area) then
@@ -246,16 +282,167 @@ subroutine lljunction_branch_velocity ()
                 elemR(JBidx,er_Velocity) = zeroR
             end if
 
+            ! if ((setting%Time%Step > stepCut) .and. (JMidx .eq. printJM))  then 
+            !     print *, ' Vel,  Flow DD',elemR(JBidx,er_Velocity), elemR(JBidx,er_Flowrate)
+            ! end if
+
             !% --- apply velocity limiter (does not affect flowrate)
             if (abs(elemR(JBidx,er_Velocity)) > setting%Limiter%Velocity%Maximum) then 
                 elemR(JBidx,er_Velocity) = sign(setting%Limiter%Velocity%Maximum * 0.99d0, &
                                                 elemR(JBidx,er_Velocity))
             end if
 
+            ! if ((setting%Time%Step > stepCut) .and. (JMidx .eq. printJM))  then 
+            !     print *, ' Vel,  Flow DD',elemR(JBidx,er_Velocity), elemR(JBidx,er_Flowrate)
+            ! end if
+
         end do
 
-        
+        !% --- compute the new total inflow and outflow rates
+        call lljunction_main_totalFlowrates ()
+
+        ! if ((setting%Time%Step > stepCut))  then 
+        !     print *, ' '
+        !     print *, 'JM Total Flowrates ', &
+        !         elemSR(printJM,esr_JM_FlowrateTotalIn), &
+        !         elemSR(printJM,esr_JM_FlowrateTotalOut)
+        ! end if
+
+        !% --- set the external head bounds that limit velocities.
+        call lljunction_main_head_bounds ()
+
+        !% --- compute limit on volume change  limits to prevent over/under oscillations
+        call lljunction_main_volume_change_limits ()
+
+        ! if ((setting%Time%Step > stepCut))  then 
+        !     print *, ' '
+        !     print *, 'JM FVolume Limits ', &
+        !         elemSR(printJM,esr_JM_VolumeInflowLimit), &
+        !         elemSR(printJM,esr_JM_VolumeOutflowLimit)
+        ! end if
+
+        !% --- limit the junction branch velocities to prevent over/under oscillations
+        call lljunction_branch_velocity_limit ()
+
+        ! if ((setting%Time%Step > stepCut))  then 
+        !     print *, ' '
+        !     print *, 'Flow',elemR(printJM+1,er_Flowrate),elemR(printJM+2,er_Flowrate)
+        !     print *, ' '
+        ! end if
+
     end subroutine lljunction_branch_velocity
+!%
+!%==========================================================================
+!%==========================================================================
+!%
+    subroutine lljunction_branch_velocity_limit ()
+        !%-----------------------------------------------------------------
+        !% Description:
+        !% limits the branch velocity based on volume limits for head
+        !% above/below neighbors to prevent over/under oscillations
+        !%-----------------------------------------------------------------
+        !% Declarations
+            integer, pointer :: NpackJB, JBidx, JMidx, thisJB(:)
+            integer          :: ii
+            real(8), pointer :: dt, VolumeOutflowLimit, VolumeInflowLimit
+            real(8), pointer :: FlowrateTotalIn, FlowrateTotalOut, FlowrateJB
+            real(8)          :: bsign, VolumeChange, DeltaFrac
+        !%-----------------------------------------------------------------
+        !% Aliases
+            NpackJB => npack_elemP(ep_JB)
+            dt      => setting%Time%Hydraulics%Dt
+        !%-----------------------------------------------------------------
+        !% Preliminaries
+            if (NpackJB < 1) return  
+        !%-----------------------------------------------------------------
+
+        thisJB => elemP(1:NpackJB,ep_JB)
+
+        do ii=1,NpackJB
+            JBidx => thisJB(ii)
+            if (elemSI(JBidx,esi_JB_Exists) .ne. oneI) cycle !% no valid branch
+            JMidx            => elemSI(JBidx,esi_JB_Main_Index)
+
+            VolumeOutflowLimit => elemSR(JMidx,esr_JM_VolumeOutflowLimit)
+            VolumeInflowLimit  => elemSR(JMidx,esr_JM_VolumeInflowLimit)
+            FlowrateTotalIn    => elemSR(JMidx,esr_JM_FlowrateTotalIn)
+            FlowrateTotalOut   => elemSR(JMidx,esr_JM_FlowrateTotalOut)
+            FlowrateJB         => elemR (JBidx,er_Flowrate)
+
+            if (elemSI(JBidx,esi_JB_IsUpstream) == oneI) then 
+                bsign = +oneR
+            else
+                bsign = -oneR
+            end if
+
+            !% --- limit the flowrates/velocities to prevent over/under oscillations
+            if (VolumeOutflowLimit > zeroR) then 
+                VolumeChange = (FlowrateTotalOut - FlowrateTotalIn) * dt 
+                !% --- possible limitation on the outflows
+                if (VolumeChange > VolumeOutflowLimit) then 
+                    !% --- if JB is an outflow it is limited
+                    if (bsign * FlowrateJB < zeroR) then 
+                        !% --- outflow: get fraction of limit applied to this JB flowrate
+                        DeltaFrac = (VolumeChange - VolumeOutflowLimit) &
+                                        * FlowrateJB / FlowrateTotalOut
+                        !% --- note that bsign is not used in the above, so DeltaFrac
+                        !%     has the same sign as FlowrateJB
+                        FlowrateJB = FlowrateJB - DeltaFrac / dt
+
+                        if (elemR(JBidx,er_AreaVelocity) > setting%ZeroValue%Area) then
+                            elemR(JBidx,er_Velocity) = FlowrateJB / elemR(JBidx,er_AreaVelocity)
+                        else
+                            elemR(JBidx,er_Velocity) = zeroR
+                        end if
+                    else
+                        !% -- no action because inflow at this JB
+                    end if
+                else
+                    !% -- no action  as volume change is less than the limit
+                end if
+            else 
+                !% --- no action
+            end if
+
+            !% --- limit the flowrates/velocities to prevent over/under oscillations
+            if  (VolumeInflowLimit > zeroR) then 
+                VolumeChange = (FlowrateTotalIn - FlowrateTotalOut) * dt 
+
+                ! if ((setting%Time%Step > stepCut) .and. (JMidx .eq. printJM))  then 
+                !     print *, ' '
+                !     print *, 'Flowrates ',FlowrateTotalIn, FlowrateTotalOut
+                !     print *, 'VolumeChange, Inflowlimit ',VolumeChange, VolumeInflowLimit
+                !     print *, ' '
+                ! end if
+
+                !% --- possible limitation on the inflows 
+                if (VolumeChange > VolumeInflowLimit) then 
+                    !% --- if JB is an inflow it is limited
+                    if (bsign * FlowrateJB > zeroR) then 
+                        !% --- inflow: get fraction of limit applied to this JB flowrate
+                        DeltaFrac = (VolumeChange - VolumeInflowLimit) &
+                                        * FlowrateJB / FlowrateTotalIn
+                        !% --- note that bsign is not used in the above, so DeltaFrac
+                        !%     has the same sign as FlowrateJB
+                        FlowrateJB = FlowrateJB - DeltaFrac / dt
+
+                        if (elemR(JBidx,er_AreaVelocity) > setting%ZeroValue%Area) then
+                            elemR(JBidx,er_Velocity) = FlowrateJB / elemR(JBidx,er_AreaVelocity)
+                        else
+                            elemR(JBidx,er_Velocity) = zeroR
+                        end if
+                    else
+                        !% --- no action because outflow at this JB
+                    end if
+                else
+                end if
+            else
+                cycle !% --- no limit for this JM
+            end if
+
+        end do
+
+    end subroutine lljunction_branch_velocity_limit
 !%
 !%==========================================================================
 !%==========================================================================
@@ -698,7 +885,6 @@ subroutine lljunction_branch_velocity ()
                 else 
                     isInflow = .false.
                 end if
-
             else
                 !% --- downstream JB
                 isDownstream = .true.
@@ -831,32 +1017,32 @@ subroutine lljunction_branch_velocity ()
     end subroutine lljunction_branch_dQdH
 !%
 !%==========================================================================
-! !%==========================================================================
-! !% 
-!     pure subroutine lljunction_branch_getface (outdata, frCol, JMidx, fiIdx, kstart)
-!         !%-----------------------------------------------------------------
-!         !% Description
-!         !% Stores face data of frCol on outdata element space
-!         !% Operates either on upstream or downstream branches, but 
-!         !% requires separate calls to for each.
-!         !%-----------------------------------------------------------------
-!             real(8), intent(inout) :: outdata(:)  !% element data for output
-!             integer, intent(in)    :: JMidx       !% index of JM junction
-!             integer, intent(in)    :: fiIdx       !%  index of map up or down to face
-!             integer, intent(in)    :: frCol    !%  column in faceR array
-!             integer, intent(in)    :: kstart       !% = 1 for upstream branches, 2 for down 
-!             real(8) :: k1,k2   
-!         !%-----------------------------------------------------------------
-    
-!         k1 = JMidx + kstart
-!         k2 = JMidx + max_branch_per_node
+    ! !%==========================================================================
+    ! !% 
+    !     pure subroutine lljunction_branch_getface (outdata, frCol, JMidx, fiIdx, kstart)
+    !         !%-----------------------------------------------------------------
+    !         !% Description
+    !         !% Stores face data of frCol on outdata element space
+    !         !% Operates either on upstream or downstream branches, but 
+    !         !% requires separate calls to for each.
+    !         !%-----------------------------------------------------------------
+    !             real(8), intent(inout) :: outdata(:)  !% element data for output
+    !             integer, intent(in)    :: JMidx       !% index of JM junction
+    !             integer, intent(in)    :: fiIdx       !%  index of map up or down to face
+    !             integer, intent(in)    :: frCol    !%  column in faceR array
+    !             integer, intent(in)    :: kstart       !% = 1 for upstream branches, 2 for down 
+    !             real(8) :: k1,k2   
+    !         !%-----------------------------------------------------------------
+        
+    !         k1 = JMidx + kstart
+    !         k2 = JMidx + max_branch_per_node
 
-!         where (elemSI(k1:k2:2,esi_JB_Exists) .eq. oneI)
-!               outdata(k1:k2:2) = faceR(elemI(k1:k2:2,fiIdx),frCol) 
-!         endwhere
+    !         where (elemSI(k1:k2:2,esi_JB_Exists) .eq. oneI)
+    !               outdata(k1:k2:2) = faceR(elemI(k1:k2:2,fiIdx),frCol) 
+    !         endwhere
 
-!     end subroutine lljunction_branch_getface
-! !%
+    !     end subroutine lljunction_branch_getface
+    ! !%
 ! !%==========================================================================
 !%==========================================================================
 !% 
@@ -1988,182 +2174,233 @@ subroutine lljunction_branch_velocity ()
 !%==========================================================================
 !%==========================================================================
 !% 
-    ! subroutine lljunction_main_head_bounds (JMidx, Hbound)
-    !     !%-----------------------------------------------------------------
-    !     !% Description
-    !     !% Computes the minimum head, Hbound(1), and Hbound(2) 
-    !     !%, maximum head for a junction
-    !     !%     Hbound(2) is the maximum head in the surrounding elements
-    !     !%     Hbound(1) is Zbottom of JM, or the lowest Z bottom of any 
-    !     !%          branch if they are all higher than JM
-    !     !% 20230912brh switched to using full energy head as bounds
-    !     !%-----------------------------------------------------------------
-    !     !% Declarations
-    !         integer,               intent(in)    :: JMidx
-    !         real(8), dimension(2), intent(inout) :: Hbound
-    !         integer :: ii, JBidx
-    !         integer, pointer :: fidx
-    !         real(8), pointer :: grav, headJM, headAdj, EnergyHeadJM, EnergyHeadAdj
-    !         real(8), dimension(max_branch_per_node,2) :: HbranchLimit
-    !         real(8) :: lateralAdd
-    !         logical :: jhead_lowlimit_TF
-    !     !%-----------------------------------------------------------------
-    !     !% Aliases
-    !         grav => setting%Constant%gravity
-    !     !%-----------------------------------------------------------------
+    subroutine lljunction_main_head_bounds ()
+        !%-----------------------------------------------------------------
+        !% Description
+        !% Computes the max and minimum head of surrounding elements
+        !% Inflow bound is total energy head, outflow is piezometeric head
+        !%-----------------------------------------------------------------
+        !% Declarations
+            integer, pointer :: JMidx, Npack, fidx
+            integer          :: ii, mm, JBidx
+            real(8), pointer :: grav
+            logical          :: isInflow
+            !real(8)
+            ! integer, pointer :: fidx
+            ! real(8), pointer :: grav, headJM, headAdj, EnergyHeadJM, EnergyHeadAdj
+            ! real(8), dimension(max_branch_per_node,2) :: HbranchLimit
+            ! real(8) :: lateralAdd
+            ! logical :: jhead_lowlimit_TF
+        !%-----------------------------------------------------------------
+        !% Aliases
+            Npack => npack_elemP(ep_JM)
+            grav  => setting%Constant%gravity
+        !%-----------------------------------------------------------------
+        !% Preliminaries
+            if (Npack < 1) return            
+        !%-----------------------------------------------------------------
 
-    !     Hbound(1) = +huge(oneR)
-    !     Hbound(2) = -huge(oneR)
+        elemSR(:,esr_JM_HeadMax) = -huge(oneR)
+        elemSR(:,esr_JM_HeadMin) = +huge(oneR)
 
-    !     ! HbranchLimit(:,1) = +huge(oneR)
-    !     ! HbranchLimit(:,2) = -huge(oneR)
+        do mm=1,Npack 
+            JMidx => elemP(mm,ep_JM)
+            !Zbottom => elemR(JMidx,er_Zbottom)
 
-    !     ! jhead_lowlimit_TF = .false.
+            !% --- cycle through branches
+            do ii = 1,max_branch_per_node
+                JBidx = JMidx+ii
+                if (elemSI(JBidx,esi_JB_Exists) .ne. oneI) cycle !% --- ignore non-branches
+                !% --- identify inflows
+                if (elemSI(JBidx,esi_JB_IsUpstream) == oneI) then 
+                    fidx => elemI(JBidx,ei_Mface_uL)
+                    if (faceR(fidx,fr_Velocity_Adjacent) > zeroR) then
+                        isInflow = .true.
+                    else
+                        isInflow = .false.
+                    end if
+                else
+                    fidx => elemI(JBidx,ei_Mface_dL)
+                    if (faceR(fidx,fr_Velocity_Adjacent) < zeroR) then
+                        isInflow = .true.
+                    else
+                        isInflow = .false.
+                    end if
+                end if
 
-    !     ! headJM       => elemR(JMidx,er_Head)
-    !     ! EnergyHeadJM => elemR(JMidx,er_EnergyHead)
+                if (isInflow) then 
+                    !% --- max head for inflow is energy head, or Zbottom if adjacent energy is small
+                    elemSR(JMidx,esr_JM_HeadMax)                    &
+                        = max(elemSR(JMidx,esr_JM_HeadMax),         &
+                               max(faceR(fidx ,fr_EnergyHead_Adjacent),elemR(JBidx,er_Zbottom)))
 
-    !     ! !% FIND ALL BRANCHES WITH INFLOW HEAD THAT COULD LIMIT THE MAX, MIN
-    !     ! !% JUNCTION HEAD
-    !     ! !% --- cycle through branches (cannot be concurrent)
-    !     ! !%     fadj* are faces for adjustment, zeroI is null value
-    !     ! do ii=1,max_branch_per_node
+                else
+                    !% --- max head for outflow is piezometric head
+                    elemSR(JMidx,esr_JM_HeadMax)                    &
+                    = max(elemSR(JMidx,esr_JM_HeadMax),             &
+                           max(faceR(fidx ,fr_Head_Adjacent),elemR(JBidx,er_Zbottom)))
+                end if
 
-    !     !     if (elemSI(JMidx+ii,esi_JB_Exists) .ne. oneI) cycle 
-    !     !     !% --- diagnostic elements cannot be head limiters
-    !     !     if (elemSI(JMidx+ii,esi_JB_Diag_adjacent) .eq. oneI) cycle
-            
-    !     !     if (mod(ii,2)== 0) then 
-    !     !         !% --- downstream branch
-    !     !         !% --- downstream face
-    !     !         fidx => elemI(JMidx+ii,ei_Mface_dL)
-    !     !         JBidx = JMidx+ ii
-    !     !         headAdj       => faceR(fidx,fr_Head_Adjacent)
-    !     !         EnergyHeadAdj => faceR(fidx,fr_EnergyHead_Adjacent)
-
-    !     !         if (elemR(JBidx,er_Flowrate) > zeroR) then
-    !     !             !% --- outflow on downstream branch 
-    !     !             !%     provides only a lower limit
-    !     !             if (headJM > headAdj) then
-    !     !             ! if (EnergyHeadJM > EnergyHeadAdj) then
-    !     !                 !% --- outflow with positive head gradient uses outside
-    !     !                 !%     head as low limiter
-    !     !                 HbranchLimit(ii,1) = headAdj
-
-    !     !             ! elseif (headJM < headAdj) then
-    !     !             ! ! elseif (EnergyHeadJM < EnergyHeadAdj) then
-    !     !             !     !% --- outflow with inverse gradient cannot reduce below inside headJM
-    !     !             !     HbranchLimit(ii,1) = headJM
-    !     !             else 
-    !     !                 !% --- zero gradient has no low limiter
-    !     !             end if
-
-    !     !         elseif (elemR(JBidx,er_Flowrate) < zeroR) then
-    !     !             !% -- inflow on downstream branch
-    !     !             !%    provides only an upper limit
-    !     !             if (headAdj > headJM) then 
-    !     !             ! if (EnergyHeadAdj > EnergyHeadJM) then 
-    !     !                 !% --- inflow with positive head gradient uses outside
-    !     !                 !%     head as high limiter
-    !     !                 HbranchLimit(ii,2) = headAdj
-    !     !                 !HbranchLimit(ii,2) = EnergyHeadAdj
-
-    !     !             ! elseif (headAdj < headJM) then 
-    !     !             ! ! elseif (EnergyHeadAdj < EnergyHeadJM) then     
-    !     !             !     !% --- inflow with adverse head gradient cannot increase
-    !     !             !     !%     JM head
-    !     !             !     HbranchLimit(ii,2) = headJM 
-    !     !             else 
-    !     !                 !% --- zero gradient has no high limiter
-    !     !             end if
-    !     !         else
-    !     !             !% no flowrate
-    !     !         end if
-
-    !     !     else
-    !     !         !% --- upstream branch
-    !     !         !% --- upstream face
-    !     !         fidx => elemI(JMidx+ii,ei_Mface_uL)
-    !     !         JBidx = JMidx+ ii
-    !     !         headAdj => faceR(fidx,fr_Head_Adjacent)
-    !     !         EnergyHeadAdj => faceR(fidx,fr_EnergyHead_Adjacent)
-
-    !     !         if (elemR(JBidx,er_Flowrate) < zeroR) then
-    !     !             !% --- outflow on upstream branch 
-    !     !             !%     provides only a lower limit
-    !     !             if (headJM > headAdj) then
-    !     !             ! if (EnergyHeadJM > EnergyHeadAdj) then
-    !     !                 !% --- outflow with positive head gradient uses outside
-    !     !                 !%     head as low limiter
-    !     !                 HbranchLimit(ii,1) = headAdj
-
-    !     !             ! elseif (headJM < headAdj) then 
-    !     !             ! ! elseif (EnergyHeadJM < EnergyHeadAdj) then 
-    !     !             !     !% --- outflow with inverse gradient cannot reduce headJM
-    !     !             !     HbranchLimit(ii,1) = headJM
-    !     !             else 
-    !     !                 !% --- zero gradient has no low limiter
-    !     !             end if
-
-    !     !         elseif (elemR(JBidx,er_Flowrate) > zeroR) then
-    !     !             !% -- inflow on upstream branch
-    !     !             !%    provides only an upper limit
-    !     !             if (headAdj > headJM) then 
-    !     !             ! if (EnergyHeadAdj > EnergyHeadJM) then 
-    !     !                 !% --- inflow with positive head gradient uses outside
-    !     !                 !%     head as high limiter
-    !     !                 HbranchLimit(ii,2) = headAdj
-    !     !                 !HbranchLimit(ii,2) = EnergyHeadAdj
-
-    !     !             ! elseif (headAdj < headJM) then 
-    !     !             ! ! elseif (EnergyHeadAdj < EnergyHeadJM) then 
-    !     !             !     !% --- inflow with adverse head gradient cannot increase
-    !     !             !     !%     JM head
-    !     !             !     HbranchLimit(ii,2) = headJM
-    !     !             else 
-    !     !                 !% --- zero gradient has no high limiter
-    !     !             end if
-
-    !     !         else
-    !     !             !% no flowrate
-    !     !         end if
-    !     !     end if
-    !     ! end do
-
-    !     ! !% --- select the lowest low limiter from all branches
-    !     ! Hbound(1) = minval(HbranchLimit(:,1))
-
-    !     ! !% --- select the highest limiter from all branches
-    !     ! Hbound(2) = maxval(HbranchLimit(:,2))
+                !% --- min head is always based on piezometric head
+                !%     with minimum being the JB bottom
+                elemSR(JMidx,esr_JM_HeadMin)                    &
+                    = min(elemSR(JMidx,esr_JM_HeadMin),         &
+                           max(faceR(fidx ,fr_Head_Adjacent), elemR(JBidx,er_Zbottom)))     
+            end do
         
-    !     ! !% --- account for lateral inflow
-    !     ! if (elemR(JMidx,er_FlowrateLateral) .ne. zeroR) then 
-    !     !     if (elemSR(JMidx,esr_Storage_Plan_Area) > zeroR) then
-    !     !         lateralAdd =  elemR(JMidx,er_FlowrateLateral) / elemSR(JMidx,esr_Storage_Plan_Area)
-    !     !     else
-    !     !         print *, 'Unexpected storage plan area of zero '
-    !     !         print *, 'for junction element index ',JMidx
-    !     !         print *, 'Node ',trim(node%Names(elemI(JMidx,ei_node_Gidx_SWMM))%str)
-    !     !         call util_crashpoint(7109744)
-    !     !     end if
-    !     ! else
-    !     !     lateralAdd = zeroR
-    !     ! end if
+        end do
+        ! Hbound(1) = +huge(oneR)
+        ! Hbound(2) = -huge(oneR)
 
-    !     ! if ((elemR(JMidx,er_FlowrateLateral) < zeroR) .and. (Hbound(1) .ne. huge(oneR))) then 
-    !     !     Hbound(1) = Hbound(1) + lateralAdd
-    !     ! elseif ((elemR(JMidx,er_FlowrateLateral) > zeroR) .and. (Hbound(2) .ne. -huge(oneR))) then 
-    !     !     Hbound(2) = Hbound(2) + lateralAdd
-    !     ! end if
+        ! HbranchLimit(:,1) = +huge(oneR)
+        ! HbranchLimit(:,2) = -huge(oneR)
 
-    !     if (Hbound(1) > 1000.d0) then
-    !         Hbound(1) = -huge(oneR)
-    !     end if
-    !     if (Hbound(2) < -1000.d0) then 
-    !         Hbound(2) = + huge(oneR)
-    !     end if
+        ! jhead_lowlimit_TF = .false.
 
-    ! end subroutine lljunction_main_head_bounds  
+        ! headJM       => elemR(JMidx,er_Head)
+        ! EnergyHeadJM => elemR(JMidx,er_EnergyHead)
+
+        ! !% FIND ALL BRANCHES WITH INFLOW HEAD THAT COULD LIMIT THE MAX, MIN
+        ! !% JUNCTION HEAD
+        ! !% --- cycle through branches (cannot be concurrent)
+        ! !%     fadj* are faces for adjustment, zeroI is null value
+        ! do ii=1,max_branch_per_node
+
+        !     if (elemSI(JMidx+ii,esi_JB_Exists) .ne. oneI) cycle 
+        !     !% --- diagnostic elements cannot be head limiters
+        !     if (elemSI(JMidx+ii,esi_JB_Diag_adjacent) .eq. oneI) cycle
+            
+        !     if (mod(ii,2)== 0) then 
+        !         !% --- downstream branch
+        !         !% --- downstream face
+        !         fidx => elemI(JMidx+ii,ei_Mface_dL)
+        !         JBidx = JMidx+ ii
+        !         headAdj       => faceR(fidx,fr_Head_Adjacent)
+        !         EnergyHeadAdj => faceR(fidx,fr_EnergyHead_Adjacent)
+
+        !         if (elemR(JBidx,er_Flowrate) > zeroR) then
+        !             !% --- outflow on downstream branch 
+        !             !%     provides only a lower limit
+        !             if (headJM > headAdj) then
+        !             ! if (EnergyHeadJM > EnergyHeadAdj) then
+        !                 !% --- outflow with positive head gradient uses outside
+        !                 !%     head as low limiter
+        !                 HbranchLimit(ii,1) = headAdj
+
+        !             ! elseif (headJM < headAdj) then
+        !             ! ! elseif (EnergyHeadJM < EnergyHeadAdj) then
+        !             !     !% --- outflow with inverse gradient cannot reduce below inside headJM
+        !             !     HbranchLimit(ii,1) = headJM
+        !             else 
+        !                 !% --- zero gradient has no low limiter
+        !             end if
+
+        !         elseif (elemR(JBidx,er_Flowrate) < zeroR) then
+        !             !% -- inflow on downstream branch
+        !             !%    provides only an upper limit
+        !             if (headAdj > headJM) then 
+        !             ! if (EnergyHeadAdj > EnergyHeadJM) then 
+        !                 !% --- inflow with positive head gradient uses outside
+        !                 !%     head as high limiter
+        !                 HbranchLimit(ii,2) = headAdj
+        !                 !HbranchLimit(ii,2) = EnergyHeadAdj
+
+        !             ! elseif (headAdj < headJM) then 
+        !             ! ! elseif (EnergyHeadAdj < EnergyHeadJM) then     
+        !             !     !% --- inflow with adverse head gradient cannot increase
+        !             !     !%     JM head
+        !             !     HbranchLimit(ii,2) = headJM 
+        !             else 
+        !                 !% --- zero gradient has no high limiter
+        !             end if
+        !         else
+        !             !% no flowrate
+        !         end if
+
+        !     else
+        !         !% --- upstream branch
+        !         !% --- upstream face
+        !         fidx => elemI(JMidx+ii,ei_Mface_uL)
+        !         JBidx = JMidx+ ii
+        !         headAdj => faceR(fidx,fr_Head_Adjacent)
+        !         EnergyHeadAdj => faceR(fidx,fr_EnergyHead_Adjacent)
+
+        !         if (elemR(JBidx,er_Flowrate) < zeroR) then
+        !             !% --- outflow on upstream branch 
+        !             !%     provides only a lower limit
+        !             if (headJM > headAdj) then
+        !             ! if (EnergyHeadJM > EnergyHeadAdj) then
+        !                 !% --- outflow with positive head gradient uses outside
+        !                 !%     head as low limiter
+        !                 HbranchLimit(ii,1) = headAdj
+
+        !             ! elseif (headJM < headAdj) then 
+        !             ! ! elseif (EnergyHeadJM < EnergyHeadAdj) then 
+        !             !     !% --- outflow with inverse gradient cannot reduce headJM
+        !             !     HbranchLimit(ii,1) = headJM
+        !             else 
+        !                 !% --- zero gradient has no low limiter
+        !             end if
+
+        !         elseif (elemR(JBidx,er_Flowrate) > zeroR) then
+        !             !% -- inflow on upstream branch
+        !             !%    provides only an upper limit
+        !             if (headAdj > headJM) then 
+        !             ! if (EnergyHeadAdj > EnergyHeadJM) then 
+        !                 !% --- inflow with positive head gradient uses outside
+        !                 !%     head as high limiter
+        !                 HbranchLimit(ii,2) = headAdj
+        !                 !HbranchLimit(ii,2) = EnergyHeadAdj
+
+        !             ! elseif (headAdj < headJM) then 
+        !             ! ! elseif (EnergyHeadAdj < EnergyHeadJM) then 
+        !             !     !% --- inflow with adverse head gradient cannot increase
+        !             !     !%     JM head
+        !             !     HbranchLimit(ii,2) = headJM
+        !             else 
+        !                 !% --- zero gradient has no high limiter
+        !             end if
+
+        !         else
+        !             !% no flowrate
+        !         end if
+        !     end if
+        ! end do
+
+        ! !% --- select the lowest low limiter from all branches
+        ! Hbound(1) = minval(HbranchLimit(:,1))
+
+        ! !% --- select the highest limiter from all branches
+        ! Hbound(2) = maxval(HbranchLimit(:,2))
+        
+        ! !% --- account for lateral inflow
+        ! if (elemR(JMidx,er_FlowrateLateral) .ne. zeroR) then 
+        !     if (elemSR(JMidx,esr_Storage_Plan_Area) > zeroR) then
+        !         lateralAdd =  elemR(JMidx,er_FlowrateLateral) / elemSR(JMidx,esr_Storage_Plan_Area)
+        !     else
+        !         print *, 'Unexpected storage plan area of zero '
+        !         print *, 'for junction element index ',JMidx
+        !         print *, 'Node ',trim(node%Names(elemI(JMidx,ei_node_Gidx_SWMM))%str)
+        !         call util_crashpoint(7109744)
+        !     end if
+        ! else
+        !     lateralAdd = zeroR
+        ! end if
+
+        ! if ((elemR(JMidx,er_FlowrateLateral) < zeroR) .and. (Hbound(1) .ne. huge(oneR))) then 
+        !     Hbound(1) = Hbound(1) + lateralAdd
+        ! elseif ((elemR(JMidx,er_FlowrateLateral) > zeroR) .and. (Hbound(2) .ne. -huge(oneR))) then 
+        !     Hbound(2) = Hbound(2) + lateralAdd
+        ! end if
+
+        ! if (Hbound(1) > 1000.d0) then
+        !     Hbound(1) = -huge(oneR)
+        ! end if
+        ! if (Hbound(2) < -1000.d0) then 
+        !     Hbound(2) = + huge(oneR)
+        ! end if
+
+    end subroutine lljunction_main_head_bounds  
 !%    
 !%========================================================================== 
 !%==========================================================================
@@ -2708,6 +2945,67 @@ subroutine lljunction_branch_velocity ()
 !%========================================================================== 
 !%==========================================================================
 !% 
+    subroutine lljunction_main_totalFlowrates ()
+        !%------------------------------------------------------------------
+        !% Description:
+        !% computes the total inflow and total outflow for a junction
+        !%------------------------------------------------------------------
+        !% Declarations
+            integer, pointer  :: JBidx, JMidx, NpackJB, NpackJM
+            integer, pointer  :: thisJB(:), thisJM(:)
+            integer           :: ii
+            real(8), pointer  :: TotalInflow, TotalOutflow, FlowrateJB
+            real(8)           :: bsign
+        !%------------------------------------------------------------------
+        !%------------------------------------------------------------------
+        !%------------------------------------------------------------------
+        !% Aliases
+            NpackJB => npack_elemP(ep_JB)
+            NpackJM => npack_elemP(ep_JM)
+        !%------------------------------------------------------------------
+        !% Preliminaries
+            if (NpackJM < 1) return   
+        !%------------------------------------------------------------------
+
+        thisJB => elemP(1:NpackJB,ep_JB)
+        thisJM => elemP(1:NpackJM,ep_JM)
+
+        !% --- reset total flowrates for JM
+        elemSR(thisJM,esr_JM_FlowrateTotalIn)  = zeroR
+        elemSR(thisJM,esr_JM_FlowrateTotalOut) = zeroR
+
+        !% --- cycle through branches
+        do ii=1,NpackJB 
+            JBidx => thisJB(ii)
+            if (elemSI(JBidx,esi_JB_Exists) .ne. oneI) cycle  !% not a branch
+
+            !% --- local aliases
+            JMidx        => elemSI(JBidx,esi_JB_Main_Index)
+            TotalInflow  => elemSR(JMidx,esr_JM_FlowrateTotalIn)
+            TotalOutflow => elemSR(JMidx,esr_JM_FlowrateTotalOut)
+            FlowrateJB   => elemR (JBidx,er_Flowrate)
+
+            if (elemSI(JBidx,esi_JB_IsUpstream) == oneI) then
+                !% --- is upstream
+                bsign = + oneR
+            else
+                !% --- is downstream
+                bsign = - oneR
+            end if
+            TotalInflow  = TotalInflow  + max(bsign*FlowrateJB, zeroR)
+            TotalOutflow = TotalOutflow - min(bsign*FlowrateJB, zeroR)
+        end do
+
+
+    end subroutine lljunction_main_totalFlowrates
+!%    
+!%========================================================================== 
+!%==========================================================================
+!% 
+!%   
+!%========================================================================== 
+!%==========================================================================
+!% 
     subroutine lljunction_main_update_Qdependent_values (JMidx,istep) 
         !%------------------------------------------------------------------
         !% Description:
@@ -3010,6 +3308,62 @@ subroutine lljunction_branch_velocity ()
         end if
 
     end function lljunction_main_volume_from_storageRate    
+!%    
+!%========================================================================== 
+!%==========================================================================
+!%
+    subroutine lljunction_main_volume_change_limits ()
+        !%-----------------------------------------------------------------
+        !% Description
+        !% computes the inflow/outflow volume limit in a time step on
+        !% a JM so that it does not go above/below the adjacent element
+        !% head max/min
+        !%-----------------------------------------------------------------
+        !% Declarations
+            integer, pointer :: Npack, JMidx, fidx
+            integer          :: ii, mm, JBidx
+            real(8), pointer :: dt, Zbottom, Hmax, Hmin
+            real(8)          :: VolMin, VolMax
+        !%-----------------------------------------------------------------
+        !% Aliases
+            Npack => npack_elemP(ep_JM)
+            dt    => setting%Time%Hydraulics%Dt
+        !%-----------------------------------------------------------------
+        !% Preliminaries
+            if (Npack < 1) return
+        !%-----------------------------------------------------------------
+
+        do mm=1,Npack 
+            JMidx => elemP(mm,ep_JM)
+            Zbottom => elemR(JMidx,er_Zbottom)
+
+            Hmin => elemSR(JMidx,esr_JM_HeadMin)
+            Hmax => elemSR(JMidx,esr_JM_HeadMax)
+
+            !% --- get volume difference between JM head and max/min
+            if (elemR(JMidx,er_Head) > Hmax) then 
+                !% --- minimum volume after net outflows
+                VolMin = storage_volume_from_depth_singular (JMidx, Hmax - Zbottom)
+                !% --- maximum JM outflow volume in time step includes any
+                !%     lateral inflow to the JM
+                elemSR(JMidx,esr_JM_VolumeOutflowLimit)   &
+                    = elemR(JMidx,er_Volume) - VolMin   &
+                        + max(elemR(JMidx,er_FlowrateLateral) * dt, zeroR)
+            elseif (elemR(JMidx,er_Head) < Hmin) then
+                !% --- maximum inflow volume in time step
+                VolMax = storage_volume_from_depth_singular (JMidx,Hmin - Zbottom)
+                !% --- maximum (negative) JM inflow volume in time step includes any
+                !%     lateral outflow from the JM
+                elemSR(JMidx,esr_JM_VolumeInflowLimit)    &
+                    = VolMax - elemR(JBidx,er_Volume) - &
+                        - min(elemR(JMidx,er_FlowrateLateral) * dt, zeroR)
+            else
+                elemSR(JMidx,esr_JM_VolumeOutflowLimit) = zeroR
+                elemSR(JMidx,esr_JM_VolumeInflowLimit)  = zeroR
+            end if
+        end do
+
+    end subroutine lljunction_main_volume_change_limits 
 !%    
 !%========================================================================== 
 !%==========================================================================

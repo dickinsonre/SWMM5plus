@@ -152,11 +152,25 @@ contains
          !integer, dimension(8) :: iet = (/ 208, 209, 210,  211,    213, 212, 214,   223 /) !% 
          !integer, dimension(9) :: iet = (/  97,  98, 99,  100,     102, 101, 103,   112,  113/) !% 
 
-         integer, dimension(7) :: iet = (/  234,  235,     237, 236, 238,   247,  248/) !% 
+         ! integer, dimension(7) :: iet = (/  234,  235,     237, 236, 238,   247,  248/) !% 
          
-         integer, dimension(4) :: ift =    (/  225,   226,               227,  236   /) 
-   
+         ! integer, dimension(4) :: ift =    (/  225,   226,               227,  236   /) 
 
+         ! integer, dimension(7) :: iet = (/  31,  32,    2, 1, 3,   12, 13 /) !% 
+         
+         ! integer, dimension(4) :: ift =    (/  29,   1,          2,  11   /) 
+   
+         ! integer, dimension(7) :: iet = (/  61,  62,    34, 33, 35,   44, 45 /) !% 
+         
+         ! integer, dimension(4) :: ift =    (/  55,   30,          31,  40   /) 
+
+         ! integer, dimension(7) :: iet = (/  92,  93,    51, 48, 50,   59, 60 /) !% 
+         
+         ! integer, dimension(4) :: ift =    (/  82,   45,          44,   53   /) 
+
+         integer, dimension(7) :: iet = (/  46,  47,    19, 18, 20,   29, 30 /) !% 
+         
+         integer, dimension(4) :: ift =    (/  42,   17,          18,   27   /) 
       !%------------------------------------------------------------------
       !% Preliminaries:
       !%------------------------------------------------------------------
@@ -172,18 +186,15 @@ contains
 
       !% --- USEFUL HEADER -----------------------------------------------
 
-      return
+     return
 
-        if (setting%Time%Step < 111131) return
+        if (setting%Time%Step < 500) return
 
-        if (setting%Time%Step == 111157) then !% 111157
+        if (setting%Time%Step == 577) then !% 111157
          stop 880984
         end if
 
 
-         ! if (setting%Time%Now + setting%Time%Hydraulics%Dt > ceiling(setting%Time%Now)) then
-      
-            !if (this_image() == 1) 
             print *, ' '
             write(*,"(A,A, e12.5)") ' ',trim(inputstring)     
 
@@ -193,9 +204,6 @@ contains
             '; time = ',setting%Time%Now / 60.d0 , 'min'    
             print *, ' '
 
-         ! else
-         !    return
-         ! end if
 
          !    print *, 'NODES'
          ! do ii=1,N_node
@@ -213,10 +221,10 @@ contains
          !       print *, ii, elemI(ii,ei_node_Gidx_SWMM), 'node ', trim(node%Names(elemI(ii,ei_node_Gidx_SWMM))%str)
          !    end if
          ! end do
-         !    stop 609873
+         !    ! stop 609873
 
         
-         ! do ii =1,9
+         ! do ii =1,7
          !    write(*,"(i8.0,A,12i8.0)"), iet(ii), ' : ', elemI(iet(ii),ei_Mface_uL),  iet(ii),  elemI(iet(ii),ei_Mface_dL)
          !    if (elemI(iet(ii),ei_Mface_uL) .ne. 998877) then
          !       write(*,"(12i8.0)"), ii, faceI(elemI(iet(ii),ei_Mface_uL),fi_Melem_dL), 998877
@@ -251,31 +259,44 @@ contains
 
          write(*,"(15A)") '       ', '    elem    ', '    face    ','    elem    ','    face    ','     JB     ','     JM     ','     JB     ','    face    ','    elem    ','    face     ', '   elem     '
    
-         write(*,"(A,15f12.3)") 'Head', &
-            elemR(iet(1),er_Head) - 29.d0, &
-               faceR(ift(1),fr_Head_d) - 29.d0, &
-            elemR(iet(2),er_Head) - 29.d0, &
-               faceR(ift(2),fr_Head_d) - 29.d0, &
-            elemR(iet(3),er_Head) - 29.d0, &
-            elemR(iet(4),er_Head) - 29.d0, &
-            elemR(iet(5),er_Head) - 29.d0, &
-               faceR(ift(3),fr_Head_d) - 29.d0, &
-            elemR(iet(6),er_Head) - 29.d0, &
-               faceR(ift(4),fr_Head_d) - 29.d0, &
-            elemR(iet(7),er_Head) - 29.d0
+         write(*,"(A,15f12.4)") 'Head', &
+            elemR(iet(1),er_Head)      - 223.5d0, &
+               faceR(ift(1),fr_Head_d) - 223.5d0, &
+            elemR(iet(2),er_Head)      - 223.5d0, &
+               faceR(ift(2),fr_Head_d) - 223.5d0, &
+            elemR(iet(3),er_Head)      - 223.5d0, &
+            elemR(iet(4),er_Head)      - 223.5d0, &
+            elemR(iet(5),er_Head)      - 223.5d0, &
+               faceR(ift(3),fr_Head_d) - 223.5d0, &
+            elemR(iet(6),er_Head)      - 223.5d0, &
+               faceR(ift(4),fr_Head_d) - 223.5d0, &
+            elemR(iet(7),er_Head)      - 223.5d0
 
-            write(*,"(A,15f12.3)") 'Zbtm', &
-            elemR(iet(1),er_Zbottom) - 29.d0, &
-               faceR(ift(1),fr_Zbottom) - 29.d0, &
-            elemR(iet(2),er_Zbottom) - 29.d0, &
-               faceR(ift(2),fr_Zbottom) - 29.d0, &
-            elemR(iet(3),er_Zbottom) - 29.d0, &
-            elemR(iet(4),er_Zbottom) - 29.d0, &
-            elemR(iet(5),er_Zbottom) - 29.d0, &
-               faceR(ift(3),fr_Zbottom) - 29.d0, &
-            elemR(iet(6),er_Zbottom) - 29.d0, &
-               faceR(ift(4),fr_Zbottom) - 29.d0, &
-            elemR(iet(7),er_Zbottom) - 29.d0
+             write(*,"(A,15f12.3)") 'Vol ', &
+            elemR(iet(1),er_Volume) , &
+               0.d0 , &
+            elemR(iet(2),er_Volume) , &
+               0.d0 , &
+            elemR(iet(3),er_Volume) , &
+            elemR(iet(4),er_Volume) , &
+            elemR(iet(5),er_Volume) , &
+               0.d0, &
+            elemR(iet(6),er_Volume) , &
+               0.d0 , &
+            elemR(iet(7),er_Volume)
+
+            ! write(*,"(A,15f12.3)") 'Zbtm', &
+            ! elemR(iet(1),er_Zbottom) - 29.d0, &
+            !    faceR(ift(1),fr_Zbottom) - 29.d0, &
+            ! elemR(iet(2),er_Zbottom) - 29.d0, &
+            !    faceR(ift(2),fr_Zbottom) - 29.d0, &
+            ! elemR(iet(3),er_Zbottom) - 29.d0, &
+            ! elemR(iet(4),er_Zbottom) - 29.d0, &
+            ! elemR(iet(5),er_Zbottom) - 29.d0, &
+            !    faceR(ift(3),fr_Zbottom) - 29.d0, &
+            ! elemR(iet(6),er_Zbottom) - 29.d0, &
+            !    faceR(ift(4),fr_Zbottom) - 29.d0, &
+            ! elemR(iet(7),er_Zbottom) - 29.d0
 
             ! write(*,"(A,15f12.3)") 'H-Z ', &
             ! elemR(iet(1),er_Head) - elemR(iet(1),er_Zcrown), &
@@ -317,31 +338,45 @@ contains
             elemR(iet(7),er_Flowrate)
 
 
-            write(*,"(A,15f12.3)") 'Area', &
-            elemR(iet(1),er_Area) , &
-               faceR(ift(1),fr_Area_d) , &
-            elemR(iet(2),er_Area) , &
-               faceR(ift(2),fr_Area_d) , &
-            elemR(iet(3),er_Area) , &
-            elemR(iet(4),er_Area) , &
-            elemR(iet(5),er_Area) , &
-               faceR(ift(3),fr_Area_d) , &
-            elemR(iet(6),er_Area) , &
-               faceR(ift(4),fr_Area_d) , &
-            elemR(iet(7),er_Area)
+            write(*,"(A,15f12.3)") 'dQdH', &
+            0.d0 , &
+            0.d0 , &
+            0.d0 , &
+            0.d0 , &
+            elemSR(iet(3),esr_JB_dQdH) , &
+            0.d0 , &
+            elemSR(iet(5),esr_JB_dQdH) , &
+            0.d0 , &
+            0.d0 , &
+            0.d0 , &
+            0.d0
 
-            write(*,"(A,15f12.3)") 'Fr  ', &
-            elemR(iet(1),er_FroudeNumber) , &
-               0.d0 , &
-            elemR(iet(2),er_FroudeNumber) , &
-               0.d0 , &
-            elemR(iet(3),er_FroudeNumber) , &
-            elemR(iet(4),er_FroudeNumber) , &
-            elemR(iet(5),er_FroudeNumber) , &
-               0.d0, &
-            elemR(iet(6),er_FroudeNumber) , &
-               0.d0 , &
-            elemR(iet(7),er_FroudeNumber)
+
+            ! write(*,"(A,15f12.3)") 'Area', &
+            ! elemR(iet(1),er_Area) , &
+            !    faceR(ift(1),fr_Area_d) , &
+            ! elemR(iet(2),er_Area) , &
+            !    faceR(ift(2),fr_Area_d) , &
+            ! elemR(iet(3),er_Area) , &
+            ! elemR(iet(4),er_Area) , &
+            ! elemR(iet(5),er_Area) , &
+            !    faceR(ift(3),fr_Area_d) , &
+            ! elemR(iet(6),er_Area) , &
+            !    faceR(ift(4),fr_Area_d) , &
+            ! elemR(iet(7),er_Area)
+
+            ! write(*,"(A,15f12.3)") 'Fr  ', &
+            ! elemR(iet(1),er_FroudeNumber) , &
+            !    0.d0 , &
+            ! elemR(iet(2),er_FroudeNumber) , &
+            !    0.d0 , &
+            ! elemR(iet(3),er_FroudeNumber) , &
+            ! elemR(iet(4),er_FroudeNumber) , &
+            ! elemR(iet(5),er_FroudeNumber) , &
+            !    0.d0, &
+            ! elemR(iet(6),er_FroudeNumber) , &
+            !    0.d0 , &
+            ! elemR(iet(7),er_FroudeNumber)
 
          return
 
