@@ -1,0 +1,52 @@
+{
+    "JSON_FoundFileYN" : true,
+    "JSON_CheckAllInputYN" : false,
+    
+    "CaseName" : {
+        "Long"  : "test",
+        "Short" : "tc50_dx10"
+    },
+
+    "Discretization" : {
+        "NominalElemLength" : 10.00
+    },
+    "Output" : {
+        "StoredLevels" : 5000,
+        "CommandLine" : {
+            "interval" : 10000
+        },
+        "DataOut" :{ 
+            "isElemHasAirOut" : true,
+            "isAirPressureHeadOut" : true     
+        }
+    },
+    "Solver" : {
+        "PreissmannSlot" : {
+            "useSlotTF"      : true,
+            "Method"         : "DynamicSlot",
+            "TargetCelerity" : 100.0,
+            "Alpha"          : 3.0,
+            "DecayRate"      : 1.0
+        }
+    },
+    "AirTracking" :{
+        "UseAirTrackingYN"          : false,
+        "AtmosphericPressureHead"   : 10.33,
+        "theta"                     : 0.6,
+        "AirDischargeCoefficient"   : 0.3,
+        "AirVentThroughJM"          : true,
+        "MinimumVentArea"           : 0.0
+    },
+    "Adjust" : {
+        "Head" : {
+            "ApplyYN" : false,
+            "Approach" : "vshape_surcharge"
+        }
+    },
+    "Limiter" : {
+        "Dt" : {
+            "Minimum"       : 1e-10
+        }
+    }
+}
+

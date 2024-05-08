@@ -7,16 +7,15 @@ program main
     !%
     !% Primary contact: Ben R. Hodges, email: benrhodges@gmail.com
     !% 
-    !% Code authors (current):
-    !% 2016-23  Prof. Ben Hodges -- lead developer and algorithm guru
-    !% 2019-23  Sazzad Sharior -- SWMM hydraulic features and Preissmann Slot
+    !% Code authors
+    !% 2016-24  Prof. Ben Hodges -- lead developer and algorithm guru
+    !% 2019-24  Dr, Sazzad Sharior -- SWMM hydraulic features and Preissmann Slot
+    !% 2022-24  Cesar Davila Hernandez -- compilation, installation, and cmake 
+    !% 2021-24  Abdulmuttalib Lokhandwala -- testing
     !% 2019-23  Eric Jenkins -- SWMM-C interface, HDF5 input and output
-    !% 2016-22  Eddie Tiernan -- network partitioning
     !% 2021-23  Christopher Bashear -- Profiling and testing
-    !% 2021-23  Abdulmuttalib Lokhandwala -- testing
-    !% 
-    !% Code authors (prior development)
-    !% 2019-22  Gerardo Riano-Briceno -- SWMM-C interface, link/node translation
+    !% 2016-22  Dr. Eddie Tiernan -- network partitioning
+    !% 2019-22  Dr. Gerardo Riano-Briceno -- SWMM-C interface, link/node translation
     !% 2020-22  Dr. Cheng-Wei (Justin) Yu -- large system test cases, compilation
     !% 2018-20  Dr. Ehsan Madidi-Kandjani -- preliminary development
     !%

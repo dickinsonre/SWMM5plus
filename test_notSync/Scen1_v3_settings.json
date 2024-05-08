@@ -1,0 +1,11 @@
+{
+    "JSON_FoundFileYN" : true,
+    "JSON_CheckAllInputYN" : false,
+    "CaseName" : {
+        "Long"  : "Scen1_v3",
+        "Short" : "Scen1_v3"
+    },
+    "Discretization" : {
+        "NominalElemLength" : 10.0
+    } 
+}

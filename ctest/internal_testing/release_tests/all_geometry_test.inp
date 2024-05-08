@@ -90,25 +90,25 @@ J40              0          4          0.5        0          0
 [OUTFALLS]
 ;;Name           Elevation  Type       Stage Data       Gated    Route To        
 ;;-------------- ---------- ---------- ---------------- -------- ----------------
-Out1             0          FREE                        NO                       
-Out2             0          FREE                        NO                       
-Out3             0          FREE                        NO                       
-Out4             0          FREE                        NO                       
-Out5             0          FREE                        NO                       
-Out6             0          FREE                        NO                       
-Out7             0          FREE                        NO                       
-Out8             0          FREE                        NO                       
-Out9             0          FREE                        NO                       
-Out10            0          FREE                        NO                       
-Out11            0          FREE                        NO                       
-Out12            0          FREE                        NO                       
-Out13            0          FREE                        NO                       
-Out14            0          FREE                        NO                       
-Out15            0          FREE                        NO                       
-Out16            0          FREE                        NO                       
-Out17            0          FREE                        NO                       
-Out19            0          FREE                        NO                       
-Out20            0          FREE                        NO                       
+Out1             0          FIXED         0.5             NO                       
+Out2             0          FIXED         0.5             NO                       
+Out3             0          FIXED         0.5             NO                       
+Out4             0          FIXED         0.5             NO                       
+Out5             0          FIXED         0.5             NO                       
+Out6             0          FIXED         0.5             NO                       
+Out7             0          FIXED         0.5             NO                       
+Out8             0          FIXED         0.5             NO                       
+Out9             0          FIXED         0.5             NO                       
+Out10            0          FIXED         0.5             NO                       
+Out11            0          FIXED         0.5             NO                       
+Out12            0          FIXED         0.5             NO                       
+Out13            0          FIXED         0.5             NO                       
+Out14            0          FIXED         0.5             NO                       
+Out15            0          FIXED         0.5             NO                       
+Out16            0          FIXED         0.5             NO                       
+Out17            0          FIXED         0.5             NO                       
+Out19            0          FIXED         0.5             NO                       
+Out20            0          FIXED         0.5             NO                       
 
 [CONDUITS]
 ;;Name           From Node        To Node          Length     Roughness  InOffset   OutOffset  InitFlow   MaxFlow   

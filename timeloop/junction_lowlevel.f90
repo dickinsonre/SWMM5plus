@@ -64,13 +64,13 @@ module junction_lowlevel
     public :: lljunction_main_volume_change_limits
 
     public :: lljunction_push_inflows_from_CC_to_JB_face
-    public :: lljunction_push_adjacent_CC_elemdata_to_face
+    public :: lljunction_push_adjacent_elemdata_to_face
 
 
-    integer :: printJM = 18
-    integer :: printJB = 19
+    integer :: printJM = 112
+    integer :: printJB = 113
     
-    integer :: stepCut = 575
+    integer :: stepCut = 0
     contains
 !%==========================================================================
 !% PUBLIC
@@ -115,6 +115,31 @@ module junction_lowlevel
         do ii=1,NpackJB 
             JBidx => thisJB(ii)
             if (elemSI(JBidx,esi_JB_Exists) .ne. oneI) cycle 
+
+            !% --- handle diagnostic elements by forcing JB to face values
+            
+            if (elemSI(JBidx,esi_JB_Diag_adjacent) == oneI) then 
+
+                ! print *, 'skipping branch velo for diag'
+                ! print *, 'JBidx ',JBidx, elemSI(JBidx,esi_JB_Diag_adjacent)
+                ! print *, ' '
+            
+
+                if (elemSI(JBidx,esi_JB_IsUpstream) == oneI) then 
+                    fidx => elemI(JBidx,ei_Mface_uL)
+                else
+                    fidx => elemI(JBidx,ei_Mface_dL)
+                end if
+                elemR(JBidx,er_Flowrate) = faceR(fidx,fr_Flowrate)
+
+                !% --- set velocity for diag adjacent JB
+                if (elemR(JBidx,er_AreaVelocity) > setting%ZeroValue%Area) then
+                    elemR(JBidx,er_Velocity) = elemR(JBidx,er_Flowrate) / elemR(JBidx,er_AreaVelocity)
+                else
+                    elemR(JBidx,er_Velocity) = zeroR
+                end if
+                cycle !% --- skip the remainder of this loop
+            end if
 
             JMidx            => elemSI(JBidx,esi_JB_Main_Index)
             HeadJM           => elemR (JMidx,er_Head)
@@ -868,6 +893,8 @@ module junction_lowlevel
             JBidx => thisP(ii)
             JMidx => elemSI(JBidx,esi_JB_Main_Index)
 
+            ! print *, 'JBIdx, diagadjacent ',JBidx, elemSI(JBidx,esi_JB_Diag_adjacent)
+
             headJM => elemR(JMidx,er_Head)
 
             !% --- get the face for this JB
@@ -990,22 +1017,24 @@ module junction_lowlevel
                 end if
 
             !% --- Diagnostic element adjacent to JB
-            elseif (elemSI(JBidx,esi_JB_Diag_adjacent)) then 
+            elseif (elemSI(JBidx,esi_JB_Diag_adjacent) == oneI) then 
                 !% --- dQdH for adjacent diagnostic element
-                if (isInflow) then 
-                    bsign = -oneR !% increasing head decreases flowrate for inflow
-                else
-                    bsign = +oneR !% increasing head increases flowrate for outflow
-                endif
                 if (elemR(JMidx,er_Head) < faceR(fidx,fr_Zcrest_Adjacent)) then 
                     !% -- insufficient head means the junction cannot affect the flow in 
                     !%    diagnostic branch (either in or out flow)
                     elemSR(JBidx,esr_JB_dQdH) = zeroR
                     !cycle
                 else
-                    elemSR(JBidx,esr_JB_dQdH) = bsign * faceR(fidx,fr_dQdH_Adjacent)
+                    !% --- use the dQdH of the adjacent diagnostic element
+                    !%     note that these should be defined such that at
+                    !%     downstrea face of an adjacent diagnostic element
+                    !%     has a negative dQdH as the increase in dH causes
+                    !%     a decrease in Q
+                    elemSR(JBidx,esr_JB_dQdH) = faceR(fidx,fr_dQdH_Adjacent)
                     !cycle
                 end if
+                ! print *, 'bsign ',bsign, faceR(fidx,fr_dQdH_Adjacent)
+                ! print *, 'JBidx, dQdH ',JBidx, elemSR(JBidx,esr_JB_dQdH) 
 
             else 
                 print *, 'CODE ERROR Unexpected else'
@@ -1629,9 +1658,9 @@ module junction_lowlevel
         !% --- compute storage rate of change at the present head
         dQdHstorage = elemSR(JMidx,esr_JM_Present_PlanArea) / setting%Time%Hydraulics%Dt
 
-        ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
-        !     print *, 'dQdH storage, planarea ',dQdHstorage, elemSR(JMidx,esr_JM_Present_PlanArea)
-        ! end if
+        !if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
+            ! print *, 'JMidx, dQdH storage, planarea ',JMidx, dQdHstorage, elemSR(JMidx,esr_JM_Present_PlanArea)
+        !end if
 
         if (isOverflow .or. isPonding) then
             !% --- compute overflow rate of change with change in head
@@ -1640,15 +1669,24 @@ module junction_lowlevel
             dQdHoverflow = zeroR
         end if
 
-        ! if ((setting%Time%Step > 54165) .and. (JMidx == 109)) then
-        !     print *, 'dQdHoverflow:    ',dQdHoverflow 
-        ! end if
+        !if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
+            ! print *, 'JMidx, dQdHoverflow:    ',JMidx, dQdHoverflow 
+        !end if
 
         !% --- compute net dQdH of branches
         dQdHbranches = lljunction_main_sumBranches(JMidx,esr_JB_dQdH, elemSR)
 
+        ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
+        !     print *, 'JMidx, dQdHbranches ',JMidx, dQdHbranches 
+        !     print *, 113, elemSR(113,esr_JB_dQdH),' ; ',114, elemSR(114,esr_JB_dQdH)
+        ! end if
+
         !% --- divisor
         divisor =  dQdHstorage -  dQdHbranches - dQdHoverflow
+
+        ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
+        !     print *, 'JMidx, Qnet, divisor ', JMidx, Qnet, divisor
+        ! end if
 
         if (abs(divisor) > localEpsilon ) then 
             dH = Qnet / divisor
@@ -1658,7 +1696,7 @@ module junction_lowlevel
 
         ! if (printJM == JMidx) then 
         !     print *, ' '
-        !     print *, 'dH here ',dH 
+        !     print *, 'JMidx, dH here ', JMidx, dH 
         !     print *, ' '
         ! end if
 
@@ -1959,11 +1997,15 @@ module junction_lowlevel
         call lljunction_branch_update_DeltaQ (JMidx,dH)  
 
         ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then
-        !     print *, 'DeltaQ ',elemR(printJB,er_DeltaQ)
+            !  print *, 'JBidx, DeltaQ ',JMidx+1, elemR(JMidx+1,er_DeltaQ)
+            !  print *, 'JBidx, DeltaQ ',JMidx+2, elemR(JMidx+2,er_DeltaQ)
         ! end if
 
         !% --- update the flowrates using DeltaQ
         call lljunction_branch_update_flowrate (JMidx) 
+
+        ! print *, 'JBidx, Q ',JMidx+1, elemR(JMidx+1,er_Flowrate)
+        ! print *, 'JBidx, Q ',JMidx+2, elemR(JMidx+2,er_Flowrate)
 
         !% --- update net Q branches (included CC and Diag)
         QnetBranches = lljunction_main_sumBranches (JMidx,er_Flowrate,elemR)
@@ -3430,40 +3472,59 @@ module junction_lowlevel
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine lljunction_push_adjacent_CC_elemdata_to_face ()
+    subroutine lljunction_push_adjacent_elemdata_to_face (tset)
         !%-----------------------------------------------------------------
         !% Description:
         !% Pushes the elem data from the element upstream or downstream
         !% of a JB to the JB face for storage in the fr_..._Adjacent
-        !% data columns
+        !% data columns. Note that this cannot handle data from the
+        !% elemSR arrays which have different indexes for the dQdH, etc. that
+        !% need to get pushed.
         !%-----------------------------------------------------------------
         !% Declarations
-            integer :: ii, epCCcol
+            integer, intent(in) :: tset
+            integer :: ii, epcol
             logical :: isUpstreamFace
         !%-----------------------------------------------------------------
 
         do ii=1,2
             !% --- cycle over upstream and downstream faces of junction
             if (ii==1) then 
-                !% --- an upstream face is CC downstream of junction
+                !% --- an upstream face is downstream of junction
                 isUpstreamFace = .true.
-                epCCcol = ep_CC_DownstreamOfJunction
+                select case (tset)
+                    case (CC)
+                        epcol = ep_CC_DownstreamOfJunction
+                    case (Diag)
+                        epcol = ep_Diag_DownstreamOfJunction
+                    case default 
+                        print *, 'CODE ERROR: unexpected case default'
+                        call util_crashpoint(739874)
+                end select
             else
                 !% -- a downstream face is CC upstream of junction
                 isUpstreamFace = .false.
-                epCCcol = ep_CC_UpstreamOfJunction
+                select case (tset)
+                case (CC)
+                    epcol = ep_CC_UpstreamOfJunction
+                case (Diag)
+                    epcol = ep_Diag_UpstreamOfJunction
+                case default 
+                    print *, 'CODE ERROR: unexpected case default'
+                    call util_crashpoint(739874)
+            end select
             end if
-            call face_push_elemdata_to_face (epCCcol, fr_Head_Adjacent,      er_Head,         elemR, isUpstreamface)
-            call face_push_elemdata_to_face (epCCcol, fr_EnergyHead_Adjacent,er_EnergyHead,   elemR, isUpstreamface)
-            call face_push_elemdata_to_face (epCCcol, fr_Topwidth_Adjacent,  er_Topwidth,     elemR, isUpstreamface)
-            call face_push_elemdata_to_face (epCCcol, fr_Length_Adjacent,    er_Length,       elemR, isUpstreamface)
-            call face_push_elemdata_to_face (epCCcol, fr_Zcrest_Adjacent,    er_Zbottom,      elemR, isUpstreamface)
-            call face_push_elemdata_to_face (epCCcol, fr_Velocity_Adjacent,  er_Velocity,     elemR, isUpstreamface)
-            call face_push_elemdata_to_face (epCCcol, fr_Froude_Adjacent,    er_FroudeNumber, elemR, isUpstreamface)
-            call face_push_elemdata_to_face (epCCcol, fr_Depth_Adjacent,     er_Depth,        elemR, isUpstreamface)
+            call face_push_elemdata_to_face (epcol, fr_Head_Adjacent,      er_Head,         elemR, isUpstreamface)
+            call face_push_elemdata_to_face (epcol, fr_EnergyHead_Adjacent,er_EnergyHead,   elemR, isUpstreamface)
+            call face_push_elemdata_to_face (epcol, fr_Topwidth_Adjacent,  er_Topwidth,     elemR, isUpstreamface)
+            call face_push_elemdata_to_face (epcol, fr_Length_Adjacent,    er_Length,       elemR, isUpstreamface)
+            call face_push_elemdata_to_face (epcol, fr_Zcrest_Adjacent,    er_Zbottom,      elemR, isUpstreamface)
+            call face_push_elemdata_to_face (epcol, fr_Velocity_Adjacent,  er_Velocity,     elemR, isUpstreamface)
+            call face_push_elemdata_to_face (epcol, fr_Froude_Adjacent,    er_FroudeNumber, elemR, isUpstreamface)
+            call face_push_elemdata_to_face (epcol, fr_Depth_Adjacent,     er_Depth,        elemR, isUpstreamface)
         end do
 
-    end subroutine lljunction_push_adjacent_CC_elemdata_to_face
+    end subroutine lljunction_push_adjacent_elemdata_to_face
 !%
 !%==========================================================================
 !% END OF MODULE

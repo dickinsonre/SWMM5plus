@@ -21,6 +21,7 @@ module common_elements
     public :: common_velocity_from_flowrate_singular
     public :: common_head_and_flowdirection_singular
     public :: common_outflow_energyhead_singular
+    public :: common_flowchange_limiter_singular
 
     contains
 !%
@@ -156,7 +157,70 @@ module common_elements
             call util_crashpoint(710983)
         end if    
             
-    end subroutine common_outflow_energyhead_singular    
+    end subroutine common_outflow_energyhead_singular   
+!%      
+!%==========================================================================
+!%==========================================================================    
+!%  
+    subroutine common_flowchange_limiter_singular (eIdx)
+        !%------------------------------------------------------------------
+        !% Description
+        !% limits flow change required be a diagnostic element based 
+        !% on a fraction of the volume of the adjacent element that is
+        !% above the head difference. Provides stability to prevent
+        !% rapid up/down oscillations during unsteady adjutment.
+        !%------------------------------------------------------------------
+        !% Declarations:
+            integer, intent(in) :: eIdx !% must be a single diagnostic element
+            integer, pointer    :: fup, fdn
+            real(8), pointer    :: Flowrate, FlowrateN0, dt, FlowVolumeLimitFactor
+            real(8)             :: dQlimit, dH
+        !%------------------------------------------------------------------
+        !% Aliases
+            fup        => elemI(eIdx,ei_Mface_uL)
+            fdn        => elemI(eIdx,ei_Mface_dL)
+            Flowrate   => elemR (eIdx,er_Flowrate)
+            FlowrateN0 => elemR (eIdx,er_Flowrate_N0)
+            dt         => setting%Time%Hydraulics%Dt
+            select case (elemI(eIdx,ei_elementType))
+                case (weir)
+                    FlowVolumeLimitFactor => setting%Weir%FlowVolumeLimitFactor
+                case (orifice)
+                    FlowVolumeLimitFactor => setting%Orifice%FlowVolumeLimitFactor
+                case (pump)
+                    FlowVolumeLimitFactor => setting%Pump%FlowVolumeLimitFactor
+                case default
+            end select
+        !%------------------------------------------------------------------
+
+        !% --- get the head difference across the diagnostic element
+        dH  =  faceR(fup,fr_Head_d) - faceR(fdn,fr_Head_u)
+
+        !% --- the increase in downstream flowrate or negative magnitude increase of upstream flowrate 
+        !%     that would eliminate a fraction of the upstream (or downstream) volume associated with 
+        !%     the head difference across the element
+        dQlimit = FlowVolumeLimitFactor * dH * faceR(fup,fr_Length_Adjacent) * faceR(fup,fr_Topwidth_Adjacent) / dt
+
+        if (dH .ge. zeroR) then 
+            if ((Flowrate - FlowrateN0) > dQlimit) then 
+                !% --- limit the change in the flowrate by the dQlimit
+                Flowrate = FlowrateN0 + dQlimit 
+            else
+                !% no action
+            end if
+        else
+            !% --- the increase in negative (upstream) dQ that would eliminate the volume associated with
+            !%     a fraction of the head difference
+            dQlimit = 0.1d0 * dH * faceR(fdn,fr_Length_Adjacent) * faceR(fdn,fr_Topwidth_Adjacent) / dt
+            if ((Flowrate - FlowrateN0) < dQlimit) then 
+                !% --- limit the change in the flowrate by dQlimit
+                Flowrate = FlowrateN0 + dQlimit 
+            else
+                !% no action 
+            end if
+        end if
+
+    end subroutine common_flowchange_limiter_singular
 !%
 !%==========================================================================
 !% END OF MODULE

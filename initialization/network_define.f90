@@ -1361,7 +1361,7 @@ contains
                         elemR(ElemLocalCounter,er_Zbottom)  = link%R(upBranchIdx,lr_ZbottomDn)
                         faceR(FaceLocalCounter,fr_Zbottom)  = elemR(ElemLocalCounter,er_Zbottom)
                         !% --- identifier for downstream junction branch faces
-                        faceYN(FaceLocalCounter,fYN_isUpstreamJBFace) = .true.
+                        faceYN(FaceLocalCounter,fYN_isFaceUpstreamOfJB) = .true.
 
                         !% --- Check 4: this node is the connecting node across partitions
                         if ( (node%I(thisNode,ni_P_is_boundary) == EdgeNode) &
@@ -1440,7 +1440,7 @@ contains
                         elemR(ElemLocalCounter,er_Zbottom)  = link%R(dnBranchIdx,lr_ZbottomUp)
                         faceR(FaceLocalCounter,fr_Zbottom)  = elemR(ElemLocalCounter,er_Zbottom)
                         !% --- identifier for downstream junction branch faces
-                        faceYN(FaceLocalCounter,fYN_isDownstreamJBFace) = .true.
+                        faceYN(FaceLocalCounter,fYN_isFaceDownstreamOfJB) = .true.
 
                         !% --- Check 4: if the link connecting this branch is a part of this partition and
                         !%     the node is not an edge node (meaning this node is the connecting node
@@ -1892,7 +1892,7 @@ contains
 !%==========================================================================
 !%==========================================================================
 !%
-subroutine init_network_map_shared_nBCdn_nodes (image, fLidx, nIdx)
+    subroutine init_network_map_shared_nBCdn_nodes (image, fLidx, nIdx)
         !%-----------------------------------------------------------------
         !% Description:
         !% set the global index, map, and ghost element for nBCdn nodes

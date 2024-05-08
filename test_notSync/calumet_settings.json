@@ -1,0 +1,66 @@
+{
+    "JSON_FoundFileYN" : true,
+    "JSON_CheckAllInputYN" : false,
+    
+    "CaseName" : {
+        "Long"  : "calumet",
+        "Short" : "calumet_dx50"
+    },
+
+    "Discretization" : {
+        "NominalElemLength" : 50
+    },
+    "Output" : {
+        "StoredLevels" : 1500,
+        "CommandLine" : {
+            "interval" : 5000
+        },
+        "DataOut" :{ 
+            "isElemHasAirOut"      : false,
+            "isAirPressureHeadOut" : false,
+            "isHydRadiusOut"       : false  
+        },
+        "Report" : {
+            "useSWMMinpYN" : true,
+            "provideYN" : true,
+            "useHD5F"   : true,
+            "useCSV"    : true,
+            "suppress_MultiLevel_Output" : false,
+            "TimeUnits" : "Seconds"
+        }
+    },
+    "Partitioning" : {
+        "PartitioningMethod" : "bquick",
+        "PhantomLinkAdjust"  : true
+    },
+    "Solver" : {
+        "PreissmannSlot" : {
+            "useSlotTF"      : true,
+            "Method"         : "DynamicSlot",
+            "TargetCelerity" : 30.0,
+            "Alpha"          : 2.0,
+            "DecayRate"      : 1.0
+        }
+    },
+    "Limiter" : {
+        "Dt" : {
+            "Minimum"       : 1e-10
+        },
+        "Velocity" : {
+            "UseLimitMaxYN" : true,
+            "Maximum" : 50.0
+        }
+    },
+    "Junction" : {
+        "ForceNodesJM"   : true,
+        "BlendingFactor" : 0.8,
+        "HeadMethodJB"   : "linear_interp", //linear_interp, use_JM
+        "ReverseDhFactor": 0.0,
+        "kFactor"        : 0.0  
+    },
+    "BC" : {
+        "TimeSlotsStored" : 10,
+        "disableInterpolationYN": false
+    }
+}
+

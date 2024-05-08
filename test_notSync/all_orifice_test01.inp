@@ -1,0 +1,162 @@
+[TITLE]
+;;Project Title/Notes
+;; contains multiple independent single-line orifice tests
+;; t1  outfall 2.5 m, orifice 1 m
+;; t2  outfall 2.5 m, orifice 1 m 
+;; t3  outfall 1.0 m, orifice 0.5 m
+;; t4  outfall 1.0 m, orifice 0.5 m 
+
+[OPTIONS]
+;;Option             Value
+FLOW_UNITS           CMS
+INFILTRATION         MODIFIED_GREEN_AMPT
+FLOW_ROUTING         DYNWAVE
+LINK_OFFSETS         DEPTH
+MIN_SLOPE            0
+ALLOW_PONDING        NO
+SKIP_STEADY_STATE    NO
+
+START_DATE           09/29/2021
+START_TIME           00:00:00
+REPORT_START_DATE    09/29/2021
+REPORT_START_TIME    00:00:00
+END_DATE             09/29/2021
+END_TIME             03:00:00
+SWEEP_START          1/1
+SWEEP_END            12/31
+DRY_DAYS             0
+REPORT_STEP          00:0:30
+WET_STEP             00:05:00
+DRY_STEP             01:00:00
+ROUTING_STEP         0:00:01 
+RULE_STEP            00:00:00
+
+INERTIAL_DAMPING     NONE
+NORMAL_FLOW_LIMITED  BOTH
+FORCE_MAIN_EQUATION  D-W
+VARIABLE_STEP        0.75
+LENGTHENING_STEP     0
+MIN_SURFAREA         0
+MAX_TRIALS           0
+HEAD_TOLERANCE       0
+SYS_FLOW_TOL         5
+LAT_FLOW_TOL         5
+MINIMUM_STEP         0.5
+THREADS              1
+
+[EVAPORATION]
+;;Data Source    Parameters
+;;-------------- ----------------
+CONSTANT         0.0
+DRY_ONLY         NO
+
+[JUNCTIONS]
+;;Name           Elevation  MaxDepth   InitDepth  SurDepth   Aponded   
+;;-------------- ---------- ---------- ---------- ---------- ----------
+;; t1
+J1               2.781     2          1          999          0         
+J2               1.390     2          1          999          0         
+J3               1.390     2          1          999          0
+;; t2
+;;c J4               2.781     2          1          999          0         
+;;c J5               1.390     2          1          999          0         
+;;c J6               1.390     2          1          999          0   
+;; t3      
+;;c J11              2.781     2          1          999          0         
+;;c J12              1.390     2          1          999          0         
+;;c J13              1.390     2          1          999          0
+;; t4
+;;c J14              2.781     2          1          999          0         
+;;c J15              1.390     2          1          999          0         
+;;c J16              1.390     2          1          999          0      
+
+[OUTFALLS]
+;;Name           Elevation  Type       Stage Data       Gated    Route To        
+;;-------------- ---------- ---------- ---------------- -------- ----------------
+Out1             0          FIXED        2.5             NO      
+;;c Out2             0          FIXED        2.5             NO       
+;;c Out11            0          FIXED        1.0             NO      
+;;c Out12            0          FIXED        1.0             NO                  
+ 
+[CONDUITS]
+;;Name           From Node        To Node          Length     Roughness  InOffset   OutOffset  InitFlow   MaxFlow   
+;;-------------- ---------------- ---------------- ---------- ---------- ---------- ---------- ---------- ----------
+;; t1
+C1               J1               J2               1000        0.015       0          0          1.5       0         
+C2               J3               Out1             1000        0.015       0          0          1.5       0 
+;; t2
+;;c C3               J4               J5               1000        0.015       0          0          1.5       0         
+;;c C4               J6               Out2             1000        0.015       0          0          1.5       0     
+;; t3   
+;;c C11              J11              J12              1000        0.015       0          0          1.5       0         
+;;c C12              J13              Out11            1000        0.015       0          0          1.5       0 
+;; t4
+;;c C13              J14              J15              1000        0.015       0          0          1.5       0         
+;;c C14              J16              Out12            1000        0.015       0          0          1.5       0        
+
+[ORIFICES]
+;;Name           From Node        To Node          Type         Offset     Qcoeff     Gated    CloseTime 
+;;-------------- ---------------- ---------------- ------------ ---------- ---------- -------- ----------
+O1               J2               J3               SIDE         0          0.65       NO       0  
+;;c O2               J5               J6               BOTTOM       0          0.65       NO       0        
+;;c O11              J12              J13              SIDE         0          0.65       NO       0  
+;;c O12              J15              J16              BOTTOM       0          0.65       NO       0        
+
+[XSECTIONS]
+;;Link           Shape        Geom1            Geom2      Geom3      Geom4      Barrels    Culvert   
+;;-------------- ------------ ---------------- ---------- ---------- ---------- ---------- ----------
+;; t1
+C1               CIRCULAR      2                0          0          0          1                    
+C2               CIRCULAR      2                0          0          0          1     
+O1               CIRCULAR      1.0              0          0          0            
+;; t2
+;;c C3               CIRCULAR      2                0          0          0          1                    
+;;c C4               CIRCULAR      2                0          0          0          1               
+;;c O2               CIRCULAR      1.0              0          0          0         
+;; t3
+;;c C11              CIRCULAR      2                0          0          0          1                    
+;;c C12              CIRCULAR      2                0          0          0          1    
+;;c O11              CIRCULAR      0.5              0          0          0    
+;; t4    
+;;c C13              CIRCULAR      2                0          0          0          1                    
+;;c C14              CIRCULAR      2                0          0          0          1               
+;;c O12              CIRCULAR      0.5             0          0          0          
+
+[INFLOWS]
+;;Node           Constituent      Time Series      Type     Mfactor  Sfactor  Baseline Pattern
+;;-------------- ---------------- ---------------- -------- -------- -------- -------- --------
+J1               FLOW             ""               FLOW     1.0      1.0      1.5
+;;c J4               FLOW             ""               FLOW     1.0      1.0      1.5
+;;c J11              FLOW             ""               FLOW     1.0      1.0      1.5
+;;c J14              FLOW             ""               FLOW     1.0      1.0      1.5
+
+[REPORT]
+;;Reporting Options
+SUBCATCHMENTS ALL
+NODES ALL
+LINKS ALL
+
+[TAGS]
+
+[MAP]
+DIMENSIONS 0.000 0.000 10000.000 10000.000
+Units      None
+
+[COORDINATES]
+;;Node           X-Coord            Y-Coord           
+;;-------------- ------------------ ------------------
+         
+
+[VERTICES]
+;;Link           X-Coord            Y-Coord           
+;;-------------- ------------------ ------------------
+
+[PROFILES]
+;;Name           Links     
+;;-------------- ----------
+"t1           " C1 O1  C2
+
+;;c "t2           " C3 O2  C4
+;;c "t3           " C11 O11  C12
+;;c "t4           " C13 O12  C14
+

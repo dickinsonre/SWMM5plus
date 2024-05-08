@@ -40,7 +40,7 @@ module runge_kutta2
 
     public :: rk2_toplevel
 
-    integer :: printIdx = 49
+    integer :: printIdx = 1
     integer :: stepcut = 13452
     contains
 !%==========================================================================
@@ -54,7 +54,9 @@ module runge_kutta2
         !%------------------------------------------------------------------
         !% Declarations:
             integer          :: istep, ii, kk
-            integer, pointer :: Npack, thisP(:)
+            integer, pointer :: Npack, thisP(:), fup, fdn
+
+            integer          :: thisDiag
             
             real(8), pointer :: grav, dt
             real(8)          :: volume1, volume2, inflowVolume, outflowVolume
@@ -95,7 +97,7 @@ module runge_kutta2
         !%     the faces require synchronizing.
         call junction_preliminaries ()
 
-            !call util_utest_CLprint('BBBB after junction preliminaries')
+            ! call util_utest_CLprint('BBBB after junction preliminaries')
         
         !%==================================  
         !% --- RK2 SOLUTION
@@ -141,30 +143,51 @@ module runge_kutta2
 
 
             !% --- interpolate all data to faces
+            !%     NOTE: in 1st iter, the diag elements have time n values, this should get
+            !%     the correct value to faces for diag elements adjacent to CC
             sync all
             call face_interpolation(fp_noBC_IorS, .true., .true., .true., .false., .true.) 
 
             ! call util_utest_CLprint('GGG after face interpolation')
 
             if (N_diag > 0) then 
-                !% --- update flowrates for aa diagnostic elements
-                call diagnostic_by_type (ep_Diag, istep)  
+                if (istep == 1) then
+                    !% --- first RK only handle the diagnostic that are inline (no JB)
+                    !%     the JB adjacent are handled in the junction computation, which
+                    !%     computes a perturbation from the time 'n' flowrate.
+                    thisDiag = ep_Diag_notJBadjacent
+                elseif (istep == 2) then 
+                    !% --- handle all diagnostic
+                    thisDiag = ep_Diag 
+                else
+                    print *, 'CODE ERROR: unexpected else'
+                    call util_crashpoint(698734)
+                end if
+                call diagnostic_push_adjacent_elemdata_to_face (thisDiag)
+                !% --- update flowrates for diagnostic elements adjacent to CC
+                call diagnostic_by_type (thisDiag, istep)  
                 !% --- push the diagnostic flowrate data to faces -- true is upstream, false is downstream
-                call face_push_elemdata_to_face (ep_Diag, fr_Flowrate, er_Flowrate, elemR, .true.)
-                call face_push_elemdata_to_face (ep_Diag, fr_Flowrate, er_Flowrate, elemR, .false.)
+                call face_push_elemdata_to_face (thisDiag, fr_Flowrate, er_Flowrate, elemR, .true.)
+                call face_push_elemdata_to_face (thisDiag, fr_Flowrate, er_Flowrate, elemR, .false.)
+                !call face_interpolation(fp_Diag_IorS, .true., .true., .true., .false., .true.)
             end if
-
-            ! call util_utest_CLprint('HHH after diagnostic')
-
             !% --- face sync
             !%     sync all the images first. then copy over the data between
             !%     shared-identical faces. then sync all images again
+            !%     NOTE this must be outside any if() statement to prevent race condition.
             sync all
             call face_shared_face_sync_single (fp_Diag_IorS,fr_Flowrate)
-            sync all
+            sync all 
 
-            !% --- update face velocities after sync changes areas and flowrates
-            call face_update_velocities (fp_Diag_IorS)
+            if (N_diag > 0) then 
+                !% --- ensure JB match the diag face flowrates.
+                !print *, 'calling face_push'
+                call face_push_diag_data_to_JBelem(fr_Flowrate, er_Flowrate)
+                !% --- update face velocities after sync changes areas and flowrates
+                call face_update_velocities (fp_Diag_IorS)
+            end if
+ 
+            ! call util_utest_CLprint('HHH after diagnostic')
 
             !% --- update various packs of zeroDepth faces for changes in depths
             call pack_CC_zeroDepth_interior_faces ()
@@ -201,7 +224,7 @@ module runge_kutta2
             call face_shared_face_sync (fp_noBC_IorS, [fr_flowrate,fr_Velocity_d,fr_Velocity_u])
             sync all
 
-            ! call util_utest_CLprint('PPPP before junction first step')
+            ! call util_utest_CLprint('OOOO before adjust Vfilter')
 
             !% --- Filter flowrates to remove grid-scale checkerboard
             !% 20240209brh moved before junction first step
@@ -211,6 +234,7 @@ module runge_kutta2
 
             !% --- JUNCTION -- first step compute
             if (istep == 1) then 
+                ! call util_utest_CLprint('PPPP before junction first step')
                 !% --- Junction first step RK estimate
                 !%     Note that this must be called in every image, including
                 !%     those that do not have junctions as it contains a sync

@@ -455,7 +455,7 @@ module define_indexes
         enumerator :: eYN_isBoundary_dn                 !% TRUE if the element is connected to a shared face downstream thus a boundary element of a partition
         enumerator :: eYN_isCulvert                     !% TRUE if CC element is inlet, outlet or culvert barrel
         enumerator :: eYN_isDummy
-        enumerator :: eYN_is_CCadjacent_JBorDiag           !% TRUE if element is adjacent to CC and is not CC
+        enumerator :: eYN_is_CCadjacent_JBorDiag        !% TRUE if element is adjacent to CC and is not CC
         enumerator :: eYN_is_DiagAdjacent               !% TRUE if element is adjacent to a diagnostic element
         enumerator :: eYN_is_JunctionAdjacent           !% TRUE if element is adjacent to a JM
         enumerator :: eYN_isElementDownstreamOfJB       !% TRUE if the element is immediate downstream of JB
@@ -755,7 +755,9 @@ module define_indexes
         enumerator ::  esr_Orifice_CriticalHead             !% critical head for weir flow through an orifice
         enumerator ::  esr_Orifice_FractionCriticalDepth    !% critical depth fracttion to distinct between weir and orifice flow
         enumerator ::  esr_Orifice_DischargeCoeff           !% discharge coefficient orifice
-        enumerator ::  esr_Orifice_dQdHe                    !% rate of change of flowrate with change in effective head
+        !enumerator ::  esr_Orifice_dQdHe                    !% rate of change of flowrate with change in effective head
+        enumerator ::  esr_Orifice_dQdH_upstream            !% rate of change of flowrate with change of upstream head 
+        enumerator ::  esr_Orifice_dQdH_downstream          !% rate of change of flowrate with change of downstream head
         enumerator ::  esr_Orifice_FullDepth                !% original orifice opening
         enumerator ::  esr_Orifice_FullArea                 !% original orifice opening area
         enumerator ::  esr_Orifice_EffectiveFullDepth       !% effective full depth after control intervention
@@ -806,7 +808,11 @@ module define_indexes
         enumerator ::  esr_Weir_Triangular              !% discharge coefficient for triangular weir part
         enumerator ::  esr_Weir_FullDepth               !% original weir opening
         enumerator ::  esr_Weir_FullArea                !% original weir opening area
-        enumerator ::  esr_Weir_dQdHe                   !% reate of change of flowrate with change in effective head
+        !enumerator ::  esr_Weir_FlowrateDeltaUpstream   !% flowrate if upstream head increased by delta
+        !enumerator ::  esr_Weir_FlowrateDeltaDownstream !% flowrate if downstream head increased by delta
+        !enumerator ::  esr_Weir_dQdHe                   !% rate of change of flowrate with change in effective head
+        enumerator ::  esr_Weir_dQdH_upstream           !% rate of change of flowrate with change of upstream head 
+        enumerator ::  esr_Weir_dQdH_downstream         !% rate of change of flowrate with change of downstream head
         enumerator ::  esr_Weir_EffectiveFullDepth      !% effective full depth after control intervention
         enumerator ::  esr_Weir_EffectiveHeadDelta      !% effective head delta across weir
         enumerator ::  esr_Weir_NominalDownstreamHead   !% nominal downstream head
@@ -815,7 +821,7 @@ module define_indexes
         enumerator ::  esr_Weir_TrapezoidalLeftSlope    !% trapezoidal weir left slope
         enumerator ::  esr_Weir_TrapezoidalRightSlope   !% trapezoidal weir right slope
         enumerator ::  esr_Weir_TriangularSideSlope     !% triangular weir side slope
-        enumerator ::  esr_Wier_RoadWidth               !% road width for roadway weir
+        enumerator ::  esr_Weir_RoadWidth               !% road width for roadway weir
         enumerator ::  esr_Weir_Zcrown                  !% weir crown elevation
         enumerator ::  esr_Weir_Zcrest                  !% weir crest elevation
         enumerator ::  esr_Weir_lastplusone !% must be last enum item
@@ -1286,8 +1292,8 @@ module define_indexes
         enumerator :: fYN_isPSsurcharged
         enumerator :: fYN_isAirflowBlocked
         enumerator :: fYN_isAirPressurized
-        enumerator :: fYN_isDownstreamJBFace
-        enumerator :: fYN_isUpstreamJBFace
+        enumerator :: fYN_isFaceDownstreamOfJB
+        enumerator :: fYN_isFaceUpstreamOfJB
         enumerator :: fYN_isFaceOut
         enumerator :: fYN_isDiag_adjacent_all
         enumerator :: fYN_isDiag_adjacent_interior
@@ -1312,6 +1318,7 @@ module define_indexes
         enumerator :: fp_CC_both_IorS               !% faces with CC on both sides.
         enumerator :: fp_Diag_IorS                  !% faces with adjacent diagnostic element
         enumerator :: fp_JB_IorS                    !% faces with adjacent JB
+        enumerator :: fp_JB_Diag_IorS               !% faces adjacent to diagnostic and JB
         
         !%--- DYNAMIC  defined for both interior and shared face arrays (...IorS)
         enumerator :: fp_CC_downstream_is_zero_IorS !% CC on both sides and downstream (only) is zero depth

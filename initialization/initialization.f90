@@ -960,6 +960,49 @@ contains
             !%     If 0 then node cannot surcharge, so exceeding depth means water either ponds or is lost
             node%R(ii,nr_OverflowHeightAboveCrown) = interface_get_nodef_attribute(ii, api_nodef_surDepth)
 
+            !% --- error checking for infinite depth value and input surcharge depth
+            !print *, ii, node%R(ii,nr_OverflowHeightAboveCrown), setting%Junction%InfiniteExtraDepthValue
+            if (node%R(ii,nr_OverflowHeightAboveCrown) > setting%Junction%InfiniteExtraDepthValue ) then 
+                !% --- reset for small difference
+                if (node%R(ii,nr_OverflowHeightAboveCrown) .le. 1.001d0*setting%Junction%InfiniteExtraDepthValue) then
+                    node%R(ii,nr_OverflowHeightAboveCrown) = setting%Junction%InfiniteExtraDepthValue
+                else
+                    print *, ' '
+                    print *, 'USER CONFIGURATION ERROR:'
+                    print *, 'Inconsistent surcharge depth and setting.Junction.InfiniteExtraDepthValue'
+                    print *, 'Surcharge Depth from input is          ',node%R(ii,nr_OverflowHeightAboveCrown)
+                    print *, 'Setting for InfiniteExtraDepthValue is ',setting%Junction%InfiniteExtraDepthValue
+                    print *, 'The Infinite...Value must be greater than any surcharge depth provided in'
+                    print *, 'the input file. '
+                    print *, 'Stopping processing at node ',trim(node%Names(ii)%str)
+                    print *, 'Note that other nodes may have the same problem.'
+                    print *, ' '
+                    print *, 'HINT: this happens when the *.json file and the *.inp file have '
+                    print *, 'inconsistent values for infinite depths. Some modelers like to use'
+                    print *, '999 in the input file for SurDepth, others like to use 1000. The json '
+                    print *, 'file should be changed so that setting.Junction.InfiniteExtraDepthValue ' 
+                    print *, 'matches the value in the *.inp file, e.g., if 1000 is used in the input'
+                    print *, 'file, then the json file needs:'
+                    print *, '},'
+                    print *, ' "Junction" : {'
+                    print *, '      "InfiniteExtraDepthValue" : 1000.0'
+                    print *, ' }'
+                    print *, ' '
+                    print *, 'NOTE: using large surcharge depth is NOT functionally the same as using an '
+                    print *, 'infinite extra depth value. A large surcharge depth is presumed able to'
+                    print *, 'eventually overflow so the node must be an nJM node (i.e., it must be  '
+                    print *, 'a manhole). However, setting the surcharge depth to the Infinite...Value'
+                    print *, 'means that the node CANNOT overflow and (if it has no inflows and has'
+                    print *, 'only 2 connections) it is replaced with an nJ2 face (i.e., there will be '
+                    print *, 'no manhole area). The nJ2 approach is generally preferred if a manhole'
+                    print *, 'does not actually exist at the node location. If a manhole exists at this'
+                    print *, 'location, make sure the Infinite...Value is larger than the surcharge'
+                    print *, 'depth in the input file.'
+                    print *, ' '
+                    call util_crashpoint(709873)
+                end if
+            end if 
+
             !% --- storage equations
             !%     Note that Storage is converted to SI units in api.c/api_get_nodef_attribute
             node%R(ii,nr_StorageConstant)   = interface_get_nodef_attribute(ii, api_nodef_StorageConstant)
@@ -1576,36 +1619,20 @@ contains
         if (setting%Junction%ForceNodesJM ) then
             node%I(ii, ni_node_type) = nJm
             return
+
+            print *, 'switch A',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+
+            return
         else
-            !% -- forcing nJM of weir-adjacent nJ2 nodes, only
-            if ( ((link%I(linkDn,li_link_type) .eq. lWeir)  &
-                   .or.                                     &
-                  (link%I(linkUp,li_link_type) .eq. lWeir)  &
-                  ) .and.                                   &
-                  (setting%Weir%ForceWeirNodesToJM)         &
-                ) then 
-                node%I(ii,ni_node_type) = nJm
-                return
-            else 
-                !% --- continue    
-            end if
-            !% -- forcing nJM of orifice-adjacent nJ2 nodes, only
-            if ( ((link%I(linkDn,li_link_type) .eq. lOrifice)  &
-                    .or.                                       &
-                  (link%I(linkUp,li_link_type) .eq. lOrifice)  &
-                  ).and.                                       &
-                  (setting%Orifice%ForceOrificeNodesToJM)      &
-                ) then 
-                node%I(ii,ni_node_type) = nJm
-                return
-            else 
-                !% --- continue
-            end if
+            !% --- continue
         end if
 
         !% --- if subcatchment outlet at nJ2 node we require nJM
         if (node%I(ii,ni_routeFrom) .ne. nullvalueI) then
             node%I(ii, ni_node_type) = nJm
+
+            print *, 'switch B',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+
             return !% finished with this junction
         else 
             !% --- continue
@@ -1619,13 +1646,17 @@ contains
             )  then
             !% --- switching to a nJm junction type'
             node%I(ii, ni_node_type) = nJm
+
+            print *, 'switch C',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+
             return !% finished with this junction
         else
             !% --- continue
         end if
 
         !% --- Set junctions with inflows and upstream pipes to nJM
-        !%     i.e., we are not (at this time) allowing pipe lateral inflows
+        !%     i.e., we are not (at this time) allowing node inflow to be
+        !%     pushed upward to a pipe lateral inflows
         if ( (link%I(linkUp,li_geometry) == lPipe)      &
             .and.                                       &
                 (node%YN(ii,nYN_has_extInflow)          &
@@ -1634,6 +1665,9 @@ contains
                 )                                       &
             ) then 
             node%I(ii, ni_node_type) = nJm
+
+            print *, 'switch D',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+
             return  !% finished with this junction
         else 
             !% --- continue 
@@ -1649,6 +1683,9 @@ contains
              node%YN(ii,nYN_has_dwfInflow)          &
             )) then 
             node%I(ii, ni_node_type) = nJm
+
+            print *, 'switch E',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+
             return  !% finished with this junction
         else
             !% --- continue
@@ -1661,6 +1698,9 @@ contains
                 (link%I(linkDn,li_barrels) > oneI)     &
             ) then       
             node%I(ii, ni_node_type) = nJm   
+
+            print *, 'switch F',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+
             return
         else
             !% --- continue
@@ -1673,6 +1713,9 @@ contains
                 (link%I(linkDn,li_culvertCode) > 0)      &
             ) then
             node%I(ii, ni_node_type) = nJm   
+
+            print *, 'switch G',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+
             return 
         else
             !% --- continue         
@@ -1685,10 +1728,15 @@ contains
               (link%I(linkDn,li_link_sub_type)  .eq. lType1Pump) &
             ) then
             node%I(ii, ni_node_type) = nJm 
+
+            print *, 'switch H',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+
             return
         else
             !% --- continue
         end if
+
+        ! print *, 'overflow ', node%R(ii,nr_OverflowHeightAboveCrown) ,  setting%Junction%InfiniteExtraDepthValue
 
         !% --- set nJM if junction can overflow
         if (((node%R(ii,nr_OverflowHeightAboveCrown)                                  &
@@ -1704,10 +1752,18 @@ contains
                 (node%R(ii,nr_OverflowHeightAboveCrown)                               &
                    > setting%Junction%InfiniteExtraDepthValue*meters_per_ft - 0.01d0) &
             ) ) then 
+
+                print *, 'no overflow ',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+
             !% --- continue, junction cannot overflow
         else
             !% --- junction can overflow, must be nJM
             node%I(ii, ni_node_type) = nJm
+
+            print *, 'switch I',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+
+
+
             return
         end if
 
@@ -1724,10 +1780,15 @@ contains
                 .or.                                           &
                 (link%I(linkUp,li_link_type) .eq. lOrifice)    &
                 ) then    
+
+                    print *, 'weir/orifice up with offset ',ii, trim(reverseKey(node%I(ii, ni_node_type)))
                 !% --- continue
             else
                 !% --- switch to nJm
                 node%I(ii, ni_node_type) = nJm
+
+                print *, 'switch J',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+
                 return
             end if
         end if
@@ -1739,9 +1800,15 @@ contains
                 (link%I(linkDn,li_link_type) .eq. lOrifice)    &
                 ) then    
                 !% --- continue
+
+                print *, 'weir/orifice dn with offset',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+
             else
                 !% --- switch to nJm
                 node%I(ii, ni_node_type) = nJm
+
+                print *, 'switch K',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+
                 return
             end if
         end if 
@@ -1759,6 +1826,9 @@ contains
                 .or.                                                         &
              (link%I(linkDn,li_link_type) .eq. lChannel)                     &
             ) then 
+
+            print *, 'channel ',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+
             return !% retain nJ2 
         else
             !% --- continue
@@ -1774,48 +1844,22 @@ contains
             .and.                                               &
             (link%I(linkDn,li_link_type)  .ne. lChannel)        &
             ) then
+
+            print *, 'closed conduit ',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+
             return !% retain nJ2
         else
             !% --- continue
         end if
 
-        ! !% nJ2 Weir face (relevant for channel connections to weirs)
-        ! !% --- an nJ2 weir face is retained without as long as
-        ! !%     the force is not in place. Note that nodes with
-        ! !%     storage already have nJM, so this does not affect
-        ! !%     them 
-        ! if  (( (link%I(linkUp,li_link_type) .eq. lWeir)         &
-        !       .or.                                              &
-        !        (link%I(linkDn,li_link_type) .eq. lWeir)         &
-        !      )                                                  &
-        !     .and. (.not. setting%Weir%ForceWeirNodesToJM)       &
-        !     ) then 
-        !     !% --- no action: retain nJ2
-        !     return
-        ! else
-        !     !% --- continue
-        ! end if       
-        
-        ! !% nJ2 Orifice face  (relevant for channel connections to orifice)
-        ! !% --- an nJ2 orifice face is retained without as long as
-        ! !%     the force is not in place. Note that nodes with
-        ! !%     storage already have nJM, so this does not affect
-        ! !%     them 
-        ! if  (( (link%I(linkUp,li_link_type) .eq. lOrifice)         &
-        !         .or.                                               &
-        !        (link%I(linkDn,li_link_type) .eq. lOrifice)         &
-        !        )                                                   &
-        !       .and. (.not. setting%Orifice%ForceOrificeNodesToJM)  &
-        !     ) then    
-        !     return !% no action: retain nJ2
-        ! else
-        !     !% --- continue
-        ! end if
-
         !% --- any case that reaches here must be nJM
             !% --- overflow must use nJM
         node%I(ii, ni_node_type) = nJm
         
+
+        ! print *, 'at end ',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+
+
     end subroutine init_node_nJ2_nJM
 !%
 !%==========================================================================

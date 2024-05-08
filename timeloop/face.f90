@@ -32,6 +32,7 @@ module face
 
     public :: face_pull_facedata_to_JBelem
     public :: face_push_JBelem_to_face
+    public :: face_push_diag_data_to_JBelem
     public :: face_push_elemdata_to_face
     public :: face_push_diag_adjacent_data_to_face
     public :: face_make_up_dn_identical
@@ -145,57 +146,125 @@ module face
 !%==========================================================================    
 !%==========================================================================
 !%
+    subroutine face_push_diag_data_to_JBelem (frCol, erCol)
+        !%------------------------------------------------------------------
+        !% Description
+        !% pushes face data from a diagnostic element into an adjacent JB
+        !% element.
+        !%------------------------------------------------------------------
+        !% Declarations
+            integer, intent(in) :: erCol, frCol !% column in elemR to be replaced by faceR data
+            integer, pointer    :: Npack, thisF(:), eup, edn
+            integer             :: ii
+        !%------------------------------------------------------------------
+        !% Preliminaries
+            Npack => npack_faceP(fp_JB_Diag_IorS)
+            thisF => faceP(1:Npack,fp_JB_Diag_IorS)
+            if (Npack < 1) return 
+        !%------------------------------------------------------------------
+        !%------------------------------------------------------------------
+        do ii=1,Npack
+            
+            ! print *, 'ii thisF ',ii, thisF(ii)
+
+            eup => faceI(thisF(ii),fi_Melem_uL)
+            edn => faceI(thisF(ii),fi_Melem_dL)
+            select case (elemI(eup,ei_elementType))
+                case (JB)
+                    elemR(eup,erCol) = faceR(thisF(ii),frCol)
+                case (weir, orifice, pump)
+                    elemR(edn,erCol) = faceR(thisF(ii),frCol)
+                case default 
+                    print *, 'CODE ERROR: unexpected case default'
+                    call util_crashpoint(709998)
+            end select
+        end do
+
+    end subroutine face_push_diag_data_to_JBelem
+!%
+!%==========================================================================    
+!%==========================================================================
+!%
     subroutine face_push_diag_adjacent_data_to_face (thisPCol)
         !%------------------------------------------------------------------
         !% Description
         !% Pushes element data into the fr_..._adjacent data fields
-        !% thsiPCol must be a packed set of diagnostic elements that are
-        !% adjacent to JB elements
+        !% This is similar to face_push_elemdata_to_face but is designed
+        !% for the elemSR, which must be handled one item at a time
+        !% do to the multi-use storage.
         !%------------------------------------------------------------------
         !% Declarations
             integer, intent(in) :: thisPCol
             integer, pointer    :: Npack, thisP(:)
             integer :: ii, kk, ff
         !%------------------------------------------------------------------
+            !print *, 'in face_push_diag_adjacent_data_to_face'
             Npack => npack_elemP(thisPCol)
             thisP => elemP(1:Npack,thisPCol)
             if (Npack < 1) return 
-        !%------------------------------------------------------------------   
+
+            !print *, 'Npack ',Npack, thisP
+        !%------------------------------------------------------------------ 
         !% --- cycle through a set of diagnostic elements
         do ii=1,Npack
             !% -- cycle through upstream and downstream faces
             do kk=1,2
-                if (kk==1) then !% -- upstream face
+                !print *, 'kk ',kk
+                if (kk==1) then !% -- upstream face of thisP(ii)
                     ff = elemI(thisP(ii),ei_Mface_uL)
-                    if (.not. faceYN(ff,fYN_isUpstreamJBFace)) cycle !% if not JB adjacent
+
+                   ! print *, 'faceYN 1 ', ff, faceYN(ff,fYN_isFaceDownstreamOfJB)
+
+                    if (.not. faceYN(ff,fYN_isFaceDownstreamOfJB)) cycle !% if not JB adjacent
+
                 else !% -- downstream face
                     ff = elemI(thisP(ii),ei_Mface_dL)
-                    if (.not. faceYN(ff,fYN_isDownstreamJBFace)) cycle !% if not JB adjacent
+
+                    !print *, 'faceYN 2 ',ff, faceYN(ff,fYN_isFaceUpstreamOfJB)
+
+                    if (.not. faceYN(ff,fYN_isFaceUpstreamOfJB)) cycle !% if not JB adjacent
+
+                   
                 end if
 
                 !% --- set the adjacent element value storage on the face
                 select case (elemI(thisP(ii),ei_elementType))
                     case (weir)
-                        faceR(ff,fr_EnergyHead_Adjacent) = elemR (thisP(ii),er_EnergyHead)
-                        faceR(ff,fr_Zcrest_Adjacent)     = elemSR(thisP(ii),esr_Weir_Zcrest)
-                        faceR(ff,fr_dQdH_Adjacent)       = elemSR(thisP(ii),esr_Weir_dQdHe)
+                        !faceR(ff,fr_EnergyHead_Adjacent) = elemR (thisP(ii),er_EnergyHead)
+                        !faceR(ff,fr_Zcrest_Adjacent)     = elemSR(thisP(ii),esr_Weir_Zcrest)
+                        if (kk==1) then
+                            faceR(ff,fr_dQdH_Adjacent)   = elemSR(thisP(ii),esr_Weir_dQdH_upstream)
+                        else
+                            faceR(ff,fr_dQdH_Adjacent)   = elemSR(thisP(ii),esr_Weir_dQdH_downstream)
+                        end if
+
+                        ! print *, ' '
+                        ! print *, 'face_push_diag_adjacent'
+                        ! print *, 'ff, thisP(ii) ',ff, thisP(ii)
+                        ! print *, 'weir dQdHe ',elemSR(thisP(ii),esr_Weir_dQdHe)
+                        ! print *, ' '
                         !% --- check if the elem data has either been pushed 
                         !%     to a shared face. if so then mark that face
                         if (faceYN(ff,fYN_isSharedFace)) then
                             faceYN(ff,fYN_isSharedFaceDiverged) = .true.
                         end if
                     case (orifice)
-                        faceR(ff,fr_EnergyHead_Adjacent) = elemR (thisP(ii),er_EnergyHead)
-                        faceR(ff,fr_Zcrest_Adjacent)     = elemSR(thisP(ii),esr_Orifice_Zcrest)
-                        faceR(ff,fr_dQdH_Adjacent)       = elemSR(thisP(ii),esr_Orifice_dQdHe)
+                        !faceR(ff,fr_EnergyHead_Adjacent) = elemR (thisP(ii),er_EnergyHead)
+                        !faceR(ff,fr_Zcrest_Adjacent)     = elemSR(thisP(ii),esr_Orifice_Zcrest)
+                        !faceR(ff,fr_dQdH_Adjacent)       = elemSR(thisP(ii),esr_Orifice_dQdHe)
+                        if (kk==1) then
+                            faceR(ff,fr_dQdH_Adjacent)   = elemSR(thisP(ii),esr_Orifice_dQdH_upstream)
+                        else
+                            faceR(ff,fr_dQdH_Adjacent)   = elemSR(thisP(ii),esr_Orifice_dQdH_downstream)
+                        end if
                         !% --- check if the elem data has either been pushed 
                         !%     to a shared face. if so then mark that face
                         if (faceYN(ff,fYN_isSharedFace)) then
                             faceYN(ff,fYN_isSharedFaceDiverged) = .true.
                         end if
                     case (outlet)
-                        faceR(ff,fr_EnergyHead_Adjacent) = elemR (thisP(ii),er_EnergyHead)
-                        faceR(ff,fr_Zcrest_Adjacent)     = elemSR(thisP(ii),esr_Outlet_Zcrest)
+                        !faceR(ff,fr_EnergyHead_Adjacent) = elemR (thisP(ii),er_EnergyHead)
+                        !faceR(ff,fr_Zcrest_Adjacent)     = elemSR(thisP(ii),esr_Outlet_Zcrest)
                         faceR(ff,fr_dQdH_Adjacent)       = elemSR(thisP(ii),esr_Outlet_dQdHe)
                         !% --- check if the elem data has either been pushed 
                         !%     to a shared face. if so then mark that face
@@ -203,8 +272,8 @@ module face
                             faceYN(ff,fYN_isSharedFaceDiverged) = .true.
                         end if
                     case (pump)
-                        faceR(ff,fr_EnergyHead_Adjacent) = elemR (thisP(ii),er_EnergyHead)
-                        faceR(ff,fr_Zcrest_Adjacent)     = elemSR(thisP(ii),esr_Pump_Zcrest)
+                        !faceR(ff,fr_EnergyHead_Adjacent) = elemR (thisP(ii),er_EnergyHead)
+                        !faceR(ff,fr_Zcrest_Adjacent)     = elemSR(thisP(ii),esr_Pump_Zcrest)
                         faceR(ff,fr_dQdH_Adjacent)       = elemSR(thisP(ii),esr_Pump_dQdHp)
                         !% --- check if the elem data has either been pushed 
                         !%     to a shared face. if so then mark that face
@@ -316,7 +385,7 @@ module face
         (thisColP, thisFaceCol, thisElemCol, isJBupstreamYN)
         !%------------------------------------------------------------------
         !% Description
-        !% Forces JB to face values without interpolation.
+        !% Forces JB of the JM to face values without interpolation.
         !% isJBupstreamYN decides whether the upstream or downstream JB
         !% are handled in a call. This must be called twice, using .true.
         !% and .false. on separate calls to handle all JB.
@@ -1637,7 +1706,8 @@ module face
     subroutine face_pull_facevalue_to_JB (frCol, erCol, fiIdx, JMidx, kstart)
         !%------------------------------------------------------------------
         !% Description:
-        !% Forces the face value onto the JB element
+        !% Forces the face value onto the JB element for all JB of a JM
+        !% with k=1 applying to upstream JB and k=2 for downstream.
         !%------------------------------------------------------------------
         integer, intent(in) :: frCol  !% column in faceR array for output
         integer, intent(in) :: erCol  !% column in elemR array for input

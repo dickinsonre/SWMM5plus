@@ -28,48 +28,135 @@ module weir_elements
     public :: weir_set_setting
 
     contains
-    !%==========================================================================
-    !% PUBLIC
-    !%==========================================================================
-    !%
+!%==========================================================================
+!% PUBLIC
+!%==========================================================================
+!%
     subroutine weir_toplevel  (eIdx)
         !%----------------------------------------------------------------------
         !% Description:
         !% Computes diagnostic flow and head delta across a weir.
+        !% Also computes dQ/dH for a weir adjacent to a JB junction
         !%----------------------------------------------------------------------
-            integer, intent(in) :: eIdx  !% must be a single element ID
+            integer, intent(in) :: eIdx !% eIdx must be a single element ID
+            integer, pointer    :: iupf, idnf
+            real(8)             :: HeadStore, FlowrateStore
             character(64) :: subroutine_name = 'weir_toplevel'
         !%----------------------------------------------------------------------
-        !% Preliminaries:
-            if (setting%Debug%File%weir_elements) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
+        !% Aliases:
+            iupf    => elemI(eIdx,ei_Mface_uL)
+            idnf    => elemI(eIdx,ei_Mface_dL)
         !%----------------------------------------------------------------------
+        !% Preliminaries:
+        !%----------------------------------------------------------------------
+
+        !% --- if is JB is upstream of weir, compute the weir flowrate for
+        !%     head increase of magnitude delta
+        if (elemYN(eIdx,eYN_isElementDownstreamOfJB)) then 
+            !print *, 'in isElementDownstreamOfJB'
+            !% --- temporary storage
+            HeadStore     = faceR(iupf,fr_Head_d)
+            FlowrateStore = elemR(eIdx,er_Flowrate)
+            !% --- upstream perturbation of head
+            faceR(iupf,fr_Head_d) = faceR(iupf,fr_Head_d) + setting%Weir%delta
+            !% --- compute weir flow at delta increment for upstream head
+            call weir_compute (eIdx, .true.)
+            !% --- temporary store of the flowrate for later dQdH compute
+            elemSR(eIdx,esr_Weir_dQdH_upstream) = elemR(eIdx,er_Flowrate)
+            !% --- reverse temporary storage
+            faceR(iupf,fr_Head_d)   = HeadStore
+            elemR(eIdx,er_Flowrate) = FlowrateStore
+        end if
+
+        !% --- if is JB is downstream, compute the weir flowrate for head increase of delta
+        if (elemYN(eIdx,eYN_isElementUpstreamOfJB)) then 
+            !print *, 'in isElementUpstreamOfJB'
+            !% --- temporary storage
+            HeadStore     = faceR(idnf,fr_Head_u)
+            FlowrateStore = elemR(eIdx,er_Flowrate)
+            !% --- downstream perturbation of head
+            faceR(idnf,fr_Head_u) = faceR(idnf,fr_Head_u) + setting%Weir%delta
+            !% --- compute weir flow at delta increament for lower downstream head
+            call weir_compute (eIdx, .true.)
+            !% --- temporary store of the flowrate forlater dQdH compute
+            elemSR(eIdx,esr_Weir_dQdH_downstream) = elemR(eIdx,er_Flowrate)
+            !% --- reverse temporary storage
+            faceR(idnf,fr_Head_u)   = HeadStore
+            elemR(eIdx,er_Flowrate) = FlowrateStore
+        end if
+
+        !% --- compute standard weir flow
+        call weir_compute (eIdx, .false.)
+
+        !% --- compute dQdH for an upstream JB element
+        !%     esr_Weir_dQdH_upstream  stores the delta perturbed flowrate
+        if (elemYN(eIdx,eYN_isElementDownstreamOfJB)) then 
+            elemSR(eIdx,esr_Weir_dQdH_upstream)                                 &
+             =  (elemSR(eIdx,esr_Weir_dQdH_upstream) - elemR(eIdx,er_Flowrate)) &
+                / setting%Weir%delta
+        end if
+
+        !% --- compute dQdH for a downstream JB element
+        !%     esr_Weir_dQdH_downstream  stores the delta perturbed flowrate
+        if (elemYN(eIdx,eYN_isElementUpstreamOfJB)) then 
+            elemSR(eIdx,esr_Weir_dQdH_downstream)                                 &
+             =  (elemSR(eIdx,esr_Weir_dQdH_downstream) - elemR(eIdx,er_Flowrate)) &
+                / setting%Weir%delta
+        end if
+
+
+    end subroutine weir_toplevel    
+!%
+!%==========================================================================
+!%==========================================================================   
+!%
+    subroutine weir_compute (eIdx, isdelta)
+        !%------------------------------------------------------------------
+        !% Description:
+        !% Computes weir equation on element eIdx
+        !% is "isdelta" true then this is a computation of delta for dQdH
+        !% puproses and only the flow is returned.
+        !%------------------------------------------------------------------
+        !% Declarations
+            integer, intent(in) :: eIdx
+            logical, intent(in) :: isdelta
+        !%------------------------------------------------------------------
+        !%------------------------------------------------------------------
 
         !% --- NOTE: fractional opening is already being set in control_update_setting() 
 
-        !% --- get the flow direction and element head
+        !% --- get the flow direction and set the element head
+        !%     depends on heads on faces (only)
         call  common_head_and_flowdirection_singular &
             (eIdx, esr_Weir_Zcrest, esr_Weir_NominalDownstreamHead, esi_Weir_FlowDirection)
+
+            ! print *, 'Flow Direction ',elemSI(eIdx,esi_Weir_FlowDirection)
+            ! print *, 'Head           ',elemR(eIdx,er_Head)
+            ! print *, 'NominalDS head ',elemSR(eIdx,esr_Weir_NominalDownstreamHead)
+            ! print *, 'is surcharged  ',elemYN(eIdx,eYN_isSurcharged)
+            ! print *, 'Zcrown face    ',faceR(101,fr_Zcrown_d),faceR(101,fr_Zcrown_u)
 
         !% --- find flow through weirs
         call weir_flow (eidx) 
         
-        !% --- update weir geometry from head
-        call weir_geometry_update (eIdx)
-        
-        !% --- update velocity from flowrate and area
-        call common_velocity_from_flowrate_singular (eIdx)
+        !% --- functions below are not needed in the dQdH computation
+        if (.not. isdelta) then
 
-        !% --- compute downstream energy head
-        call common_outflow_energyhead_singular &
-         (eIdx, esr_Weir_NominalDownstreamHead, esi_Weir_FlowDirection)
-        
-        !%----------------------------------------------------------------------
-        !% Closing
-            if (setting%Debug%File%weir_elements)  &
-                write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
+            !% --- limit weir flow for stability
+            call common_flowchange_limiter_singular (eIdx)
 
-    end subroutine weir_toplevel    
+            !% --- update weir geometry from head
+            call weir_geometry_update (eIdx)
+            
+            !% --- update velocity from flowrate and area
+            call common_velocity_from_flowrate_singular (eIdx)
+
+            !% --- compute downstream energy head
+            call common_outflow_energyhead_singular &
+            (eIdx, esr_Weir_NominalDownstreamHead, esi_Weir_FlowDirection)
+
+        end if
+    end subroutine weir_compute
 !%
 !%==========================================================================
 !%==========================================================================   
@@ -116,7 +203,7 @@ module weir_elements
 !% PRIVATE
 !%==========================================================================       
 !%  
-     subroutine weir_effective_head_delta (eIdx)
+    subroutine weir_effective_head_delta (eIdx)
         !%------------------------------------------------------------------
         !% Description:
         !% Computes the effective head difference flowing over the top of a weir
@@ -190,7 +277,7 @@ module weir_elements
         !% find the flow in weir elements
         !%------------------------------------------------------------------
         !% Declarations
-            integer, intent(in) :: eIdx !% must be single element ID
+            integer, intent(in) :: eIdx !% eIdx must be single element ID
             integer, pointer    :: SpecificWeirType
             logical, pointer    :: isSurcharged
 
@@ -244,9 +331,9 @@ module weir_elements
         !% Computes surcharge flow with weir
         !%------------------------------------------------------------------
         !% Declarations
-            integer, intent(in) :: eIdx !% must be single element ID
+            integer, intent(in) :: eIdx !% eIdx must be single element ID
             integer, pointer :: FlowDirection
-            real(8), pointer :: Area, Flowrate, EffectiveFullDepth, Depth, dQdH 
+            real(8), pointer :: Area, Flowrate, EffectiveFullDepth, Depth !, dQdH 
             real(8), pointer :: EffectiveHeadDelta, grav
             logical, pointer :: hasFlapGate
             real(8) :: CoeffOrifice
@@ -254,7 +341,7 @@ module weir_elements
         !% Aliases
             Area               => elemR (eIdx,er_Area)
             Depth              => elemR (eIdx,er_Depth)
-            dQdH               => elemSR(eIdx,esr_Weir_dQdHe)
+            !dQdH               => elemSR(eIdx,esr_Weir_dQdHe)
             Flowrate           => elemR (eIdx,er_Flowrate)
             hasFlapGate        => elemYN(eiDx,eYN_hasFlapGate) 
             FlowDirection      => elemSI(eIdx,esi_Weir_FlowDirection)
@@ -281,12 +368,13 @@ module weir_elements
             Flowrate = FlowDirection * CoeffOrifice * sqrt(EffectiveHeadDelta)
         end if
 
-        !% --- find the dQ/dH
-        if (EffectiveFullDepth > zeroR) then
-            dQdH = onehalfR * Flowrate / EffectiveFullDepth
-        else
-            dQdH = zeroR
-        end if
+        ! !% --- find the dQ/dH
+        ! if (EffectiveFullDepth > zeroR) then
+        !     !dQdH = onehalfR * Flowrate / EffectiveFullDepth
+        !     dQdH = Flowrate / EffectiveFullDepth
+        ! else
+        !     dQdH = zeroR
+        ! end if
 
     end subroutine weir_surcharge_flow
 !%
@@ -304,31 +392,34 @@ module weir_elements
             logical, intent(in) :: ApplySubmergenceCorrection, ApplyHeadlossCorrection
 
             integer, pointer    :: SpecificWeirType, EndContractions, FlowDirection
+            integer, pointer    :: fup, fdn
 
-            real(8), pointer    :: Flowrate, Head, EffectiveHeadDelta, CurrentSetting, fullDepth, dQdH
+            real(8), pointer    :: Flowrate, Head, EffectiveHeadDelta, CurrentSetting, fullDepth !, dQdH
             real(8), pointer    :: RectangularBreadth, TrapezoidalBreadth
             real(8), pointer    :: TriangularSideSlope, TrapezoidalLeftSlope, TrapezoidalRightSlope
             real(8), pointer    :: CoeffTriangular, CoeffRectangular
             real(8), pointer    :: WeirExponent, WeirExponentVNotch
             real(8), pointer    :: WeirContractionFactor, VillemonteExponent, WeirCrestExponent
-            real(8), pointer    :: NominalDsHead, Zcrest
+            real(8), pointer    :: NominalDsHead, Zcrest, Zbottom, dt, FlowrateN0
 
             logical, pointer    :: hasFlapGate
 
             real(8) :: CrestLength, SubCorrectionTriangular, SubCorrectionRectangular
-            real(8) :: FlowRect, FlowTriang, ratio
+            real(8) :: FlowRect, FlowTriang, ratio, dQlimit, dH
         !%------------------------------------------------------------------
         !% Aliases:
             SpecificWeirType      => elemSI(eIdx,esi_Weir_SpecificType)
             EndContractions       => elemSI(eIdx,esi_Weir_EndContractions)
             FlowDirection         => elemSI(eIdx,esi_Weir_FlowDirection)
-            dQdH                  => elemSR(eIdx,esr_Weir_dQdHe)
+            !dQdH                  => elemSR(eIdx,esr_Weir_dQdHe)
             Head                  => elemR (eIdx,er_Head)
             Flowrate              => elemR (eIdx,er_Flowrate)
+            FlowrateN0            => elemR (eIdx,er_Flowrate_N0)
             CurrentSetting        => elemR (eIdx,er_Setting)
             hasFlapGate           => elemYN(eIdx,eYN_hasFlapGate)
             EffectiveHeadDelta    => elemSR(eIdx,inCol)
             Zcrest                => elemSR(eIdx,esr_Weir_Zcrest)
+            Zbottom               => elemR(eIdx,er_Zbottom)
             RectangularBreadth    => elemSR(eIdx,esr_Weir_RectangularBreadth)
             TrapezoidalBreadth    => elemSR(eIdx,esr_Weir_TrapezoidalBreadth)
             TriangularSideSlope   => elemSR(eIdx,esr_Weir_TriangularSideSlope)
@@ -338,6 +429,7 @@ module weir_elements
             CoeffRectangular      => elemSR(eIdx,esr_Weir_Rectangular)
             NominalDsHead         => elemSR(eIdx,esr_Weir_NominalDownstreamHead)
             FullDepth             => elemSR(eIdx,esr_Weir_FullDepth)
+            dt                    => setting%Time%Hydraulics%Dt
         !%----------------------------------------------------------------------
         !% --- initializing default local Villemonte submergence correction factors as 1
         !%     These are changed below if needed
@@ -345,7 +437,11 @@ module weir_elements
         SubCorrectionRectangular = oneR
 
         !% initialized dQ/dH to zero
-        dQdH =  zeroR
+        !dQdH =  zeroR
+
+        fup => elemI(eIdx,ei_Mface_uL)
+        fdn => elemI(eIdx,ei_Mface_dL)
+        dH  =  faceR(fup,fr_Head_d) - faceR(fdn,fr_Head_u)
          
         select case (SpecificWeirType)
             case (transverse_weir)
@@ -365,12 +461,12 @@ module weir_elements
                     Flowrate = real(FlowDirection,8) * CrestLength * CoeffRectangular  * (EffectiveHeadDelta ** WeirExponent)
                 end if
 
-                !% --- find the dQ/dH 
-                if (EffectiveHeadDelta > zeroR) then
-                    dQdH = WeirExponent * Flowrate/EffectiveHeadDelta 
-                else
-                    dQdH = zeroR
-                end if
+                ! !% --- find the dQ/dH 
+                ! if (EffectiveHeadDelta > zeroR) then
+                !     dQdH = WeirExponent * Flowrate/EffectiveHeadDelta 
+                ! else
+                !     dQdH = zeroR
+                ! end if
 
                 !% --- correction factor for nominal downstream submergence
                 if ((NominalDsHead > Zcrest) .and. (ApplySubmergenceCorrection)) then
@@ -402,11 +498,11 @@ module weir_elements
                     end if
 
                     !% --- find the dQ/dH
-                    if (EffectiveHeadDelta > zeroR) then
-                        dQdH = WeirExponent * Flowrate/EffectiveHeadDelta 
-                    else
-                        dQdH = zeroR
-                    endif
+                    !if (EffectiveHeadDelta > zeroR) then
+                        !dQdH = WeirExponent * Flowrate/EffectiveHeadDelta 
+                    !else
+                        !dQdH = zeroR
+                    !endif
 
                     !% --- correction factor for nominal downstream submergence
                     if ((NominalDsHead > Zcrest) .and. (ApplySubmergenceCorrection)) then
@@ -428,12 +524,12 @@ module weir_elements
                     Flowrate = real(FlowDirection,8) * CrestLength * &
                         CoeffRectangular  * (EffectiveHeadDelta ** WeirExponent)
                     
-                    !% -- find the dQ/dH
-                    if (EffectiveHeadDelta > zeroR) then
-                        dQdH = WeirExponent * Flowrate/EffectiveHeadDelta
-                    else
-                        dQdH = zeroR
-                    end if
+                    ! !% -- find the dQ/dH
+                    ! if (EffectiveHeadDelta > zeroR) then
+                    !     dQdH = WeirExponent * Flowrate/EffectiveHeadDelta
+                    ! else
+                    !     dQdH = zeroR
+                    ! end if
 
                     if ((NominalDsHead > Zcrest) .and. (ApplySubmergenceCorrection)) then
                         ratio = (NominalDsHead - Zcrest) / (Head - Zcrest)      
@@ -445,6 +541,7 @@ module weir_elements
                 endif  
 
             case (trapezoidal_weir)
+
                 WeirExponentVNotch    => Setting%Weir%VNotch%WeirExponent
                 WeirExponent          => Setting%Weir%Trapezoidal%WeirExponent
                 WeirContractionFactor => Setting%Weir%Trapezoidal%WeirContractionFactor
@@ -457,6 +554,7 @@ module weir_elements
 
                 FlowRect    = real(FlowDirection,8) * (CoeffRectangular * CrestLength &
                             * (EffectiveHeadDelta ** WeirExponent))
+
                 FlowTriang  = real(FlowDirection,8) * (CoeffTriangular * ((TrapezoidalLeftSlope &
                             + TrapezoidalRightSlope) / twoR) * (EffectiveHeadDelta ** WeirExponentVNotch))
 
@@ -471,16 +569,27 @@ module weir_elements
                                 + TrapezoidalRightSlope) / twoR) * (EffectiveHeadDelta ** WeirExponentVNotch))
                 end if
 
-                !% --- find the dQ/dH
-                if (EffectiveHeadDelta > zeroR) then
-                    dQdH = WeirExponent * FlowRect/EffectiveHeadDelta + WeirExponentVNotch * FlowTriang/EffectiveHeadDelta 
-                else
-                    dQdH = zeroR
-                end if
+                ! !% --- find the dQ/dH
+                ! if (EffectiveHeadDelta > zeroR) then
+                !     dQdH = WeirExponent * FlowRect/EffectiveHeadDelta + WeirExponentVNotch * FlowTriang/EffectiveHeadDelta 
+                ! else
+                !     dQdH = zeroR
+                ! end if
 
                 !% --- correction factor for nominal downstream submergence
                 if ((NominalDsHead > Zcrest) .and. (ApplySubmergenceCorrection)) then
                     ratio = (NominalDsHead - Zcrest) / (Head - Zcrest)   
+                    
+                    ! print *, 'Ratio ',ratio
+                    ! print *,  'exponents ', WeirExponent, VillemonteExponent
+                    ! print *, 'HEAD, zcrest         ',Head, Zcrest
+                    ! print *, 'nominalHead, zbottom ',NominalDSHead, Zbottom
+                    ! print *, 'head - zbottom   ',  (Head - Zbottom)
+                    ! print *, 'Zcrest - zbottom ',(Zcrest - Zbottom)
+                    ! print *, 'NominalDS - Zbott',(NominalDSHead - Zbottom) 
+                    ! print *, 'Depth over crest / Crest ', &
+                    !  (Head - Zbottom)/(Zcrest - Zbottom), (NominalDSHead - Zbottom) / (Zcrest - Zbottom)
+
                     SubCorrectionRectangular = ((oneR - (ratio ** WeirExponent)) **  VillemonteExponent)
                     SubCorrectionTriangular  = ((oneR - (ratio ** WeirExponentVNotch)) ** VillemonteExponent)
                 endif
@@ -490,6 +599,57 @@ module weir_elements
                 FlowTriang = SubCorrectionTriangular  * FlowTriang
                 Flowrate   = FlowRect + FlowTriang
                       
+
+                ! print *, 'Submergence correction '
+                ! print *, 'FlowRect     ',FlowRect
+                ! print *, 'Flow Triang  ', FlowTriang
+                ! print *, 'flowrate     ',Flowrate, FlowrateN0
+
+                ! !% --- require zero flow if reversing
+                ! if ((Flowrate < zeroR) .and. (FlowrateN0 > zeroR)) then 
+                !     Flowrate = zeroR 
+                ! endif 
+                ! if ((Flowrate > zeroR) .and. (FlowrateN0 < zeroR)) then 
+                !     Flowrate = zeroR 
+                ! end if
+
+                ! if (Flowrate .ne. zeroR) then 
+
+                ! if (istep .ne. zeroI) then
+
+                !     !% --- limit flowrate to prevent unstable oscillations during adjustment
+                !     !%     for unsteady flows.
+                !     if (dH .ge. zeroR) then 
+                !         !% --- the increase dQ that would eliminate the volume associated with the
+                !         !%     actual head delta
+                !         dQlimit = 0.1d0 * dH * faceR(fup,fr_Length_Adjacent) * faceR(fup,fr_Topwidth_Adjacent) / dt
+                !         if ((Flowrate - FlowrateN0) > dQlimit) then 
+                !             Flowrate = FlowrateN0 + dQlimit 
+                !         else
+                !             !% no action
+                !         end if
+                !     else
+                !         dQlimit = 0.1d0 * dH * faceR(fdn,fr_Length_Adjacent) * faceR(fdn,fr_Topwidth_Adjacent) / dt
+                !         if ((Flowrate - FlowrateN0) < dQlimit) then 
+                !             Flowrate = FlowrateN0 + dQlimit 
+                !         else
+                !             !% no action 
+                !         end if
+                !     end if
+
+                ! end if
+
+                ! end if
+
+                ! print *, ' '
+                ! print *, 'limited flowrate'
+                ! print *, 'DH ',dH 
+                ! print *, 'area ',faceR(fdn,fr_Length_Adjacent) * faceR(fdn,fr_Topwidth_Adjacent)
+                ! print *, 'dQlimit ',dQlimit
+                ! print *, 'dQ      ',Flowrate - FlowrateN0
+                ! print *, 'Flowrate',Flowrate
+
+
             case (vnotch_weir)
                 WeirExponent          => Setting%Weir%VNotch%WeirExponent
                 WeirContractionFactor => Setting%Weir%VNotch%WeirContractionFactor
@@ -507,11 +667,11 @@ module weir_elements
                 end if
 
                 !% --- find the dQ/dH
-                if (EffectiveHeadDelta > zeroR) then
-                    dQdH = WeirExponent * Flowrate/EffectiveHeadDelta 
-                else
-                    dQdH = zeroR
-                end if
+                ! if (EffectiveHeadDelta > zeroR) then
+                !     dQdH = WeirExponent * Flowrate/EffectiveHeadDelta 
+                ! else
+                !     dQdH = zeroR
+                ! end if
 
                 !% --- correction factor for nominal downstream submergence
                 if ((NominalDsHead > Zcrest) .and. (ApplySubmergenceCorrection)) then
@@ -527,7 +687,7 @@ module weir_elements
                 print *, 'which has key ',trim(reverseKey(specificWeirType))
                 call util_crashpoint(2229587)
 
-        end Select
+        end select
 
     end subroutine weir_non_surcharge_flow
 !%
@@ -586,7 +746,7 @@ module weir_elements
             Depth = Zcrown - Zcrest
         endif
 
-        !% --- find offset of weir cresr due to control setting
+        !% --- find offset of weir crest due to control setting
         z  = (oneR - CurrentSetting) * FullDepth
         zY = min(z+Depth,FullDepth) 
         
@@ -602,7 +762,7 @@ module weir_elements
             
             case (trapezoidal_weir)
                 Area      = (TrapezoidalBreadth + onehalfR * (TrapezoidalLeftSlope + TrapezoidalRightSlope) * zY) * zY &
-                        - (TrapezoidalBreadth + onehalfR * (TrapezoidalLeftSlope + TrapezoidalRightSlope) * z) * z 
+                          - (TrapezoidalBreadth + onehalfR * (TrapezoidalLeftSlope + TrapezoidalRightSlope) * z) * z 
                 Volume    = Area * Length
                 Topwidth  = TrapezoidalBreadth + Depth &
                             * (TrapezoidalLeftSlope + TrapezoidalRightSlope)

@@ -2432,19 +2432,19 @@ contains
         end if
 
     !% fp_JB_all
-        !% --- all faces with JB on eitehr side
+        !% --- all faces with JB on either side
         ptype => col_faceP(fp_JB_all)
         npack => npack_faceP(ptype)
         npack = count(                                           &
-                      faceYN(1:Nfaces,fYN_isUpstreamJBFace)      &
+                      faceYN(1:Nfaces,fYN_isFaceUpstreamOfJB)      &
                         .or.                                     &
-                      faceYN(1:Nfaces,fYN_isDownstreamJBFace)    &
+                      faceYN(1:Nfaces,fYN_isFaceDownstreamOfJB)    &
                       )
         if (npack > 0) then 
             faceP(1:npack,ptype) = pack(fIdx,                    &
-                      faceYN(1:Nfaces,fYN_isUpstreamJBFace)      &
+                      faceYN(1:Nfaces,fYN_isFaceUpstreamOfJB)      &
                         .or.                                     &
-                      faceYN(1:Nfaces,fYN_isDownstreamJBFace)    &
+                      faceYN(1:Nfaces,fYN_isFaceDownstreamOfJB)    &
                       )
         end if
 
@@ -2454,15 +2454,15 @@ contains
         ptype => col_faceP(fp_notJB_all)
         npack => npack_faceP(ptype)
         npack = count(                                                   &
-                        (.not. faceYN(1:Nfaces,fYN_isUpstreamJBFace))    &
+                        (.not. faceYN(1:Nfaces,fYN_isFaceUpstreamOfJB))    &
                             .and.                                        &
-                        (.not. faceYN(1:Nfaces,fYN_isDownstreamJBFace) ) &
+                        (.not. faceYN(1:Nfaces,fYN_isFaceDownstreamOfJB) ) &
                         )
         if (npack > 0) then 
             faceP(1:npack,ptype) = pack(fIdx,                             &
-                        (.not. faceYN(1:Nfaces,fYN_isUpstreamJBFace))     &
+                        (.not. faceYN(1:Nfaces,fYN_isFaceUpstreamOfJB))     &
                         .and.                                             &
-                        (.not. faceYN(1:Nfaces,fYN_isDownstreamJBFace) ) &
+                        (.not. faceYN(1:Nfaces,fYN_isFaceDownstreamOfJB) ) &
                         )
         end if
 
@@ -2471,17 +2471,17 @@ contains
         ptype => col_faceP(fp_JBorDiag_all)
         npack => npack_faceP(ptype)
         npack = count(                                             &
-                        (faceYN(1:Nfaces,fYN_isUpstreamJBFace))    &
+                        (faceYN(1:Nfaces,fYN_isFaceUpstreamOfJB))    &
                         .or.                                       &
-                        (faceYN(1:Nfaces,fYN_isDownstreamJBFace) ) &
+                        (faceYN(1:Nfaces,fYN_isFaceDownstreamOfJB) ) &
                         .or.                                       &
                         (faceYN(1:Nfaces,fYN_isDiag_adjacent_all)) &
                       )
         if (npack > 0) then 
             faceP(1:npack,ptype) = pack(fIdx,                      &
-                        (faceYN(1:Nfaces,fYN_isUpstreamJBFace))    &
+                        (faceYN(1:Nfaces,fYN_isFaceUpstreamOfJB))    &
                         .or.                                       &
-                        (faceYN(1:Nfaces,fYN_isDownstreamJBFace) ) &
+                        (faceYN(1:Nfaces,fYN_isFaceDownstreamOfJB) ) &
                         .or.                                       &
                         (faceYN(1:Nfaces,fYN_isDiag_adjacent_all)) &
                        )
@@ -2587,7 +2587,7 @@ contains
         faceYN(faceP(1:npack, ptype),fYN_isDiag_adjacent_interior) = .true.
 
     !% fp_JB_IorS
-        !% --- faces that are adjacent to a JM
+        !% --- faces that are adjacent to a JB
         ptype => col_faceP(fp_JB_IorS)
         npack => npack_faceP(ptype)
 
@@ -2607,6 +2607,55 @@ contains
                    .or.  &
                     (elemI(eup,ei_elementType) == JB) &
                 ) )
+        end if
+
+    !% fp_JB_Diag_IorS 
+        !% --- faces that are between a JB and a Diag
+        ptype => col_faceP(fp_JB_Diag_IorS)
+        npack => npack_faceP(ptype)
+
+        npack =  count( &
+            faceYN(1:Nfaces,fYN_isInteriorFace)   &
+                .and. &
+                ( &
+                    (   (elemI(edn,ei_elementType) == JB) &
+                        .and.  &
+                        (   (elemI(eup,ei_HeqType) == diagnostic) &
+                            .or.  &
+                            (elemI(eup,ei_QeqType) == diagnostic) &
+                        ) &
+                    ) &
+                    .or. & 
+                    (   (elemI(eup,ei_elementType) == JB) &
+                        .and.  &
+                        (   (elemI(edn,ei_HeqType) == diagnostic) &
+                            .or.  &
+                            (elemI(edn,ei_QeqType) == diagnostic) &
+                        ) &
+                    ) &
+                ) )
+
+        if (npack > 0) then 
+            faceP(1:npack, ptype) = pack( fIdx,      &
+                faceYN(1:Nfaces,fYN_isInteriorFace)   &
+                    .and. &
+                    ( &
+                        (   (elemI(edn,ei_elementType) == JB) &
+                            .and.  &
+                            (   (elemI(eup,ei_HeqType) == diagnostic) &
+                                .or.  &
+                                (elemI(eup,ei_QeqType) == diagnostic) &
+                            ) &
+                        ) &
+                        .or. & 
+                        (   (elemI(eup,ei_elementType) == JB) &
+                            .and.  &
+                            (   (elemI(edn,ei_HeqType) == diagnostic) &
+                                .or.  &
+                                (elemI(edn,ei_QeqType) == diagnostic) &
+                            ) &
+                        ) &
+                    ) )
         end if
 
     !% fp_J1

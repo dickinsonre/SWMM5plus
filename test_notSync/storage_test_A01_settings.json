@@ -1,0 +1,14 @@
+{
+    "JSON_FoundFileYN" : true,
+    "JSON_CheckAllInputYN" : false,
+    "CaseName" : {
+        "Long"  : "storage",
+        "Short" : "storage"
+    },
+    "Discretization" : {
+        "NominalElemLength" : 50.00
+    },
+    "Solver" : {
+        "MomentumSourceMethod" : "T20"
+    }
+}

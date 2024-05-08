@@ -1200,6 +1200,8 @@ module geometry
         !% When the main head is below the branch, this sets the
         !% branch head to the bottom elevation plus a depth implied
         !% by a Froude number of one.
+        !% This does not assign JB flowrate, but doesn modify velocity in case of
+        !% a waterfall (thus, waterfall velocity and flowrate are inconsistent after this)
         !%------------------------------------------------------------------
         !%
         !% Note that the JB works in an inverse form from the other geometry computations.
@@ -1305,7 +1307,11 @@ module geometry
 
                         select case (setting%Junction%HeadMethodJB)
                         case (use_JM)
-                            head(tB) = head(tM)
+                            head(tB) = head(tM)  !% causes instabilities
+                            print *, 'USER CONFIGURATION ERROR'
+                            print *, 'setting.Junction.HeadMethodJB = use_JM is not working'
+                            print *, 'please use linear_interp'
+                            call util_crashpoint(6209872)
                         case (linear_interp)
                             !% --- head(tB) is linear interp from face value.
                             if (isUpBranch) then 

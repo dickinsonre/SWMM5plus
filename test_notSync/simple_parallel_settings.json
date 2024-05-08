@@ -1,0 +1,25 @@
+{
+        "JSON_FoundFileYN" : true,
+        "JSON_CheckAllInputYN" : false,
+        "CaseName" : {
+            "Long"  : "test",
+            "Short" : "test"
+    },
+        "Discretization" : {
+            "NominalElemLength" : 10.00
+    },
+        "Partitioning" : {
+            "PartitioningMethod" : "bquick",
+            "PhantomLinkAdjust"  : true
+    },    
+    "Output" : {
+        "StoredLevels" : 2000,
+        "CommandLine" : {
+            "quietYN" : false,
+            "interval" : 1000
+        }
+    },
+    "PreissmannSlot" : {
+        "Method"         : "DynamicSlot"
+    }
+}

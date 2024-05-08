@@ -57,6 +57,11 @@ module pump_elements
             FlowRate => elemR(eIdx,er_Flowrate)
             PSetting => elemR(eIdx,er_Setting)
         !%-------------------------------------------------------------------
+
+
+              !% NOTE MAY NEED TO INCLUDE THE DQDH APPROACH OF WEIRS
+
+
         !% -- get the head and flow direction through pumps
         call common_head_and_flowdirection_singular &
             (eIdx, esr_Pump_Zcrest, esr_Pump_NominalDownstreamHead, esi_Pump_FlowDirection)
@@ -86,6 +91,10 @@ module pump_elements
 
         !% --- prohibit reverse flow through pump
         if (FlowRate < zeroR) FlowRate = zeroR 
+
+        !% --- limit pump flow for stability (NOT SURE IF THIS IS NEEDED)
+        !call common_flowchange_limiter_singular (eIdx)
+
 
         !% --- compute downstream energy head
         call common_outflow_energyhead_singular &

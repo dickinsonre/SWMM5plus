@@ -1,0 +1,166 @@
+[TITLE]
+;;Project Title/Notes
+
+[OPTIONS]
+;;Option             Value
+FLOW_UNITS           CMS
+INFILTRATION         HORTON
+FLOW_ROUTING         DYNWAVE
+LINK_OFFSETS         ELEVATION
+MIN_SLOPE            0
+ALLOW_PONDING        NO
+SKIP_STEADY_STATE    NO
+
+START_DATE           09/27/2022
+START_TIME           00:00:00
+REPORT_START_DATE    09/27/2022
+REPORT_START_TIME    00:00:00
+END_DATE             09/27/2022
+END_TIME             03:48:36
+SWEEP_START          01/01
+SWEEP_END            12/31
+DRY_DAYS             0
+REPORT_STEP          00:00:10
+WET_STEP             00:05:00
+DRY_STEP             01:00:00
+ROUTING_STEP         0:00:10 
+RULE_STEP            00:00:00
+
+INERTIAL_DAMPING     NONE
+NORMAL_FLOW_LIMITED  BOTH
+FORCE_MAIN_EQUATION  H-W
+SURCHARGE_METHOD     SLOT
+VARIABLE_STEP        0.75
+LENGTHENING_STEP     0
+MIN_SURFAREA         1.167
+MAX_TRIALS           8
+HEAD_TOLERANCE       0.0015
+SYS_FLOW_TOL         5
+LAT_FLOW_TOL         5
+MINIMUM_STEP         0.5
+THREADS              1
+
+[EVAPORATION]
+;;Data Source    Parameters
+;;-------------- ----------------
+CONSTANT         0.0
+DRY_ONLY         NO
+
+[JUNCTIONS]
+;;Name           Elevation  MaxDepth   InitDepth  SurDepth   Aponded   
+;;-------------- ---------- ---------- ---------- ---------- ----------
+BreakPressureTank 28.88      15         0.3        0          0         
+Shaft8           5.5        20         0.41       0          0         
+Shaft14          3.52       20         0.41       0          0         
+Shaft17          2.55       20         1.05       0          0         
+HobsonvillePS    1.71       25         0.45       0          0         
+DN600ValveD      2.55       20         0.985      0          0         
+PumpDischarge    2.0        3.0        0          0          0         
+
+[OUTFALLS]
+;;Name           Elevation  Type       Stage Data       Gated    Route To        
+;;-------------- ---------- ---------- ---------------- -------- ----------------
+OF1              1.5        FREE                        NO                       
+OF2              0          FREE                        NO                       
+
+[CONDUITS]
+;;Name           From Node        To Node          Length     Roughness  InOffset   OutOffset  InitFlow   MaxFlow   
+;;-------------- ---------------- ---------------- ---------- ---------- ---------- ---------- ---------- ----------
+C1               BreakPressureTank Shaft8           1200       0.013      28.88      7.5        0.48       0         
+C2               Shaft8           Shaft14          1777       0.013      5.5        3.52       0.48       0         
+C3               Shaft14          Shaft17          873        0.013      3.52       2.55       0.48       0         
+C4               DN600ValveD       HobsonvillePS    106.2      0.015      2.55       2.24       0.48       0         
+C5               PumpDischarge    OF1              100        0.013      2          1.5        0          0         
+
+[PUMPS]
+;;Name           From Node        To Node          Pump Curve       Status   Sartup Shutoff 
+;;-------------- ---------------- ---------------- ---------------- ------ -------- --------
+Hobsonville      HobsonvillePS    PumpDischarge    Hobsonville      ON       0        0       
+
+[ORIFICES]
+;;Name           From Node        To Node          Type         Offset     Qcoeff     Gated    CloseTime 
+;;-------------- ---------------- ---------------- ------------ ---------- ---------- -------- ----------
+DN600Valve       Shaft17          DN600ValveD       SIDE         2.55       0.65       NO       0.0833    
+
+[WEIRS]
+;;Name           From Node        To Node          Type         CrestHt    Qcoeff     Gated    EndCon   EndCoeff   Surcharge  RoadWidth  RoadSurf   Coeff. Curve
+;;-------------- ---------------- ---------------- ------------ ---------- ---------- -------- -------- ---------- ---------- ---------- ---------- ----------------
+SpillWay         HobsonvillePS    OF2              TRANSVERSE   4.000      1.86       NO       0        0          YES       
+
+[XSECTIONS]
+;;Link           Shape        Geom1            Geom2      Geom3      Geom4      Barrels    Culvert   
+;;-------------- ------------ ---------------- ---------- ---------- ---------- ---------- ----------
+C1               CIRCULAR     2.1              0          0          0          1                    
+C2               CIRCULAR     2.1              0          0          0          1                    
+C3               CIRCULAR     2.1              0          0          0          1                    
+C4               CIRCULAR     0.6              0          0          0          1                    
+C5               CIRCULAR     1                0          0          0          1                    
+DN600Valve       CIRCULAR     0.6              0          0          0
+SpillWay         RECT_OPEN    2                0.8        0          0         
+
+[CONTROLS]
+RULE DN600_Close
+IF SIMULATION TIME > 1.08333
+THEN ORIFICE DN600Valve SETTING = 0
+
+
+[INFLOWS]
+;;Node           Constituent      Time Series      Type     Mfactor  Sfactor  Baseline Pattern
+;;-------------- ---------------- ---------------- -------- -------- -------- -------- --------
+BreakPressureTank FLOW             Scen1Ramp        FLOW     1.0      1.0              
+
+[CURVES]
+;;Name           Type       X-Value    Y-Value   
+;;-------------- ---------- ---------- ----------
+Hobsonville      Pump4      0          0         
+Hobsonville                 0.5        0.52      
+Hobsonville                 30         0.52      
+;
+Hobsonville_Existing Rating     0          0         
+Hobsonville_Existing            0.5        0.52      
+Hobsonville_Existing            30         0.52      
+
+[TIMESERIES]
+;;Name           Date       Time       Value     
+;;-------------- ---------- ---------- ----------
+Scen1Ramp                   0:00       0.48      
+Scen1Ramp                   0:05       0.48      
+Scen1Ramp                   0:35       1.85      
+Scen1Ramp                   12:00      1.85      
+
+[REPORT]
+;;Reporting Options
+SUBCATCHMENTS ALL
+NODES ALL
+LINKS ALL
+
+[TAGS]
+
+[MAP]
+DIMENSIONS -1842.764 7913.493 6619.695 8332.426
+Units      None
+
+[COORDINATES]
+;;Node           X-Coord            Y-Coord           
+;;-------------- ------------------ ------------------
+BreakPressureTank -1458.107          8280.740          
+Shaft8           609.358            8280.740          
+Shaft14          2361.262           8291.621          
+Shaft17          4831.338           8313.384          
+HobsonvillePS    5614.799           8291.621          
+DN600Valve       5179.543           8291.621          
+PumpDischarge    5929.191           8216.203          
+OF1              6235.038           8258.977          
+OF2              5603.917           7932.535          
+
+[VERTICES]
+;;Link           X-Coord            Y-Coord           
+;;-------------- ------------------ ------------------
+
+
+[PROFILES]
+;;Name           Links     
+;;-------------- ----------
+;;"System          " C1 C2 C3 DN600Valve C4
+;;"System          " Hobsonville C5
+"Steep_Pipe"  C1 C2

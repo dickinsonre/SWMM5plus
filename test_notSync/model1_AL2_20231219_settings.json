@@ -1,0 +1,64 @@
+{
+    "JSON_FoundFileYN" : true,
+    "JSON_CheckAllInputYN" : false,
+
+    "Adjust" : {
+        "Head" : {
+            "ApplyYN" : false
+        }
+    },
+
+    "BC" : {
+        "InflowBC" : {
+            "UseLinkDistributionTF"  : false,
+            "LinkDistributionMethod" : "BC_AllUpstreamLinks"
+        }
+    },
+    
+    "CaseName" : {
+        "Long"  : "test2",
+        "Short" : "tc50_dx10"
+    },
+
+    "Discretization" : {
+        "UseEquivalentOrifice" : false,
+        "EquivalentOrificeDischargeCoeff" : 0.6,
+        "NominalElemLength" : 10.00
+    },
+    "Output" : {
+        "StoredLevels" : 80,
+        "Report" : {
+            "useSWMMinpYN" : true,
+            "provideYN" : true,
+            "useHD5F"   : false,
+            "useCSV"    : false,
+            "suppress_MultiLevel_Output" : false,
+            "StartTime" : 0.0,
+            "TimeInterval" : 300.0,
+            "TimeUnits" : "Hours"
+        }
+    },
+    "Partitioning" : {
+        "PartitioningMethod" : "bquick",
+        "PhantomLinkAdjust"  : true
+    },
+    "Profile" : {
+        "useYN" : false
+    },
+    "Simulation" : {
+        "stopAfterInitializationYN" : false,
+        "useHydrology"              : true,
+        "useHydraulics"             : true,
+        "useSpinUp"                 : false,
+        "stopAfterSpinUp"           : false,
+        "SpinUpDays"                : 10.0
+    },
+    "Solver" : {
+        "PreissmannSlot" : {
+            "useSlotTF"      : true,
+            "Method"         : "DynamicSlot",
+            "TargetCelerity" : 50.0
+        }
+    },
+}
+

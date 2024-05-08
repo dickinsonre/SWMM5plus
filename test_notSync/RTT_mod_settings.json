@@ -1,0 +1,51 @@
+{
+    "JSON_FoundFileYN" : true,
+    "JSON_CheckAllInputYN" : false,
+    
+    "CaseName" : {
+        "Long"  : "test",
+        "Short" : "tc60_dx10"
+    },
+    "Adjust" : {
+        "Head" : {
+            "ApplyYN" : false
+        }
+    },
+    "Discretization" : {
+        "UseEquivalentOrifice" : false,
+        "EquivalentOrificeDischargeCoeff" : 0.6,
+        "MinElementPerLink" :  3,
+        "NominalElemLength" :  10.0
+    },
+    "Junction" : {
+        "InfiniteExtraDepthValue" : 999.0,
+        "OutflowDampingFactor" : 0.9
+    },
+    "Output" : {
+        "CommandLine" : {
+            "interval" : 1000,
+        },
+        "StoredLevels" : 80,
+        "Report" : {
+            "useSWMMinpYN" : true,
+            "provideYN" : true,
+            "useHD5F"   : true,
+            "useCSV"    : true,
+            "suppress_MultiLevel_Output" : false,
+            "StartTime" : 0.0,
+            "TimeInterval" : 300.0,
+            "TimeUnits" : "Hours"
+        }
+    },
+    "Solver" : {
+        "MomentumSourceMethod" : "T10",
+        "PreissmannSlot" : {
+            "Method"         : "DynamicSlot",
+            "TargetCelerity" : 20.0,
+            "Alpha"          : 3.0,
+            "DecayRate"      : 5.0,
+            "initPNminimum"      : 3.0
+        }
+    }
+}
+

@@ -702,8 +702,8 @@ module preissmann_slot
             !% --- pointer to elemYN column
             isSurcharge=> elemYN(:,eYN_isSurcharged)
             isfSlot    => faceYN(:,fYN_isPSsurcharged)
-            isJBup     => faceYN(:,fYN_isUpstreamJBFace)
-            isJBdn     => faceYN(:,fYN_isDownstreamJBFace)
+            !isJBup     => faceYN(:,fYN_isFaceUpstreamOfJB)
+            !isJBdn     => faceYN(:,fYN_isFaceDownstreamOfJB)
             !% --- pointers to elemI columns
             fUp        => elemI(:,ei_Mface_uL)
             fDn        => elemI(:,ei_Mface_dL)

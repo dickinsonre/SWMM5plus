@@ -1,0 +1,18 @@
+{
+    "JSON_FoundFileYN" : true,
+    "JSON_CheckAllInputYN" : false,
+    
+    "CaseName" : {
+        "Long"  : "equivalent orifice",
+        "Short" : "equivO"
+    },
+    "Discretization" : {
+        "NominalElemLength"     : 100.00,
+        "Method"                : "EqualElements",
+        "SmallElementHandling"  : "EquivalentOrifice"
+    },
+    "AirTracking" :{
+        "UseAirTrackingYN"          : false
+    }
+}
+

@@ -28,65 +28,75 @@ module diagnostic_elements
 
     private
 
-    public :: diagnostic_fix_JB_adjacent
     public :: diagnostic_by_type 
+    public :: diagnostic_flowrate_replaced_by_JB 
+    public :: diagnostic_push_adjacent_elemdata_to_face
 
     contains
 !%==========================================================================
 !% PUBLIC
 !%==========================================================================
 !% 
-    subroutine diagnostic_fix_JB_adjacent ()
+    subroutine diagnostic_flowrate_replaced_by_JB (thisCol)
         !%------------------------------------------------------------------
         !% Description
-        !% ensures that a diagnostic element adjacent to a JB junction branch
-        !% has exactly the JB flowrate on its faces and element
-        !% This assumes that JB flowrate has been forced to the faces of
-        !% the JB
+        !% at end of first step of RK2, the flux through a diagnostic element
+        !% that is connected to one or more JB elements is replaced with the
+        !% average flux on either face.
+        !% The input should be the column for ep_Diag_JBadjacent, which is 
+        !% all Diag having one or two JB adjacent.
         !%------------------------------------------------------------------
-        !% Declarations
-            integer, pointer :: thisColP, Npack, thisE(:), fup(:), fdn(:)
-            logical, pointer :: fFrozenYN(:), fJBupstreamYN(:), fJBdownstreamYN(:)
-            integer :: mm, eIdx
+        !% Declarations:
+            integer, intent(in) :: thisCol
+            integer, pointer    :: Npack, thisP(:), fup, fdn
+            integer             :: ii
         !%------------------------------------------------------------------
-        !% Aliases
-            thisColP =>   col_elemP(ep_Diag_JBadjacent)
-            Npack    => npack_elemP(thisColP)
+        !% Preliminaries:
+            Npack => npack_elemP(thisCol)
             if (Npack < 1) return
-
-            thisE => elemP(:,thisColP)
-            fup   => elemI(:,ei_Mface_uL)
-            fdn   => elemI(:,ei_Mface_dL)
-
-            fFrozenYN       => faceYN(:,fYN_isJB_QfrozenByDiag)
-            fJBupstreamYN   => faceYN(:,fYN_isUpstreamJBFace)
-            fJBdownstreamYN => faceYN(:,fYN_isDownstreamJBFace)
+            thisP    => elemP(1:Npack,thisCol)
         !%------------------------------------------------------------------
+        !% this cycles through the individual elements, but each
+        !% cycle is entirely independent
+        do ii=1,Npack    
+            !% --- up and down faces
+            fup => elemI(thisP(ii),ei_Mface_uL)
+            fdn => elemI(thisP(ii),ei_Mface_dL)
+            !% --- average the flow rate
+            elemR(thisP(ii),er_Flowrate) = onehalfR &
+               *(faceR(fup,fr_Flowrate) + faceR(fdn,fr_Flowrate))
+            
+            ! if (faceR(fup,fr_Flowrate) * faceR(fdn,fr_Flowrate) > zeroR) then 
+            !     !% --- same sign
+            !     elemR(thisP(ii),er_Flowrate)             &
+            !         = sign(oneR,faceR(fup,fr_Flowrate))  &
+            !         * min (                              &
+            !                 abs(faceR(fup,fr_Flowrate)), &
+            !                 abs(faceR(fdn,fr_Flowrate)))
+            ! else 
+            !     !% --- average the flow rate
+            !     elemR(thisP(ii),er_Flowrate) = onehalfR  &
+            !         *(faceR(fup,fr_Flowrate) + faceR(fdn,fr_Flowrate))
 
-        !% --- cycle through diagnostic elements adjacent to JB
-        do mm=1,Npack
-            eIdx = thisE(mm)
-
-            !% --- check if faces are not frozen
-            if ( (.not. fFrozenYN(fup(eIdx))) .and. (.not. fFrozenYN(fdn(eIdx))) ) then
-                if (fJBupstreamYN(fup(eIdx))) then 
-                    !% --- if JB upstream then store that Q as the diagnostic element
-                    !%     and the downstream face
-                    elemR(eIdx,er_Flowrate)      = faceR(fup(eIdx),fr_Flowrate)
-                    faceR(fdn(eIdx),fr_Flowrate) = faceR(fup(eIdx),fr_Flowrate)
-                elseif (fJBdownstreamYN(fdn(eIdx))) then
-                    !% --- if JB downstreamstream then store that Q as the diagnostic element
-                    !%     and the upstream face
-                    elemR(eIdx,er_Flowrate)      = faceR(fdn(eIdx),fr_Flowrate)
-                    faceR(fup(eIdx),fr_Flowrate) = faceR(fdn(eIdx),fr_Flowrate)
-                else
-                    print *, 'CODE ERROR unexpected else'
-                    call util_crashpoint(219874)
-                end if
+            ! end if
+               
+            !% --- set the velocity
+            if (elemR(thisP(ii),er_AreaVelocity) > setting%ZeroValue%Area) then
+                elemR(thisP(ii),er_Velocity) = elemR(thisP(ii),er_Flowrate)  &
+                                             / elemR(thisP(ii),er_AreaVelocity) 
+            else
+                elemR(thisP(ii),er_Velocity) = zeroR
+            end if
+            !% --- limit the velocity
+            if (abs(elemR(thisP(ii),er_Velocity)) > setting%Limiter%Velocity%Maximum) then
+                elemR(thisP(ii),er_Velocity)  &
+                    = sign( 0.99d0 * setting%Limiter%Velocity%Maximum, elemR(thisP(ii),er_Velocity) )
+            else 
+                !% continue
             end if
         end do
 
-    end subroutine diagnostic_fix_JB_adjacent
+    end subroutine diagnostic_flowrate_replaced_by_JB 
 !%
 !%==========================================================================
 !%==========================================================================
@@ -118,6 +128,7 @@ module diagnostic_elements
             thisP    => elemP(1:Npack,thisCol)
         !%-----------------------------------------------------------------------------
 
+        !print *, thisP
         !% this cycles through the individual elements, but each
         !% cycle is entirely independent
         do ii=1,Npack
@@ -148,6 +159,7 @@ module diagnostic_elements
                 !return
             end select
 
+            !% HACK brh 20240502 NEED TO RE-EXAMINE THIS FEATURE
             !% --- prevent an RK2 first step from setting the flowrate to zero
             !%     Otherwise the conservative flux is identically zero for the
             !%     entire time step
@@ -159,6 +171,31 @@ module diagnostic_elements
 
     end subroutine diagnostic_by_type
 !%
+!%==========================================================================
+!%==========================================================================
+!%
+    subroutine diagnostic_push_adjacent_elemdata_to_face (tPcol)
+        !%-----------------------------------------------------------------
+        !% Description:
+        !% Pushes element data (elemR) from element upstream or downstream of a
+        !% diagnostic to the face between element and diagnostic
+        !%-----------------------------------------------------------------
+            integer, intent(in) :: tPcol  !% packed column ep_Diag
+            integer, pointer    :: Npack
+            integer             :: ii
+        !%-----------------------------------------------------------------
+        !% Preliminaries:
+            Npack => npack_elemP(tPCol)
+            if (Npack < 1) return
+        !%-----------------------------------------------------------------
+
+        call face_push_elemdata_to_face (tPcol, fr_Topwidth_Adjacent, er_Topwidth, elemR, .true.)
+        call face_push_elemdata_to_face (tPcol, fr_Topwidth_Adjacent, er_Topwidth, elemR, .false.)
+        call face_push_elemdata_to_face (tPcol, fr_Length_Adjacent,   er_Length,   elemR, .true.)
+        call face_push_elemdata_to_face (tPcol, fr_Length_Adjacent,   er_Length,   elemR, .false.)
+
+    end subroutine diagnostic_push_adjacent_elemdata_to_face
+!% 
 !%==========================================================================
 !% END OF MODULE
 !%+=========================================================================

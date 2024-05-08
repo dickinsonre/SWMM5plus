@@ -1,0 +1,215 @@
+[TITLE]
+;;Project Title/Notes
+Example User3
+
+[OPTIONS]
+;;Option             Value
+FLOW_UNITS           CMS
+INFILTRATION         HORTON
+FLOW_ROUTING         DYNWAVE
+LINK_OFFSETS         DEPTH
+MIN_SLOPE            0
+ALLOW_PONDING        NO
+SKIP_STEADY_STATE    NO
+
+START_DATE           01/01/1999
+START_TIME           01:00:00
+REPORT_START_DATE    01/01/1999
+REPORT_START_TIME    00:00:00  ;;01:46:00
+END_DATE             01/01/1999
+END_TIME             07:00:00  ;;01:54:00
+SWEEP_START          01/01
+SWEEP_END            12/31
+DRY_DAYS             0
+REPORT_STEP          00:00:06
+WET_STEP             00:01:00
+DRY_STEP             00:10:00
+ROUTING_STEP         0.5
+
+INERTIAL_DAMPING     NONE
+NORMAL_FLOW_LIMITED  SLOPE
+FORCE_MAIN_EQUATION  H-W
+VARIABLE_STEP        0.00
+LENGTHENING_STEP     1
+MIN_SURFAREA         1.14
+MAX_TRIALS           8
+HEAD_TOLERANCE       0.0015
+SYS_FLOW_TOL         5
+LAT_FLOW_TOL         5
+MINIMUM_STEP         0.5
+THREADS              1
+
+
+[FILES]
+;;Interfacing Files
+
+[EVAPORATION]
+;;Data Source    Parameters
+;;-------------- ----------------
+CONSTANT         3.0
+DRY_ONLY         NO
+
+[RAINGAGES]
+;;Name           Format    Interval SCF      Source    
+;;-------------- --------- ------ ------ ----------
+GAGE1            INTENSITY 0.25000  1.0      TIMESERIES RainSeries1  
+
+[SUBCATCHMENTS]
+;;Name           Rain Gage        Outlet           Area     %Imperv  Width    %Slope   CurbLen  SnowPack        
+;;-------------- ---------------- ---------------- -------- -------- -------- -------- -------- ----------------
+SCORMID          GAGE1            SCANWOL-Is        16.8     40.0     2520.0   1.0      0                        
+SMRYCOR          GAGE1            SCANWOL-Is        4.125    59.0     619.0    1.0      0   
+SWSMWAL1         GAGE1            SCANWOL-Is        4.67     55.0     701.0    1.0      0     
+SWSMCAN1         GAGE1            SCANWOL-Is        3.842    55.0     576.0    1.0      0    
+SMRYWSM          GAGE1            SCANWSM-Is        1.929    60.0     289.0    1.0      0 
+SWSMWAL2         GAGE1            SCANWSM-Is        4.67     55.0     701.0    1.0      0 
+SWSMCAN2         GAGE1            SCANWSM-Is        3.842    55.0     576.0    1.0      0    
+SWSMARL1         GAGE1            SWOLHOM-Is        5.88     55.0     882.0    1.0      0 
+SWSMETH1         GAGE1            SWOLHOM-Is        4.306    55.0     646.0    1.0      0  
+
+[SUBAREAS]
+;;Subcatchment   N-Imperv   N-Perv     S-Imperv   S-Perv     PctZero    RouteTo    PctRouted 
+;;-------------- ---------- ---------- ---------- ---------- ---------- ---------- ----------
+SCORMID          0.015      0.25       2          5          25         OUTLET    
+SMRYCOR          0.015      0.25       2          5          25         OUTLET 
+SWSMWAL1         0.015      0.25       2          5          25         OUTLET  
+SWSMCAN1         0.015      0.25       2          5          25         OUTLET  
+SMRYWSM          0.015      0.25       2          5          25         OUTLET    
+SWSMWAL2         0.015      0.25       2          5          25         OUTLET       
+SWSMCAN2         0.015      0.25       2          5          25         OUTLET   
+SWSMARL1         0.015      0.25       2          5          25         OUTLET 
+SWSMETH1         0.015      0.25       2          5          25         OUTLET    
+
+[INFILTRATION]
+;;Subcatchment   MaxRate    MinRate    Decay      DryTime    MaxInfil  
+;;-------------- ---------- ---------- ---------- ---------- ----------
+SCORMID          75.0       13.0       4.14       0.02013    0      
+SMRYCOR          75.0       13.0       4.14       0.02013    0  
+SWSMWAL1         75.0       13.0       4.14       0.02013    0  
+SWSMCAN1         75.0       13.0       4.14       0.02013    0 
+SMRYWSM          75.0       13.0       4.14       0.02013    0  
+SWSMWAL2         75.0       13.0       4.14       0.02013    0 
+SWSMCAN2         75.0       13.0       4.14       0.02013    0   
+SWSMARL1         75.0       13.0       4.14       0.02013    0   
+SWSMETH1         75.0       13.0       4.14       0.02013    0    
+
+[JUNCTIONS]
+;;Name           Elevation  MaxDepth   InitDepth  SurDepth   Aponded   
+;;-------------- ---------- ---------- ---------- ---------- ----------
+SCANOUT1j         222.26     8.95       1.44       0          0   
+XSCANPALj         222.28     8.93       1.42       0          0   
+
+[OUTFALLS]
+;;Name           Elevation  Type       Stage Data       Gated    Route To        
+;;-------------- ---------- ---------- ---------------- -------- ----------------
+SCANOUTo          222.1      FIXED      223.7            NO            
+
+[STORAGE]
+;;Name           Elev.    MaxDepth   InitDepth  Shape      Curve Name/Params            N/A      Fevap    Psi      Ksat     IMD     
+;;-------------- -------- ---------- ----------- ---------- ---------------------------- -------- --------          -------- --------
+SCANPALs          222.26   8.95       1.44       TABULAR    SCANPALsc                     0        0       
+SCANWOL-Is        222.41   8.55       1.29       TABULAR    SCANWOL-Isc                    0        0       
+SCANWSM-Is        222.58   9.964      1.12       TABULAR    SCANWSM-Isc                    0        0       
+SWOLHOM-Is        223.9    6.75       0.0        TABULAR    SWOLHOM-Isc                    0        0       
+
+[CONDUITS]
+;;Name           From Node        To Node          Length     Roughness  InOffset   OutOffset  InitFlow   MaxFlow   
+;;-------------- ---------------- ---------------- ---------- ---------- ---------- ---------- ---------- ----------
+SCANOUT1c         SCANOUT1j         SCANOUTo          300.0      0.014      0.0        0.0        0.0        0         
+PumpSubstitute    SCANPALs          SCANOUT1j         200        0.014      0.0        0.0        0.0        0
+XSCANPALc         XSCANPALj         SCANPALs          200.0      0.014      0.0        0.0        0.0        0         
+SCANWOLc          SCANWOL-Is        XSCANPALj         200.0      0.0099     0.0        0.0        0.0        0         
+SCANWSMc          SCANWSM-Is        SCANWOL-Is        277.0      0.014      0.0        0.0        0.0        0         
+SWOLHOMc          SWOLHOM-Is        SCANWOL-Is        170.0      0.014      0.0        0.33       0.0        0         
+
+[PUMPS]
+;;Name           From Node        To Node          Pump Curve       Status   Sartup Shutoff 
+;;-------------- ---------------- ---------------- ---------------- ------ -------- --------
+;; PUMP1@SCANPALs-SCANOUT1j SCANPALs          SCANOUT1j         PUMPCURVEforPUMP1@SCANPALs ON       0        0       
+
+[XSECTIONS]
+;;Link           Shape        Geom1            Geom2      Geom3      Geom4      Barrels    Culvert   
+;;-------------- ------------ ---------------- ---------- ---------- ---------- ---------- ----------
+SCANOUT1c         CIRCULAR     1.975            0.0        0          0          1        
+PumpSubstitute    CIRCULAR     1.975            0.0        0          0          1                     
+XSCANPALc         RECT_CLOSED  4.0              2.0        0.0        0.0        1                    
+SCANWOLc          CIRCULAR     1.975            0.0        0          0          1                    
+SCANWSMc          CIRCULAR     1.95             0.0        0          0          1                    
+SWOLHOMc          CIRCULAR     1.125            0.0        0          0          1                    
+
+[LOSSES]
+;;Link           Kentry     Kexit      Kavg       Flap Gate  Seepage   
+;;-------------- ---------- ---------- ---------- ---------- ----------
+SCANOUT1c         0          0          0          YES        0     
+
+[CURVES]
+;;Name           Type       X-Value    Y-Value   
+;;-------------- ---------- ---------- ----------
+;; PUMPCURVEforPUMP1@SCANPALs PUMP4      1.44       0.00001   
+;; PUMPCURVEforPUMP1@SCANPALs            1.459      1.0       
+;; PUMPCURVEforPUMP1@SCANPALs            1.524      2.0       
+;; PUMPCURVEforPUMP1@SCANPALs            1.635      3.0       
+;; PUMPCURVEforPUMP1@SCANPALs            1.801      4.0       
+;; PUMPCURVEforPUMP1@SCANPALs            2.029      5.0       
+;; PUMPCURVEforPUMP1@SCANPALs            2.31       6.0       
+;; PUMPCURVEforPUMP1@SCANPALs            2.658      7.0       
+;; PUMPCURVEforPUMP1@SCANPALs            4.189      10.0      
+;; PUMPCURVEforPUMP1@SCANPALs            7.956      15.0      
+;
+SCANPALsc          STORAGE    0.0        1.2       
+SCANPALsc                     1.58       1.2       
+SCANPALsc                     2.58       20.9      
+SCANPALsc                     3.58       40.7      
+SCANPALsc                     4.58       20.9      
+SCANPALsc                     8.95       20.9     
+;
+SCANWOL-Isc        STORAGE    0.0        1.2       
+SCANWOL-Isc                   1.65       1.2       
+SCANWOL-Isc                   1.95       40.0      
+SCANWOL-Isc                   4.0        40.0      
+SCANWOL-Isc                   4.5        2.9       
+SCANWOL-Isc                   8.55       2.9  
+;
+SCANWSM-Isc        STORAGE    0.0        1.2       
+SCANWSM-Isc                   1.65       1.2       
+SCANWSM-Isc                   1.95       20.0      
+SCANWSM-Isc                   4.0        20.0      
+SCANWSM-Isc                   4.56       2.9       
+SCANWSM-Isc                   9.96       2.9   
+;
+SWOLHOM-Isc        STORAGE    0.0        1.2       
+SWOLHOM-Isc                   0.9        1.2       
+SWOLHOM-Isc                   1.1        12.2      
+SWOLHOM-Isc                   2.1        40.7      
+SWOLHOM-Isc                   2.3        1.2       
+SWOLHOM-Isc                   6.75       1.2     
+
+[TIMESERIES]
+;;Name           Date       Time       Value     
+;;-------------- ---------- ---------- ----------
+RainSeries1      01/01/1999 01:00      0.00000   
+RainSeries1                 01:15      3.20000   
+RainSeries1                 01:30      3.97000   
+RainSeries1                 01:45      5.31000   
+RainSeries1                 02:00      8.20000   
+RainSeries1      01/01/1999 02:15      19.04000  
+RainSeries1                 02:30      77.03000  
+RainSeries1                 02:45      21.67000  
+RainSeries1                 03:00      10.46000  
+RainSeries1                 03:15      6.94000   
+RainSeries1      01/01/1999 03:30      5.22000   
+RainSeries1                 03:45      4.21000   
+RainSeries1                 04:00      3.55000   
+RainSeries1                 04:15      0.00000   
+
+[REPORT]
+;;Reporting Options
+SUBCATCHMENTS ALL
+NODES ALL
+LINKS ALL
+
+
+[PROFILES]
+;;Name           Links     
+;;-------------- ----------
+"prof01       " SWOLHOMc SCANWOLc XSCANPALc PumpSubstitute SCANOUT1c 

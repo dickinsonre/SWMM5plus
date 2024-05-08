@@ -289,6 +289,7 @@ module define_settings
         real(8) :: WeirContractionFactor
         real(8) :: SideFlowWeirCrestExponent
         real(8) :: VillemonteCorrectionExponent
+        real(8) :: FlowVolumeLimitFactor = 0.1d0
     endtype WeirConstantType
 
     ! setting%Debug%File
@@ -498,10 +499,10 @@ module define_settings
         !% short term fix would be allow nJ2 wherever there are no inflows
         !% long term fix requires fixing bug that causes spikes when an inflow is into an conduit/channel
         !% rather than a node.  Test on calumet_20yr_120min_noOverflow_R18.inp
-        logical :: ForceNodesJM = .true.   !% forces all nJ2 nodes (other than phantom) to nJM
+        logical :: ForceNodesJM = .false.   !% forces all nJ2 nodes (other than phantom) to nJM
         !% NOTE ForceStorage must be true as of 20230507. Future extension may include junction solution that does
         !% not require the minimum surface area of the ImpliedStorage type
-        logical :: ForceStorage = .true.        !% forces nJM junctions without explicit storage to have implied storage
+        logical :: ForceStorage = .true.        !% forces nJM junctions without explicit storage to have implied storage (true is required, false causes errors)
         logical :: ForceInfiniteExtraDepth = .false. !% true forces all nJM surcharge tdepth InfiniteExtraDepth
         integer :: HeadMethodJB = linear_interp !% {use_JM / linear_interp} methods for head on JB, recommend linear_interp 
         integer :: FunStorageN  = 10            !% number of curve entries for functional storage   
@@ -546,6 +547,8 @@ module define_settings
         real(8) :: SharpCrestedWeirCoefficient = 0.414
         real(8) :: TransverseWeirExponent = 1.5
         real(8) :: VillemonteCorrectionExponent = 0.385
+        real(8) :: delta = 0.01d0 !% used for compute dQdH
+        real(8) :: FlowVolumeLimitFactor = 0.1d0 !% fraction of upstream DH volume removed in a time step
     end type OrificeType
 
     !% setting%Output
@@ -595,6 +598,8 @@ module define_settings
     type PumpSettingType 
         real(8) :: RampupTime = 5.d0  !% seconds for pump ramp up. If too small, instabilities can result (0 causes seg fault)
         real(8) :: MinShutoffTime = 60.d0  !% seconds for pump to be idle before starting again 
+        real(8) :: delta = 0.01d0  !% used for compute dQdH
+        real(8) :: FlowVolumeLimitFactor = 0.1d0 !% fraction of upstream DH volume removed in a time step
     end type PumpSettingType
 
     !% setting%Simulation
@@ -742,7 +747,9 @@ module define_settings
         type(WeirConstantType) :: SideFlow
         type(WeirConstantType) :: VNotch
         type(WeirConstantType) :: Trapezoidal
-    end type WeirType
+        real(8) :: delta = 0.01d0  !% used for compute dQdH
+        real(8) :: FlowVolumeLimitFactor = 0.1d0 !% fraction of upstream DH volume removed in a time step
+     end type WeirType
 
     !% setting%VariableDT
     type VariableDTType
@@ -761,7 +768,7 @@ module define_settings
 
     !% setting%ZeroValue
     !% Note that Depth is the setting users should change
-    type ZerovalueType
+    type ZeroValueType
         logical :: UseZeroValues = .true.
         real(8) :: Area = 1.d-12 ! m^2 -- NOT A USER SETTING
         real(8) :: Depth = 1.d-4 ! m
@@ -770,7 +777,7 @@ module define_settings
         real(8) :: Volume = 1.d-12 ! m^3 -- NOT A USER SETTING
         real(8) :: VolumeResetLevel !m^3 -- NOT A USER SETTING
         real(8) :: Velocity = 1.d-3
-    end type ZerovalueType
+    end type ZeroValueType
 
     !%===================================================================
     !% First Level Type (setting)
@@ -1397,10 +1404,26 @@ contains
         if (found) setting%Junction%ForceInfiniteExtraDepth = logical_value
         if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Junction.ForceInfiniteExtraDepth not found'
 
+                !%                       Junction.HeadMethodJB
+        call json%get('Junction.HeadMethodJB', c, found)
+        if (found) then
+            call util_lower_case(c)
+            if (c == 'linear_interp') then
+                setting%Junction%HeadMethodJB = linear_interp
+            else if (c == 'use_jm') then
+                setting%Junction%HeadMethodJB = use_JM
+            else
+                write(*,"(A)") 'Error - json file - setting.Junction.HeadMethodJB of ',trim(c)
+                write(*,"(A)") '..is not in allowed options of:'
+                write(*,"(A)") '... linear_interp, use_JM'
+                stop 3866681
+            end if
+        end if
+
         !%                       Junction.FunStorageN
         call json%get('Junction.FunStorageN', integer_value, found)
         if (found) setting%Junction%FunStorageN = integer_value
-        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Junction.CFLlimit not found'
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Junction.FunStorageN not found'
         
         !%                       Junction.kFactor
         call json%get('Junction.kFactor', real_value, found)
