@@ -22,7 +22,7 @@ module timeloop
     use pack_mask_arrays
     use runge_kutta2
     ! use hydrology
-    use utility
+    use utility, only: util_global_volume_balance, util_local_volume_balance !
     use utility_output
     use boundary_conditions
     use utility_profiler
@@ -68,8 +68,6 @@ contains
             character(64)    :: subroutine_name = 'timeloop_toplevel'
         !%--------------------------------------------------------------------
         !% Preliminaries
-            if (setting%Debug%File%timeloop) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
         !%--------------------------------------------------------------------
         !% Aliases
             dtTol   => setting%Time%DtTol
@@ -99,8 +97,21 @@ contains
             setting%Time%WallClock%LastStepStored = setting%Time%Step
         end if 
 
+        !print *, 'before initialize loop'
+
         !% --- initialize the time settings for hydraulics and hydrology steps
         call tl_initialize_loop (doHydraulicsStepYN, doHydrologyStepYN, .false.)
+
+        !print *, 'before outerloop '
+
+        !% --- command line initiation 
+        if (      (setting%Output%Verbose)                            &
+            .and. (this_image() == 1)                                 &
+            .and. (setting%Output%CommandLine%startoutput > 1)        &
+            ) then
+                write(*,"(A)") 'Command line output suppressed by setting%Output%CommandLine%startoutput.'
+                write(*,"(A,i12)") 'Output will start at step ',setting%Output%CommandLine%startoutput
+        end if
 
         !-- perform the time-marching loop
         call tl_outerloop (doHydrologyStepYN, doHydraulicsStepYN, .false., .false.)
@@ -114,8 +125,6 @@ contains
 
         !%--------------------------------------------------------------------
         !% Closing
-        if (setting%Debug%File%timeloop) &
-            write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
     end subroutine timeloop_toplevel
 !% 
 !%==========================================================================
@@ -153,6 +162,7 @@ contains
 
         !% --- initialize the time variables
         call tl_initialize_loop (doHydraulicsStepYN, doHydrologyStepYN, inSpinUpYN)
+
         
         !% --- perform the time loop for spin-up
         call tl_outerloop (doHydrologyStepYN, doHydraulicsStepYN, inSpinUpYN, SpinUpOutputYN)
@@ -265,6 +275,8 @@ contains
         !% --- initialize the time step counter
         thisStep = 1
 
+       ! print *, 'in outerloop'
+
         !% --- outer loop of the time-march
         do while (setting%Time%Now <= setting%Time%End - dtTol) !
 
@@ -363,6 +375,8 @@ contains
 
                 !% --- set hydraulics time step to handle inflow
                 call tl_update_hydraulics_timestep(.false.)
+
+               ! print *, 'before tl_hydraulics '
 
                 !% --- perform one hydraulic routing step
                 call tl_hydraulics()
@@ -553,11 +567,19 @@ contains
         !%     so that we can be confident of conservation computation. 
         faceR(:,fr_Flowrate_Conservative) = zeroR  
 
+        !print *, 'call in rk2_toplevel'
         !% --- call the RK2 time march
         call rk2_toplevel ()
 
+       ! print *, 'out of rk2_toplevel'
+
+        !% --- accumulate artificial inflow
+        elemR(:,er_VolumeArtificialInflowTotal) = elemR(:,er_VolumeArtificialInflowTotal) &
+                                                 +elemR(:,er_VolumeArtificialInflow)
+
         !% --- add non-conservation in this step to accumulator
-        call util_accumulate_volume_conservation () 
+        call util_global_volume_balance () 
+        call util_local_volume_balance(.false.)
 
         !%-------------------------------------------------------------------
         !% Closing
@@ -955,7 +977,7 @@ contains
             logical, intent(in) :: inSpinUpYN
             logical, pointer    :: matchHydrologyStep, useHydrology
 
-            real(8)             :: oldDT, oldCFL
+            real(8)             :: oldDT, oldCFL, cflJM
             real(8), pointer    :: newDT, timeNow
             real(8), pointer    :: nextHydraulicsTime, lastHydraulicsTime
 
@@ -1021,6 +1043,25 @@ contains
         !% --- invoke other time step limiters
         call tl_limit_DT (newDT)
         ! newDT = 0.08
+
+        !% --- check for minimum limit
+        if (setting%Limiter%Dt%UseLimitMinYN) then
+            if (newDT < setting%Limiter%Dt%Minimum) then 
+               ! print *, 'WARNING time step is set to minimum ', &
+               !      setting%Limiter%Dt%Minimum, ' seconds'
+                newDT = setting%Limiter%Dt%Minimum
+            endif 
+        end if
+
+        !% --- check for maximum
+        if (setting%Limiter%Dt%UseLimitMaxYN) then 
+            if (newDT > setting%Limiter%Dt%Maximum) then 
+               ! print *, 'WARNING time step set to maximum ', &
+               !     setting%Limiter%Dt%Maximum, ' seconds'
+                newDT = setting%Limiter%Dt%Maximum
+            end if
+        end if
+
         !% --- round off of time steps with too many digits
         call tl_roundoff_DT (newDT, neededSteps)
         ! newDT = 0.08
@@ -1040,31 +1081,32 @@ contains
         !% Closing
             if ((setting%Limiter%Dt%UseLimitMinYN)      &
                 .and.                                   &
-                (newDT .le. setting%Limiter%Dt%Minimum) &
-                .and.                                   &
-                (setting%Limiter%Dt%FailOnMinYN)        &
-                ) then
+                (newDT .le. setting%Limiter%Dt%Minimum)) then 
+                
+                if (setting%Limiter%Dt%FailOnMinYN) then
 
-                print *, ' '
-                print *, 'EXITING ON TIME STEP ERROR -- PROBABLY BLOWING UP DUE TO EXCESSIVE HEAD'
-                print *,'timestep= ', setting%Time%Step
-                print*, 'timeNow = ', timeNow, ' seconds'
-                print*, 'dt = ', newDT, 'minDt = ',  setting%Limiter%Dt%Minimum
-                print*, 'max velocity  ', maxval( &
-                    elemR(elemP(1:npack_elemP(ep_CCJM_NOTzerodepth),ep_CCJM_NOTzerodepth),er_Velocity) )
-                print*, 'max wavespeed ', maxval( &
-                    elemR(elemP(1:npack_elemP(ep_CCJM_NOTzerodepth),ep_CCJM_NOTzerodepth),er_WaveSpeed) )
-                print*, 'warning: the dt value is smaller than the user supplied min dt value'
+                    print *, ' '
+                    print *, 'EXITING ON TIME STEP ERROR -- PROBABLY BLOWING UP DUE TO EXCESSIVE HEAD'
+                    print *,'timestep= ', setting%Time%Step
+                    print*, 'timeNow = ', timeNow, ' seconds'
+                    print*, 'dt = ', newDT, 'minDt = ',  setting%Limiter%Dt%Minimum
+                    print*, 'max velocity  ', maxval( &
+                        elemR(elemP(1:npack_elemP(ep_CCJM_NOTzerodepth),ep_CCJM_NOTzerodepth),er_Velocity) )
+                    print*, 'max wavespeed ', maxval( &
+                        elemR(elemP(1:npack_elemP(ep_CCJM_NOTzerodepth),ep_CCJM_NOTzerodepth),er_WaveSpeed) )
+                    print*, 'warning: the dt value is smaller than the user supplied min dt value'
 
-                print *, ' '
-                print *, 'element index location of max velocity'
-                pindex = maxloc(elemR(elemP(1:npack_elemP(ep_CCJM_NOTzerodepth),ep_CCJM_NOTzerodepth),er_Velocity))
-                print *, elemP(pindex,ep_CCJM_NOTzerodepth)
-                print *, 'element index location of max wavespeed'
-                pindex = maxloc(  elemR(elemP(1:npack_elemP(ep_CCJM_NOTzerodepth),ep_CCJM_NOTzerodepth),er_WaveSpeed))
-                print *, elemP(pindex,ep_CCJM_NOTzerodepth)
-                call util_crashpoint(1123938)
-
+                    print *, ' '
+                    print *, 'element index location of max velocity'
+                    pindex = maxloc(elemR(elemP(1:npack_elemP(ep_CCJM_NOTzerodepth),ep_CCJM_NOTzerodepth),er_Velocity))
+                    print *, elemP(pindex,ep_CCJM_NOTzerodepth)
+                    print *, 'element index location of max wavespeed'
+                    pindex = maxloc(  elemR(elemP(1:npack_elemP(ep_CCJM_NOTzerodepth),ep_CCJM_NOTzerodepth),er_WaveSpeed))
+                    print *, elemP(pindex,ep_CCJM_NOTzerodepth)
+                    call util_crashpoint(1123938)
+                else 
+                    !print *,'WARNING: small timestep= ',setting%Time%Step
+                end if
             end if
 
             if (setting%Debug%File%timeloop) &
@@ -1224,6 +1266,7 @@ contains
             logical, intent(in) :: inSpinUpYN
         
             integer,         pointer :: interval
+            integer(kind=8), pointer :: startoutput
             integer(kind=8), pointer :: step
             integer(kind=8)          :: cval, crate, cmax
 
@@ -1246,7 +1289,9 @@ contains
             timeEnd       => setting%Time%End
             step          => setting%Time%Step
             interval      => setting%Output%CommandLine%interval
+            startoutput   => setting%Output%CommandLine%startoutput
         !%------------------------------------------------------------------
+
         if (this_image() == 1) then
             call system_clock(count=cval,count_rate=crate,count_max=cmax)
             setting%Time%WallClock%Now = cval
@@ -1262,37 +1307,40 @@ contains
 
         if (setting%Output%Verbose) then
             if (this_image() == 1) then
-                if (mod(step,interval) == 0) then
+                if ((mod(step,interval) == 0) .and. (step .ge. startoutput)) then
                     thistime = timeNow
                     call util_datetime_display_time (thistime, timeunit)
 
                     ! write a time counter
                     if (.not. inSpinUpYN) then
                         if (dt > oneR) then
-                            write(*,"(A12,i8,a17,F9.2,a1,a8,a6,f9.3,a3,a8,f9.2,a11,f9.2,a13,f9.2)") &
+                            write(*,"(A12,i8,a17,F9.2,a1,a8,a6,f9.4,a3,a8,f9.3,a11,f9.3,a13,f9.3)") &
                                 'time step = ',step,'; model time = ',thistime, &
                                 ' ',trim(timeunit),'; dt = ',dt,' s', '; cfl = ',cfl_max
                         else
-                            write(*,"(A12,i8,a17,F9.2,a1,a8,a6,f9.3,a3,a8,f9.2,a11,f9.2,a13,f9.2)") &
+                            write(*,"(A12,i8,a17,F9.2,a1,a8,a6,f9.4,a3,a8,f9.3,a11,f9.3,a13,f9.3)") &
                                 'time step = ',step,'; model time = ',thistime, &
                                 ' ',trim(timeunit),'; dt = ',dt,' s', '; cfl = ',cfl_max
                         end if
                     else
-                        write(*,"(A15,i8,a17,f9.2,a1,a8,a6,f9.2,a3,a8,f9.2)") &
+                        write(*,"(A15,i8,a17,f9.2,a1,a8,a6,f9.4,a3,a8,f9.3)") &
                             'spin-up step = ',step,'; model time = ',thistime, &
                           ' ',trim(timeunit),'; dt = ',dt,' s', '; cfl = ',cfl_max 
                     end if
-                    if (.not. inSpinUpYN) then
+                    if ((.not. inSpinUpYN) .and. (setting%Output%CommandLIne%showTimeToCompletion)) then
                         ! write estimate of time remaining
                         thistime = seconds_to_completion
                         call util_datetime_display_time (thistime, timeunit)
-                        write(*,"(A9,F10.2,A1,A3,A)") 'estimate ',thistime,' ',timeunit,' wall clock time until completion'
+                        write(*,"(A9,F10.2,A1,A3,A)") 'estimate ',thistime,' ',timeunit,' wall clock time until completion (EXPERIMENTAL)'
                         !write(*,"(A9,F6.2,A1,A3,A)") 'execution time ',thistime,' ',timeunit,' wall clock time thus far'
                     end if    
-                    if (setting%Debug%isGlobalVolumeBalance) then 
-                        print *,'Global volume balance: ',setting%Debug%GlobalVolumeBalance
+                    if ((setting%Debug%GlobalVolume%useVolumeBalanceTF) .and. (setting%Output%CommandLine%showVolumeConservation)) then 
+                        print *,'scaled volume balance:   ',setting%Debug%GlobalVolume%LatestScaledValue, setting%Debug%GlobalVolume%CumulativeScaledValue
+                        print *,'unscaled volume balance: ',setting%Debug%GlobalVolume%LatestValue, setting%Debug%GlobalVolume%CumulativeValue
                     end if
-                    print *, ' '
+                    if (.not. setting%Output%CommandLine%noBlank) then 
+                        print *, ' '
+                    end if
                 endif
             endif
         endif
@@ -1481,7 +1529,12 @@ contains
 
             newDTlimit = minval(DTlimit,(DTlimit > zeroR))
 
+            ! if (newDTlimit < thisDT) then 
+            !     print *, 'limiting DT based on inflow ',newDTlimit
+            ! end if
+
             thisDT = min(thisDT, newDTlimit)
+
 
             ! !% --- ARCHIVE 20230711
             ! !% --- ensure flowrate used for limiter is positive and non-zero
@@ -1873,23 +1926,23 @@ contains
             end if
         endif
 
-        !% --- check for minimum limit
-        if (setting%Limiter%Dt%UseLimitMinYN) then
-            if (newDT < setting%Limiter%Dt%Minimum) then 
-                print *, 'WARNING time step is set to minimum ', &
-                     setting%Limiter%Dt%Minimum, ' seconds'
-                newDT = setting%Limiter%Dt%Minimum
-            endif 
-        end if
+        ! !% --- check for minimum limit
+        ! if (setting%Limiter%Dt%UseLimitMinYN) then
+        !     if (newDT < setting%Limiter%Dt%Minimum) then 
+        !        ! print *, 'WARNING time step is set to minimum ', &
+        !        !      setting%Limiter%Dt%Minimum, ' seconds'
+        !         newDT = setting%Limiter%Dt%Minimum
+        !     endif 
+        ! end if
 
-        !% --- check for maximum
-        if (setting%Limiter%Dt%UseLimitMaxYN) then 
-            if (newDT > setting%Limiter%Dt%Maximum) then 
-                print *, 'WARNING time step set to maximum ', &
-                    setting%Limiter%Dt%Maximum, ' seconds'
-                newDT = setting%Limiter%Dt%Maximum
-            end if
-        end if
+        ! !% --- check for maximum
+        ! if (setting%Limiter%Dt%UseLimitMaxYN) then 
+        !     if (newDT > setting%Limiter%Dt%Maximum) then 
+        !        ! print *, 'WARNING time step set to maximum ', &
+        !        !     setting%Limiter%Dt%Maximum, ' seconds'
+        !         newDT = setting%Limiter%Dt%Maximum
+        !     end if
+        ! end if
 
     end subroutine tl_DT_standard
 !% 
@@ -1907,6 +1960,7 @@ contains
             real(8), intent(inout) :: newDT
 
             real(8), pointer :: reportDT
+
         !%------------------------------------------------------------------
         !% Aliases
             reportDt => setting%Output%Report%TimeInterval
@@ -1919,6 +1973,8 @@ contains
         !%     lower cfl values. Needs to revisit later. 
         newDT = min(newDT,reportDt)
     
+        !call tl_limit_DT_JM (newDT)
+
         !% --- time step limiter for inflows into small or zero volumes
         call tl_limit_BCinflow_dt (newDT)
 
@@ -1932,6 +1988,125 @@ contains
         end if
 
     end subroutine tl_limit_DT
+!% 
+!%==========================================================================
+!%==========================================================================
+!%
+    subroutine tl_limit_DT_JM (newDT)
+        !%-------------------------------------------------------------------
+        !% Description:
+        !% computes the maximum dt for all JM based on head reversal
+        !% instability
+        !%-------------------------------------------------------------------
+        !% Declarations
+            real(8), intent(inout) :: newDT
+            integer, pointer    :: Npack, thisP(:), JMidx, fAdj
+            integer             :: mm, kk, JBidx, bsign
+            real(8), pointer    :: dt, Qnet, grav
+            real(8)             :: Hmax, Hmin, VelHvolume, VolNet, thisDT
+        !%-------------------------------------------------------------------
+        !% Aliases
+            dt   => setting%Time%Hydraulics%Dt
+            grav => setting%Constant%gravity
+        !%-------------------------------------------------------------------
+        !% Preliminaries
+            Npack => npack_elemP(ep_JM)
+            if (Npack < 1) return
+            thisP => elemP(1:Npack,ep_JM)
+        !%-------------------------------------------------------------------
+
+        thisDT = newDT 
+
+        do mm=1,Npack
+            JMidx => thisP(mm)
+            Qnet  => elemSR(JMidx,esr_JM_StorageRate)
+
+            ! print *, ' '
+            ! print *, 'in CFL_JM ', setting%Time%Step, Qnet
+            ! print *, reverseKey(elemI(JMidx,ei_elementType))
+            ! print *, trim(node%Names(elemI(JMidx,ei_node_Gidx_BIPquick))%str)
+
+            if (Qnet > (zeroR + setting%Eps%Velocity) ) then 
+                !% --- handle net inflow
+                Hmax = zeroR !% --- max H of surrounding branches
+                VelHvolume = zeroR
+                do kk=1,max_branch_per_node
+                    if (elemSI(JMidx+kk,esi_JB_Exists) .ne. oneI) cycle !% not a valid branch
+                    JBidx = JMidx + kk
+                    if (mod(kk,twoI) == zeroI ) then 
+                        !% --- downstream brannch
+                        bsign = -oneI
+                        fAdj => elemI(JBidx,ei_Mface_dL)
+                    else 
+                        !% --- upstream branch
+                        bsign = +oneI
+                        fAdj => elemI(JBidx,ei_Mface_uL)
+                    end if
+                    if (elemR(JBidx,er_Flowrate) * real(bsign,8) > zeroR) then 
+                        !% --- this is an inflow
+                        Hmax = max(Hmax,faceR(fAdj,fr_Head_Adjacent_to_JB))
+                        !% --- accumulate the velocity head at the entrance multiplied by the flow area as
+                        !%     the net volume effect of inflowing velocity head.  Use a 1/2 factor assuming
+                        !%     that 50% of the inflowing velocity head is lost to dissipation.
+                        !print *, 'vel, area ',elemR(JBidx,er_Velocity),elemR(JBidx,er_Area)
+                        VelHvolume = VelHvolume + onehalfR *((elemR(JBidx,er_Velocity)**2) / (twoR * grav)) * elemR(JBidx,er_Area)
+                    else
+                        !% --- ignore outflows 
+                    end if
+                end do
+                VolNet = (Hmax - elemR(JMidx,er_Head)) * elemSR(JMidx,esr_JM_Present_PlanArea) + VelHvolume
+
+            elseif (Qnet < (zeroR - setting%Eps%Velocity) ) then 
+                Hmin = zeroR !% --- min H of surrounding branches
+                VelHvolume = zeroR
+                do kk=1,max_branch_per_node
+                    if (elemSI(JMidx+kk,esi_JB_Exists) .ne. oneI) cycle !% not a valid branch
+                    JBidx = JMidx + kk
+                    if (mod(kk,twoI) == zeroI ) then 
+                        !% --- downstream branch
+                        bsign = -oneI
+                        fAdj => elemI(JBidx,ei_Mface_dL)
+                    else 
+                        !% --- upstream branch
+                        bsign = +oneI
+                        fAdj => elemI(JBidx,ei_Mface_uL)
+                    end if
+                    if (elemR(JBidx,er_Flowrate) * real(bsign,8) < zeroR) then 
+                        !% --- this is an outflow
+                        Hmin = min(Hmin,faceR(fAdj,fr_Head_Adjacent_to_JB))
+                        !% --- accumulate the velocity head at the entrance multiplied by the flow area as
+                        !%     the net volume effect of inflowing velocity head.  Use a 1/2 factor assuming
+                        !%     that 50% of the inflowing velocity head is lost to dissipation.
+                        !print *, 'vel, area ',elemR(JBidx,er_Velocity),elemR(JBidx,er_Area)
+                        VelHvolume = VelHvolume + onehalfR *((elemR(JBidx,er_Velocity)**2) / (twoR * grav)) * elemR(JBidx,er_Area)
+                    else
+                        !% --- ignore outflows 
+                    end if
+                end do
+                VolNet = (elemR(JMidx,er_Head) - Hmin) * elemSR(JMidx,esr_JM_Present_PlanArea) + velHvolume
+
+            else !% Qnet == zeroR 
+                VolNet = zeroR
+            end if
+
+            if (abs(VolNet) >  zeroR) then 
+                thisDT = min(thisDT, VolNet / abs(Qnet))
+            else
+                !% no change in dat
+            end if
+
+           ! print *, 'IN NEW DT JM ',thisDt
+
+        end do
+
+        !if (thisDT < newDT) print *,' FINAL NEW DT JM ',thisDT, newDT
+
+        newDT = min(thisDt,newDT)
+
+    
+    end subroutine tl_limit_DT_JM
+!%
+!%==========================================================================
 !% 
 !%==========================================================================
 !%==========================================================================

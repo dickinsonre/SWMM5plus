@@ -18,6 +18,7 @@ module weir_elements
     use common_elements
     use roadway_weir_elements
     use adjust
+    !use utility, only: util_get_adjacent_CC_link
     use utility_crash, only: util_crashpoint
 
     implicit none
@@ -26,6 +27,7 @@ module weir_elements
 
     public :: weir_toplevel
     public :: weir_set_setting
+    ! public :: weir_upstream_geometry
 
     contains
 !%==========================================================================
@@ -103,6 +105,16 @@ module weir_elements
              =  (elemSR(eIdx,esr_Weir_dQdH_downstream) - elemR(eIdx,er_Flowrate)) &
                 / setting%Weir%delta
         end if
+
+        !% --- limit weirflow change for stability
+        call common_flowchange_limiter_singular (eIdx)
+
+        !% --- update velocity from flowrate and area
+        call common_velocity_from_flowrate_singular (eIdx)
+
+        !% --- compute downstream energy head
+        call common_outflow_energyhead_singular &
+            (eIdx, esr_Weir_NominalDownstreamHead, esi_Weir_FlowDirection)
 
 
     end subroutine weir_toplevel    
@@ -198,6 +210,47 @@ module weir_elements
         EffectiveFullDepth = FullDepth * CurrentSetting
 
     end subroutine weir_set_setting
+!%
+!%==========================================================================
+!%==========================================================================   
+!%
+    ! subroutine weir_upstream_geometry (eIdx)   
+    !     !%------------------------------------------------------------------ 
+    !     !% Description:
+    !     !% sets the weir upstream 
+    !     !% As this is not provided by SWMM input file, we use the 
+    !     !% full area of the upstream link, 
+    !     !%------------------------------------------------------------------ 
+    !     integer, intent(in) :: eIdx
+    !     integer, pointer    :: thisLink, upNode, upJM
+    !     integer             :: upLink
+    !     logical             :: useNodeValues
+    ! !%------------------------------------------------------------------ 
+
+    !     thisLink => elemI(eIdx,ei_link_Gidx_BIPquick)
+    !     upNode   => link%I(thisLink,li_Mnode_u)
+    !     upJM     => node%I(upNode,ni_elem_idx)
+        
+    !     upLink = util_get_adjacent_CC_link (upNode,thisLink,.true.)
+
+    !     if (upLink < 1) then 
+    !         !% --- no upstream link found
+    !         !%     set full depth to JM full depth
+    !         elemR(eIdx,er_FullDepth) = elemR(upJM,er_FullDepth)
+    !         elemI(eIdx,ei_geometryType) = nullvalueI !% --- call to geometry will fail
+    !     else
+    !         select case (link%I(upLink,li_link_type))
+    !         case (lChannel) 
+    !             call IC_get_channel_geometry(upLink,eIdx)
+    !         case (lPipe)
+    !             call IC_get_conduit_geometry(upLink,eIdx)
+    !         case default 
+    !             print *, 'CODE ERROR: unexpected case default'
+    !             call util_crashpoint(6119873)
+    !         end select
+    !     end if
+
+    ! end subroutine weir_upstream_geometry
 !% 
 !%==========================================================================   
 !% PRIVATE
@@ -622,14 +675,14 @@ module weir_elements
                 !     if (dH .ge. zeroR) then 
                 !         !% --- the increase dQ that would eliminate the volume associated with the
                 !         !%     actual head delta
-                !         dQlimit = 0.1d0 * dH * faceR(fup,fr_Length_Adjacent) * faceR(fup,fr_Topwidth_Adjacent) / dt
+                !         dQlimit = 0.1d0 * dH * faceR(fup,fr_Length_Adjacent_to_JB) * faceR(fup,fr_Topwidth_Adjacent_to_JB) / dt
                 !         if ((Flowrate - FlowrateN0) > dQlimit) then 
                 !             Flowrate = FlowrateN0 + dQlimit 
                 !         else
                 !             !% no action
                 !         end if
                 !     else
-                !         dQlimit = 0.1d0 * dH * faceR(fdn,fr_Length_Adjacent) * faceR(fdn,fr_Topwidth_Adjacent) / dt
+                !         dQlimit = 0.1d0 * dH * faceR(fdn,fr_Length_Adjacent_to_JB) * faceR(fdn,fr_Topwidth_Adjacent_to_JB) / dt
                 !         if ((Flowrate - FlowrateN0) < dQlimit) then 
                 !             Flowrate = FlowrateN0 + dQlimit 
                 !         else
@@ -644,7 +697,7 @@ module weir_elements
                 ! print *, ' '
                 ! print *, 'limited flowrate'
                 ! print *, 'DH ',dH 
-                ! print *, 'area ',faceR(fdn,fr_Length_Adjacent) * faceR(fdn,fr_Topwidth_Adjacent)
+                ! print *, 'area ',faceR(fdn,fr_Length_Adjacent_to_JB) * faceR(fdn,fr_Topwidth_Adjacent_to_JB)
                 ! print *, 'dQlimit ',dQlimit
                 ! print *, 'dQ      ',Flowrate - FlowrateN0
                 ! print *, 'Flowrate',Flowrate
@@ -787,13 +840,13 @@ module weir_elements
         end select
 
         !% --- apply geometry limiters
-        call adjust_limit_by_zerovalues_singular (eIdx, er_Area,      setting%ZeroValue%Area,    .false.)
-        call adjust_limit_by_zerovalues_singular (eIdx, er_Depth,     setting%ZeroValue%Depth,   .false.)
-        call adjust_limit_by_zerovalues_singular (eIdx, er_HydRadius, setting%ZeroValue%Depth,   .false.)
-        call adjust_limit_by_zerovalues_singular (eIdx, er_EllDepth,  setting%ZeroValue%Depth,   .false.) 
-        call adjust_limit_by_zerovalues_singular (eIdx, er_Topwidth,  setting%ZeroValue%Topwidth,.false.)
-        call adjust_limit_by_zerovalues_singular (eIdx, er_Perimeter, setting%ZeroValue%Topwidth,.false.)
-        call adjust_limit_by_zerovalues_singular (eIdx, er_Volume,    setting%ZeroValue%Volume,  .true.)
+        call adjust_limit_by_zerovalues_singular (eIdx, er_Area,      setting%ZeroValue%Area,    .false., zeroI)
+        call adjust_limit_by_zerovalues_singular (eIdx, er_Depth,     setting%ZeroValue%Depth,   .false., zeroI)
+        call adjust_limit_by_zerovalues_singular (eIdx, er_HydRadius, setting%ZeroValue%Depth,   .false., zeroI)
+        call adjust_limit_by_zerovalues_singular (eIdx, er_EllDepth,  setting%ZeroValue%Depth,   .false., zeroI) 
+        call adjust_limit_by_zerovalues_singular (eIdx, er_Topwidth,  setting%ZeroValue%Topwidth,.false., zeroI)
+        call adjust_limit_by_zerovalues_singular (eIdx, er_Perimeter, setting%ZeroValue%Topwidth,.false., zeroI)
+        call adjust_limit_by_zerovalues_singular (eIdx, er_Volume,    setting%ZeroValue%Volume,  .true., zeroI)
 
     end subroutine weir_geometry_update
 !%
@@ -859,7 +912,7 @@ module weir_elements
         end select
 
         !% --- apply geometry limiters
-        call adjust_limit_by_zerovalues_singular (eIdx, er_Area, setting%ZeroValue%Area, .false.)
+        call adjust_limit_by_zerovalues_singular (eIdx, er_Area, setting%ZeroValue%Area, .false., zeroI)
 
     end subroutine weir_get_open_area
 !%

@@ -1,0 +1,15 @@
+{
+    "JSON_FoundFileYN" : true,
+    "JSON_CheckAllInputYN" : false,
+    
+    "CaseName" : {
+        "Long"  : "overflow testing",
+        "Short" : "overflow"
+    },
+
+    "Discretization" : {
+        "SmallElementHandling" : "FailLimiter",
+        "NominalElemLength" : 10.00
+    }
+}
+

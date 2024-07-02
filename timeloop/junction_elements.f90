@@ -39,8 +39,8 @@ module junction_elements
     public :: junction_first_step
     public :: junction_second_step
 
-    integer :: printJM =112
-    integer :: printJB =113
+    integer :: printJM = 18
+    integer :: printJB = 20
     integer :: stepCut = 0
 
     contains
@@ -106,10 +106,9 @@ module junction_elements
         !% --- ensure that all JB are consistent with adjacent face before the
         !%     energy equation is invoked for outflow
         if (N_nJM > 0) then 
-            call face_pull_facedata_to_JBelem (ep_JM, fr_Flowrate,   er_Flowrate, .true.)
-            call face_pull_facedata_to_JBelem (ep_JM, fr_Flowrate,   er_Flowrate, .false.)
-            call face_pull_facedata_to_JBelem (ep_JM, fr_Velocity_d, er_Velocity, .true.)
-            call face_pull_facedata_to_JBelem (ep_JM, fr_Velocity_u, er_Velocity, .false.)
+            call face_pull_facedata_to_JBelem (ep_JM, fr_Flowrate,   er_Flowrate, elemR, .true., .true.)
+            call face_pull_facedata_to_JBelem (ep_JM, fr_Velocity_d, er_Velocity, elemR, .true., .true.)
+
         end if
 
         ! call util_utest_CLprint ('------- jjj.03 after face_pull...')
@@ -126,7 +125,7 @@ module junction_elements
 
         ! call util_utest_CLprint ('------- jjj.04 after lljunction_push_adjacent')
 
-        !% --- push JB adjacent diag data to faces
+        !% --- push JB adjacent diag data to faces  QUESTION: HOW IS THIS DIFFERENT THAN CALL TO push_adjacent...(Diag) above?
         ! print *, 'in junction_preliminaries '
         ! print *, 'npack ',npack_elemP(ep_Diag_JBadjacent)
         if (npack_elemP(ep_Diag_JBadjacent) > 0) then
@@ -140,18 +139,18 @@ module junction_elements
         !%     sync all the images first. then copy over the data between
         !%     shared-identical faces. then sync all images again
         sync all
-        call face_shared_face_sync (fp_JB_IorS,[fr_Head_Adjacent,fr_EnergyHead_Adjacent,         &
-                                    fr_Topwidth_Adjacent,fr_Length_Adjacent, fr_Zcrest_Adjacent, &
-                                    fr_Velocity_Adjacent,fr_Froude_Adjacent,fr_Depth_Adjacent,   &
-                                    fr_dQdH_Adjacent])
+        call face_shared_face_sync (fp_JB_IorS,[fr_Head_Adjacent_to_JB,fr_EnergyHead_Adjacent_to_JB,         &
+                                    fr_Topwidth_Adjacent_to_JB,fr_Length_Adjacent_to_JB, fr_Zcrest_Adjacent_to_JB, &
+                                    fr_Velocity_Adjacent_to_JB,fr_Froude_Adjacent_to_JB,fr_Depth_Adjacent_to_JB,   &
+                                    fr_dQdH_Adjacent_to_JB])
         sync all
 
         !% --- compute inflow-based flow data for the JM
         if (N_nJM > 0) then
             call lljunction_main_velocity (ep_JM)
-            ! call util_utest_CLprint ('------- jjj.06 after lljunction_main_velocity')
+                ! call util_utest_CLprint ('------- jjj.06 after lljunction_main_velocity')
             call lljunction_main_energyhead (ep_JM)
-            ! call util_utest_CLprint ('------- jjj.07 after lljunction_main_energyhead')
+                ! call util_utest_CLprint ('------- jjj.07 after lljunction_main_energyhead')
         end if
 
         !% --- JB ENERGY EQUATION compute flows/velocities on JB/CC outflow elements/faces from 
@@ -222,15 +221,52 @@ module junction_elements
         !% cycle through the junctions
         do mm=1,Npack
 
+            ! if (thisP(mm) == printJM) then
+            !     print *, ' '
+            ! print *, 'in junction main volume advance aaa'
+            ! print *, elemR(printJM,er_Volume_N0),  elemR(printJM,er_Volume) , elemR(printJM,er_Volume) - elemR(printJM,er_Volume_N0)
+            ! print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            ! end if
+
+            ! if ((setting%Time%Step > 30686) .and. (thisP(mm) .eq. 13)) then 
+            !     print *, ' '
+            !     print *, 'top of main volume advance' 
+            !     print *, 'starting volume            ',elemR(thisp(mm),er_Volume_N0)
+            !  end if   
+
             !% --- volume change due to lateral inflow
             elemR(thisp(mm),er_Volume)                        &
                 = elemR(thisp(mm),er_Volume_N0)               &
                 + elemR(thisP(mm),er_FlowrateLateral) * dt
 
-            !% --- volume change due to overflow
+                ! if (thisP(mm) == printJM) then
+                !     print *, ' '
+                !     print *, 'in junction main volume advance bbb'
+                !     print *, elemR(printJM,er_Volume_N0),  elemR(printJM,er_Volume) , elemR(printJM,er_Volume) - elemR(printJM,er_Volume_N0)
+                !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+                ! end if
+
+            ! if ((setting%Time%Step > 30686) .and. (thisP(mm) .eq. 13)) then  
+            !     print *, ' lateral vol ', elemR(thisP(mm),er_FlowrateLateral) * dt
+            ! end if   
+
+            !% --- volume change due to overflow or ponding
             elemR(thisp(mm),er_Volume)                        &
                 = elemR (thisp(mm),er_Volume)                 &
-                + elemSR(thisP(mm),esr_JM_OverflowPondingRate) * dt      
+                + elemSR(thisP(mm),esr_JM_OverflowPondingRate) * dt    
+
+
+                ! if ((setting%Time%Step > 30686) .and. (thisP(mm) .eq. 13)) then  
+                !     print *, ' overflow vol ', elemSR(thisP(mm),esr_JM_OverflowPondingRate) * dt    
+                ! end if   
+    
+                
+                ! if (thisP(mm) == printJM) then
+                !     print *, ' '
+                !     print *, 'in junction main volume advance ccc'
+                !     print *, elemR(printJM,er_Volume_N0),  elemR(printJM,er_Volume) , elemR(printJM,er_Volume) - elemR(printJM,er_Volume_N0)
+                !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+                ! end if
 
             !% --- volume change due to overflow or ponding
             select case (elemSI(thisP(mm),esi_JM_OverflowType))
@@ -239,34 +275,12 @@ module junction_elements
                     
                 case (OverflowWeir,OverflowOrifice)
 
-                    ! if (setting%Time%Step > 54165)  then 
-                    !     print *, 'Volume Overflow BBB', elemR(109,er_VolumeOverFlow)
-                    ! end if
-
-                    !% --- VolumeOverFlow > 0 is removing volume
-                    ! elemR(thisp(mm),er_Volume) = elemR(thisp(mm),er_Volume) &
-                    !         - elemR(thisP(mm),er_VolumeOverflow)
-
-                    ! elemR(thisP(mm),er_VolumeOverFlowTotal) = elemR(thisP(mm),er_VolumeOverFlow) &
-                    !     + elemR(thisP(mm),er_VolumeOverFlowTotal)
-
                     elemR(thisP(mm),er_VolumeOverFlowTotal)                  &
                         = elemR (thisP(mm),er_VolumeOverFlowTotal)           &
                         - elemSR(thisP(mm),esr_JM_OverflowPondingRate) * dt  
 
 
                 case (PondedWeir,PondedOrifice)
-
-                    !% --- VolumePonded > 0 is removing volume 
-                    !%     VolumePonded < 0 is adding volume
-                    ! elemR(thisp(mm),er_Volume) = elemR(thisp(mm),er_Volume) &
-                    !         - elemR(thisP(mm),er_VolumePonded)
-
-                    ! elemR(thisp(mm),er_Volume) = elemR(thisp(mm),er_Volume) &
-                    !         + elemSR(thisP(mm),esr_JM_OverflowPondingRate) * dt
-
-                    ! elemR(thisP(mm),er_VolumePondedTotal) = elemR(thisP(mm),er_VolumePonded) &
-                    !     + elemR(thisP(mm),er_VolumePondedTotal)
 
                     elemR(thisP(mm),er_VolumePondedTotal)                   &
                         = elemR (thisP(mm),er_VolumePondedTotal)            &
@@ -277,28 +291,108 @@ module junction_elements
                     call util_crashpoint(772223)
             end select
 
+            ! if (thisP(mm) == printJM) then
+            !     print *, ' '
+            ! print *, 'in junction main volume advance ddd'
+            ! print *, elemR(printJM,er_Volume_N0),  elemR(printJM,er_Volume) , elemR(printJM,er_Volume) - elemR(printJM,er_Volume_N0)
+            ! print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            ! end if
+
             !% --- volume change due to branch flows
+            elemSR(thisP(mm),esr_JM_FlowrateNetConservative) = zeroR
             do kk=1,max_branch_per_node
                 if (elemSI(thisP(mm)+kk,esi_JB_Exists) .ne. oneI) cycle
                 if (mod(kk,2) == 0) then 
                     !% --- downstream branch
                     elemR(thisP(mm),er_Volume) = elemR(thisp(mm),er_Volume) &
                         - faceR(elemI(thisP(mm)+kk,ei_Mface_dL),fr_Flowrate_Conservative) * dt
+
+                    elemSR(thisP(mm),esr_JM_FlowrateNetConservative) &
+                        = elemSR(thisP(mm),esr_JM_FlowrateNetConservative)  &
+                        - faceR(elemI(thisP(mm)+kk,ei_Mface_dL),fr_Flowrate_Conservative)
+
+                        ! if ((setting%Time%Step > 30686) .and. (thisP(mm) .eq. 13)) then 
+                        !     print *, ' downstream inflow vol',kk, - faceR(elemI(thisP(mm)+kk,ei_Mface_dL),fr_Flowrate_Conservative) * dt  
+                        ! end if
+
                 else 
                     !% --- upstream branch
                     elemR(thisP(mm),er_Volume) = elemR(thisp(mm),er_Volume) &
                         + faceR(elemI(thisP(mm)+kk,ei_Mface_uL),fr_Flowrate_Conservative) * dt
+
+                    elemSR(thisP(mm),esr_JM_FlowrateNetConservative) &
+                        = elemSR(thisP(mm),esr_JM_FlowrateNetConservative)  &
+                        + faceR(elemI(thisP(mm)+kk,ei_Mface_uL),fr_Flowrate_Conservative)
+
+                        ! if ((setting%Time%Step > 30686) .and. (thisP(mm) .eq. 13)) then 
+                        !     print *, ' upstream inflow vol',kk, + faceR(elemI(thisP(mm)+kk,ei_Mface_uL),fr_Flowrate_Conservative) * dt 
+                        ! end if
+
                 end if
             end do
 
-        end do
+            ! if ((setting%Time%Step > 30686) .and. (thisP(mm) .eq. 13)) then  
+            !     print *, ' net flow vol ', elemSR(thisP(mm),esr_JM_FlowrateNetConservative) *dt   
+            !     print *, ' '
+            ! end if   
+    
+    
 
-        ! print *, ' '
-        ! print *, 'SINGLE POINT CHECK in junction_main_volume_advance'
-        ! print *, -(elemR(116,er_Volume) - elemR(116,er_Volume_N0)) & 
-        !          + elemR(116,er_FlowrateLateral)  * setting%Time%Hydraulics%Dt &
-        !          + faceR(elemI(117,ei_Mface_uL),fr_Flowrate_Conservative) * setting%Time%Hydraulics%Dt &
-        !          - faceR(elemI(118,ei_Mface_dL),fr_Flowrate_Conservative) * setting%Time%Hydraulics%Dt
+            ! if (thisP(mm) == printJM) then
+            !     print *, ' '
+            !     print *, 'in junction main volume advance eee'
+            !     print *, elemR(printJM,er_Volume_N0),  elemR(printJM,er_Volume) , elemR(printJM,er_Volume) - elemR(printJM,er_Volume_N0)
+            !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            !     end if
+
+            ! if (elemR(thisP(mm),er_Volume)  < setting%ZeroValue%Volume) then 
+            !     print *, ' '
+            !     print *, 'in junction vol adv 1,', thisP(mm), elemR(thisP(mm),er_VolumeArtificialInflow)
+            !     print *, 'volume ', thisP(mm),elemR(thisP(mm),er_Volume)
+            !     print *, ' '
+            ! end if
+
+
+            !% --- adjust volume with artificial inflow when dropping too low.
+            if (elemR(thisP(mm),er_Volume)  < setting%ZeroValue%Volume) then 
+                elemR(thisP(mm),er_VolumeArtificialInflow)                     &
+                    =  (setting%ZeroValue%Volume - elemR(thisP(mm),er_Volume))
+                elemR(thisP(mm),er_Volume) = setting%ZeroValue%Volume
+            end if
+
+            ! if (elemR(thisP(mm),er_VolumeArtificialInflow) .ne. zeroR) then 
+            !     print *, 'in junction vol adv 2,', thisP(mm), elemR(thisP(mm),er_VolumeArtificialInflow)
+            !     print *, ' '
+            ! end if
+
+            ! if (thisP(mm) == printJM) then
+            !     print *, ' '
+            !     print *, 'in junction main volume advance fff'
+            !     print *, elemR(printJM,er_Volume_N0),  elemR(printJM,er_Volume) , elemR(printJM,er_Volume) - elemR(printJM,er_Volume_N0)
+            !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+
+            !     print *, ' '
+            !     print *, 'conservation '
+            !     print *, elemR (printJM,er_Volume) - elemR(printJM,er_Volume_N0) & 
+            !            - elemSR(printJM,esr_JM_FlowrateNetConservative) * dt &
+            !            + elemSR(thisP(mm),esr_JM_OverflowPondingRate) * dt &
+            !            - elemR(thisP(mm),er_FlowrateLateral) * dt & 
+            !            - elemR(printJM,er_VolumeArtificialInflow)
+
+            !     print *, ' '
+            !     print *, 'dVol  ', elemR (printJM,er_Volume) - elemR(printJM,er_Volume_N0) 
+            !     print *, 'Qnet  ', elemSR(printJM,esr_JM_FlowrateNetConservative) * dt
+            !     print *, 'QLat  ', elemR(thisP(mm),er_FlowrateLateral) * dt 
+            !     print *, '-Qpond', -elemSR(thisP(mm),esr_JM_OverflowPondingRate) * dt
+            !     print *, 'Qart  ', elemR(printJM,er_VolumeArtificialInflow)
+            !     print *, ' ===='
+
+            ! end if
+
+
+
+
+        end do
 
     end subroutine junction_main_volume_advance
 !%
@@ -317,7 +411,24 @@ module junction_elements
         ! print *, elemI(101,ei_Mface_dL)
 
         ! call util_utest_CLprint('aaaa top of junction 1st step -------------------------------------')
+        ! if (setting%Time%Step .ge. stepcut) then
+        !     print *,' '
+        !     print *,'Vol JM ',elemR(printJM,er_Volume_N0),elemR(printJM,er_Volume)
+        !     print *,'QoutJB ',elemR(printJB,er_Flowrate) * setting%Time%Hydraulics%Dt
+        ! end if
         ! print *, ' '
+
+        ! if (setting%Time%Step > stepcut) then 
+        !     print *, ' '
+        !     print *, 'in junction 1st step  1111'
+        !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+        !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+        !     print *, ' '
+        ! end if
+
+        ! if (setting%Time%Step > 30686) then 
+        !     print *, 'AAAAA ',elemR(printJB,er_Flowrate)
+        ! end if
 
         if (N_nJM > 0) then 
             !% --- forces JB elem Q to faces (overriding the interpolation)
@@ -326,8 +437,17 @@ module junction_elements
             !%     assigns new JB and JM aux values
             call junction_toplevel(1)
 
-            ! call util_utest_CLprint('zzzz after junction toplevel -------------------------------------')
+            ! call util_utest_CLprint('bbbb after junction toplevel -------------------------------------')
+            ! if (setting%Time%Step .ge. stepcut) then
+            !     print *,' '
+            !     print *,'Vol JM ',elemR(printJM,er_Volume_N0),elemR(printJM,er_Volume)
+            !     print *,'QoutJB ',elemR(printJB,er_Flowrate) * setting%Time%Hydraulics%Dt
+            ! end if
            ! print *, 'BBBB ',elemR(101,er_Flowrate)
+
+            ! if (setting%Time%Step > 30686) then 
+            !     print *, 'BBBBB ',elemR(printJB,er_Flowrate)
+            ! end if
 
         end if       
         !% ==============================================================
@@ -343,8 +463,31 @@ module junction_elements
         !% 
         !% ==============================================================
 
+        ! if (setting%Time%Step > stepcut) then 
+        !     print *, ' '
+        !     print *, 'in junction 1st step  2222'
+        !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+        !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+        !     print *, ' '
+        ! end if
+
+        ! call util_utest_CLprint('uuuu junction first step -------------------------------------')
+        ! if (setting%Time%Step .ge. stepcut) then
+        !     print *,' '
+        !     print *,'Vol JM ',elemR(printJM,er_Volume_N0),elemR(printJM,er_Volume)
+        !     print *,'QoutJB ',elemR(printJB,er_Flowrate) * setting%Time%Hydraulics%Dt
+        ! end if
+
         !% --- update velocities for new flowrates on JB faces
         call face_update_velocities (fp_JB_IorS)
+
+        ! if (setting%Time%Step > stepcut) then 
+        !     print *, ' '
+        !     print *, 'in junction 1st step  3333'
+        !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+        !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+        !     print *, ' '
+        ! end if
 
         ! print *, 'DDDD ',elemR(101,er_Flowrate)
 
@@ -364,6 +507,12 @@ module junction_elements
         ! end if
 
         ! print *, 'EEEE ',elemR(101,er_Flowrate)
+        ! call util_utest_CLprint('vvvv junction first step -------------------------------------')
+        ! if (setting%Time%Step .ge. stepcut) then
+        !     print *,' '
+        !     print *,'Vol JM ',elemR(printJM,er_Volume_N0),elemR(printJM,er_Volume)
+        !     print *,'QoutJB ',elemR(printJB,er_Flowrate) * setting%Time%Hydraulics%Dt
+        ! end if
 
         !% ==============================================================
         !% --- face sync
@@ -377,20 +526,87 @@ module junction_elements
         !% 
         !% ==============================================================
 
+        ! call util_utest_CLprint('wwww junction first step -------------------------------------')
+        ! if (setting%Time%Step .ge. stepcut) then
+        !     print *,' '
+        !     print *,'Vol JM ',elemR(printJM,er_Volume_N0),elemR(printJM,er_Volume)
+        !     print *,'QoutJB ',elemR(printJB,er_Flowrate) * setting%Time%Hydraulics%Dt
+        ! end if
+        ! if (setting%Time%Step > stepcut) then 
+        !     print *, ' '
+        !     print *, 'in junction 1st step  4444'
+        !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+        !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+        !     print *, ' '
+        ! end if
+
         !% --- these calls are outside of the if (N_nJM) statement to prevent any race conditions
         !% --- update various packs of zeroDepth faces
         call pack_JB_zeroDepth_interior_faces ()
 
+        ! call util_utest_CLprint('xxxx junction first step -------------------------------------')
+        ! if (setting%Time%Step .ge. stepcut) then
+        !     print *,' '
+        !     print *,'Vol JM ',elemR(printJM,er_Volume_N0),elemR(printJM,er_Volume)
+        !     print *,'QoutJB ',elemR(printJB,er_Flowrate) * setting%Time%Hydraulics%Dt
+        ! end if
+
         sync all
         call pack_JB_zeroDepth_shared_faces () 
         sync all
+
+        ! call util_utest_CLprint('yyyy junction first step -------------------------------------')
+        ! if (setting%Time%Step .ge. stepcut) then
+        !     print *,' '
+        !     print *,'Vol JM ',elemR(printJM,er_Volume_N0),elemR(printJM,er_Volume)
+        !     print *,'QoutJB ',elemR(printJB,er_Flowrate) * setting%Time%Hydraulics%Dt
+        ! end if
+
+        ! if (setting%Time%Step > 120908) then 
+        ! print *, ' '
+        ! write(*,"(4(e12.5,A))") elemR(134,er_Depth), ' ', faceR(131,fr_Depth_u), ' ',faceR(131,fr_Depth_d), ' ',elemR(923,er_Depth)
+        ! print *, elemR(134,er_Flowrate), faceR(131,fr_Flowrate), elemR(923,er_Flowrate)
+        ! print *, 'face zerodepth down ',faceP(1:npack_faceP(fp_JB_downstream_is_zero_IorS),fp_JB_downstream_is_zero_IorS)
+        ! print *, 'face zerodepth up   ',faceP(1:npack_faceP(fp_JB_upstream_is_zero_IorS)  ,fp_JB_upstream_is_zero_IorS)
+        ! print *, 'face zerodepth both ',faceP(1:npack_faceP(fp_JB_bothsides_are_zero_IorS),fp_JB_bothsides_are_zero_IorS)
+        ! print *, ' '
+
+        ! end if
 
         !% --- set face geometry and flowrates where adjacent element is zero
         !%     only applies to faces with JB on one side
         call face_zeroDepth (fp_JB_downstream_is_zero_IorS, &
             fp_JB_upstream_is_zero_IorS,fp_JB_bothsides_are_zero_IorS)
 
+
+            ! if (setting%Time%Step > 120908) then 
+            !     print *, ' '
+            !     print *, 'after '
+            !     write(*,"(4(e12.5,A))") elemR(134,er_Depth), ' ', faceR(131,fr_Depth_u), ' ',faceR(131,fr_Depth_d), ' ',elemR(923,er_Depth)
+            !     print *, elemR(134,er_Flowrate), faceR(131,fr_Flowrate), elemR(923,er_Flowrate)
+            !     !print *, 'face zerodepth down ',faceP(1:npack_faceP(fp_JB_downstream_is_zero_IorS),fp_JB_downstream_is_zero_IorS)
+            !     !print *, 'face zerodepth up   ',faceP(1:npack_faceP(fp_JB_upstream_is_zero_IorS)  ,fp_JB_upstream_is_zero_IorS)
+            !     !print *, 'face zerodepth both ',faceP(1:npack_faceP(fp_JB_bothsides_are_zero_IorS),fp_JB_bothsides_are_zero_IorS)
+            !     print *, ' '
+        
+            !     end if
+
             ! print *, 'FFFF',elemR(101,er_Flowrate)
+
+            ! if (setting%Time%Step > stepcut) then 
+            !     print *, ' '
+            !     print *, 'in junction 1st step  5555'
+            !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+            !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            !     print *, ' '
+            ! end if
+
+            ! call util_utest_CLprint('zzzz end of junction first step -------------------------------------')
+            ! if (setting%Time%Step .ge. stepcut) then
+            !     print *,' '
+            !     print *,'Vol JM ',elemR(printJM,er_Volume_N0),elemR(printJM,er_Volume)
+            !     print *,'QoutJB ',elemR(printJB,er_Flowrate) * setting%Time%Hydraulics%Dt
+            ! end if
         
     end subroutine junction_first_step
 !%
@@ -428,10 +644,12 @@ module junction_elements
             !     print *, ' '
             ! end if
 
-            ! if (setting%Time%Step > 52100) then 
+            ! if (setting%Time%Step > stepcut) then 
             !     print *, ' '
             !     print *, 'in junction 2nd step before'
-            !     print *, 'volume ',elemR(30,er_Volume), elemR(30,er_Volume_N0)
+            !     print *, elemR(printJM,er_Volume), elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+            !     print *, elemSR(printJM,esr_JM_FlowrateTotalIn) - elemSR(printJM,esr_JM_FlowrateTotalOut)
+            !     print *, elemSR(printJM,esr_JM_OverflowPondingRate)
             !     print *, ' '
             ! end if
 
@@ -439,24 +657,57 @@ module junction_elements
             !% --- new junction volume from conservative face fluxes
             call junction_main_volume_advance (ep_JM, Npack)
 
-            ! if (setting%Time%Step > 52100) then 
+            ! if (setting%Time%Step > stepcut) then 
             !     print *, ' '
-            !     print *, 'in junction 2nd step'
-            !     print *, 'volume ',elemR(30,er_Volume), elemR(30,er_Volume_N0)
+            !     print *, 'in junction 2nd step after main volume'
+            !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+            !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            !     ! print *, elemSR(printJM,esr_JM_FlowrateTotalIn) - elemSR(printJM,esr_JM_FlowrateTotalOut)
+            !     ! print *, elemSR(printJM,esr_JM_OverflowPondingRate)
             !     print *, ' '
             ! end if
 
             !% --- new junction plan area (non-surcharged functional, tabular storage only)
             call geo_plan_area_from_volume_JM (elemPGetm, npack_elemPGetm, col_elemPGetm)
+
+            ! if (setting%Time%Step > stepcut) then 
+            !     print *, ' '
+            !     print *, 'in junction 2nd step  CCCC'
+            !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+            !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            !     ! print *, elemSR(printJM,esr_JM_FlowrateTotalIn) - elemSR(printJM,esr_JM_FlowrateTotalOut)
+            !     ! print *, elemSR(printJM,esr_JM_OverflowPondingRate)
+            !     print *, ' '
+            ! end if
             
             !% --- compute slots based on solved volume
             !%     includes the JunctionMain_Surcharge_Plan_Area
             call slot_JM (ep_JM, Npack)
+
+            ! if (setting%Time%Step > stepcut) then 
+            !     print *, ' '
+            !     print *, 'in junction 2nd step DDDD'
+            !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+            !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            !     print *, ' '
+            !     ! print *, elemSR(printJM,esr_JM_FlowrateTotalIn) - elemSR(printJM,esr_JM_FlowrateTotalOut)
+            !     ! print *, elemSR(printJM,esr_JM_OverflowPondingRate)
+            ! end if
             
             !% --- new junction depth 
             !%     NOTE: THIS USES storage_implied_depth_from_volume
             !%     that limits depth based on fulldepth, Slot is added back in slot_JM_adjustments
             call geo_depth_from_volume_JM (elemPGetm, npack_elemPGetm, col_elemPGetm)
+
+            ! if (setting%Time%Step > stepcut) then 
+            !     print *, ' '
+            !     print *, 'in junction 2nd step EEEE'
+            !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+            !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            !     ! print *, elemSR(printJM,esr_JM_FlowrateTotalIn) - elemSR(printJM,esr_JM_FlowrateTotalOut)
+            !     ! print *, elemSR(printJM,esr_JM_OverflowPondingRate)
+            !      print *, ' '
+            ! end if
         
             !% --- new JM head, ellDepth and area
             elemR(thisP,er_Head)     = llgeo_head_from_depth_pure (thisP,elemR(thisP,er_Depth))
@@ -464,8 +715,28 @@ module junction_elements
             elemR(thisP,er_Area)     = elemR(thisP,er_Depth) * sqrt(elemSR(thisP,esr_Storage_Plan_Area))
             elemR(thisP,er_AreaVelocity) = elemR(thisP,er_Area)
 
+            ! if (setting%Time%Step > stepcut) then 
+            !     print *, ' '
+            !     print *, 'in junction 2nd step FFFF'
+            !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+            !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            !     ! print *, elemSR(printJM,esr_JM_FlowrateTotalIn) - elemSR(printJM,esr_JM_FlowrateTotalOut)
+            !     ! print *, elemSR(printJM,esr_JM_OverflowPondingRate)
+            !     print *, ' '
+            ! end if
+
             !% --- add the Preissmann slot depths back to head 
             call slot_JM_adjustments (ep_JM, Npack)
+
+            ! if (setting%Time%Step > stepcut) then 
+            !     print *, ' '
+            !     print *, 'in junction 2nd step GGGG'
+            !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+            !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            !     ! print *, elemSR(printJM,esr_JM_FlowrateTotalIn) - elemSR(printJM,esr_JM_FlowrateTotalOut)
+            !     ! print *, elemSR(printJM,esr_JM_OverflowPondingRate)
+            !     print *, ' '
+            ! end if
 
             ! print *, ' '
             ! print *, 'SlotDepth after JM adjust ',elemR(printJM,er_SlotDepth)
@@ -473,18 +744,38 @@ module junction_elements
             ! print *, ' '
 
             !% --- adjust JM for small or zero depth
-            call adjust_element_toplevel (JM)
+            call adjust_element_toplevel (JM,.true.)
 
-            ! print *, 'JB head before'
-            ! print *, elemR(169,er_Head), elemR(170,er_Head)
-            ! print *, ' '
+            ! if (setting%Time%Step > stepcut) then 
+            !     print *, ' '
+            !     print *, 'in junction 2nd step HHHH'
+            !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+            !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            !     print *, ' '
+            ! end if
 
             if (setting%AirTracking%UseAirTrackingYN) then 
                 elemR(thisP,er_Head) = elemR(thisP,er_Head) + elemSR(thisP,esr_JM_Air_HeadGauge)
             end if
+
+            ! if (setting%Time%Step > stepcut) then 
+            !     print *, ' '
+            !     print *, 'in junction 2nd step III'
+            !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+            !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            !     print *, ' '
+            ! end if
             
             !% --- assign JB values based on new JM head
             call geo_assign_JB_from_head (ep_JM) !% HACK  revise using ep_JB
+
+            ! if (setting%Time%Step > stepcut) then 
+            !     print *, ' '
+            !     print *, 'in junction 2nd step JJJJ'
+            !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+            !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            !     print *, ' '
+            ! end if
 
             ! print *, 'JB head after'
             ! print *, elemR(169,er_Head), elemR(170,er_Head)
@@ -493,17 +784,35 @@ module junction_elements
             !% --- Preissmann slot computations
             call slot_JB_computation (ep_JM)
 
+            ! if (setting%Time%Step > stepcut) then 
+            !     print *, ' '
+            !     print *, 'in junction 2nd step KKKK'
+            !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+            !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            !     print *, ' '
+            ! end if
+
             ! print *, 'SlotDepth after JB',elemR(169,er_SlotDepth),elemR(170,er_SlotDepth)
             ! print *, ' '
 
             !% --- adjust JB for small or zero depth
-            call adjust_element_toplevel (JB)
+            call adjust_element_toplevel (JB,.false.)
+
+            ! if (setting%Time%Step > stepcut) then 
+            !     print *, ' '
+            !     print *, 'in junction 2nd step LLLL'
+            !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume) -elemR(printJM,er_Volume_N0)
+            !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            !     print *, ' '
+            ! end if
 
             ! print *, 'Head end of 2nd step'
             ! print *, elemR(169,er_Head), elemR(168,er_Head), elemR(170,er_Head)
             ! print *, ' '
             
         end if
+
+        ! print *, 'almost to end '
 
         !% --- auxiliary variables update
         !%     replaces update_auxiliary_variables_JMJB
@@ -550,12 +859,19 @@ module junction_elements
             thisP => elemP(1:Npack,ep_JM)
         !%------------------------------------------------------------------
 
+            ! if (setting%Time%Step > stepcut) then 
+                ! print *, '---- JTL 01',elemR(printJB,er_Head)
+            ! end if
+
         !% --- Consistency, store face values identical
         !% --- store face flowrate in JB for upstream (1) and downstream (2)
         !%     This is required because the face flowrates may have changed by 
         !%     interpolation on JB/CC branches
-        call face_pull_facedata_to_JBelem (ep_JM, fr_Flowrate, er_Flowrate, .true.)
-        call face_pull_facedata_to_JBelem (ep_JM, fr_Flowrate, er_Flowrate, .false.)
+        call face_pull_facedata_to_JBelem (ep_JM, fr_Flowrate, er_Flowrate, elemR, .true., .true.)
+
+            ! if (setting%Time%Step > stepcut) then 
+                ! print *, '---- JTL 02',elemR(printJB,er_Head)
+            ! end if
 
         ! do mm=1,Npack
         !     call lljunction_branch_getface (elemR(:,er_Flowrate),fr_Flowrate,thisP(mm),ei_Mface_uL,1)
@@ -564,9 +880,30 @@ module junction_elements
 
         ! call util_utest_CLprint('bbb after branch getface -------------------------------------')
 
+
+        ! if (setting%Time%Step > stepcut) then 
+        !     print *, ' '
+        !     print *, 'in junction top level AAAAA'
+        !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+        !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+        !     print *, ' '
+        ! end if
+
         !% --- compute the new junction element volume and head, JB flowrates
         !%     Does not change JB face values or JB values other than flowrate.
         call junction_calculation (thisP, Npack, istep)
+
+        ! if (setting%Time%Step > 30686) then 
+            ! print *, 'BBBBB 03',elemR(printJB,er_Head)
+        ! end if
+
+        ! if (setting%Time%Step > stepcut) then 
+        !     print *, ' '
+        !     print *, 'in junction top level BBBBB'
+        !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+        !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+        !     print *, ' '
+        ! end if
 
         !% --- at this point, the JB flows are conservative with the dH, but the Diag that
         !%     are JB adjacent have not been updated.
@@ -575,10 +912,34 @@ module junction_elements
 
         call geo_assign_JB_from_head (ep_JM)
 
+        ! if (setting%Time%Step > 30686) then 
+            ! print *, 'BBBBB 04',elemR(printJB,er_Head)
+        ! end if
+
+        ! if (setting%Time%Step > stepcut) then 
+        !     print *, ' '
+        !     print *, 'in junction top level CCCCC'
+        !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+        !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+        !     print *, ' '
+        ! end if
+
         ! call util_utest_CLprint('ddd after assign JB -------------------------------------')
 
         !%  -- we need JB slot computations here
         call slot_JB_computation (ep_JM)
+
+        ! if (setting%Time%Step > 30686) then 
+            !  print *, 'BBBBB 05',elemR(printJB,er_Head)
+        ! end if
+
+        ! if (setting%Time%Step > stepcut) then 
+        !     print *, ' '
+        !     print *, 'in junction top level DDDD'
+        !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+        !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+        !     print *, ' '
+        ! end if
 
         ! call util_utest_CLprint('fff after slot JB -------------------------------------')
 
@@ -599,7 +960,19 @@ module junction_elements
         call face_push_JBelem_to_face (ep_JM, fr_Head_u, er_Head, .true.) 
         call face_make_up_dn_identical(fp_JB_IorS, fr_Head_u, fr_Head_d)
 
+        ! if (setting%Time%Step > 30686) then 
+            ! print *, 'BBBBB 06',elemR(printJB,er_Head)
+        ! end if
+
         ! call util_utest_CLprint('fff02 after face push JB elem to face B-------------------------------------')
+
+        ! if (setting%Time%Step > stepcut) then 
+        !     print *, ' '
+        !     print *, 'in junction top level FFFF'
+        !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+        !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+        !     print *, ' '
+        ! end if
 
         !% --- at this point, JB elements and their faces have fluxes that are consistent with
         !%     the change in volume of the JM element.  However, if two JM are separated by 
@@ -614,15 +987,38 @@ module junction_elements
 
         if (N_diag > 0) then
             call diagnostic_flowrate_replaced_by_JB (ep_Diag_JBadjacent)
+            ! if (setting%Time%Step > 30686) then 
+                ! print *, 'BBBBB 06a',elemR(printJB,er_Head)
+            ! end if
             call face_push_elemdata_to_face (ep_Diag_JBadjacent, fr_Flowrate, er_Flowrate, elemR, .true.)
+            ! if (setting%Time%Step > 30686) then 
+                ! print *, 'BBBBB 06b',elemR(printJB,er_Head)
+            ! end if
             call face_push_elemdata_to_face (ep_Diag_JBadjacent, fr_Flowrate, er_Flowrate, elemR, .false.)
+            ! if (setting%Time%Step > 30686) then 
+                ! print *, 'BBBBB 06c',elemR(printJB,er_Head)
+            ! end if
             call face_push_diag_data_to_JBelem(fr_Flowrate, er_Flowrate)
-            !% NOTE: we assume that a partition break CANNOT occur at the JB adjacen to a Diag element
+            !% NOTE: we assume that a partition break CANNOT occur at the JB adjacent to a Diag element
             !% so there is no need to sync after these updates.
         end if
 
+        ! if (setting%Time%Step > 30686) then 
+            ! print *, 'BBBBB 07',elemR(printJB,er_Head)
+        !     print *, 'face   ',elemI(printJB,ei_Mface_dL)
+        !     print *, 'element',faceI(elemI(printJB,ei_Mface_dL),fi_Melem_dL)
+        !     print *, 'type   ',reverseKey(elemI(faceI(elemI(printJB,ei_Mface_dL),fi_Melem_dL),ei_elementType))
+        ! end if
+
         ! call util_utest_CLprint('fff03 after diagnostic and face push-------------------------------------')
 
+        ! if (setting%Time%Step > stepcut) then 
+        !     print *, ' '
+        !     print *, 'in junction top level GGGG'
+        !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+        !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+        !     print *, ' '
+        ! end if
  
         ! if (N_diag > 0) then
         !     call diagnostic_by_type(ep_Diag_JBadjacent, istep)
@@ -652,10 +1048,22 @@ module junction_elements
         if (Npack > 0) then
             thisP => elemP(1:Npack, ep_JM)
             !% --- adjust JM for small or zero depth (may be redundant)
-            call adjust_element_toplevel (JM)
+            call adjust_element_toplevel (JM,.false.)
             call update_wavespeed_element(thisP)
             call update_Froude_number_element (thisP) 
         end if
+
+        ! if (setting%Time%Step > 30686) then 
+        !   print *, 'BBBBB 08',elemR(printJB,er_Head)
+        ! end if
+
+        ! if (setting%Time%Step > stepcut) then 
+        !     print *, ' '
+        !     print *, 'in junction top level HHHH'
+        !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+        !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+        !     print *, ' '
+        ! end if
 
         ! call util_utest_CLprint('ggg after updates JM -------------------------------------')
 
@@ -667,11 +1075,23 @@ module junction_elements
         if (Npack > 0) then 
             thisP => elemP(1:Npack, ep_JB)
             !% --- adjust JB for small or zero depth (may be redundant)
-            call adjust_element_toplevel (JB)
+            call adjust_element_toplevel (JB,.false.)
             call update_Froude_number_element (thisP) 
             call update_wavespeed_element(thisP)
             call update_interpweights_JB (thisP, Npack, .false.)    !% 20230904brh change to FALSE
         end if
+
+        ! if (setting%Time%Step > 30686) then 
+            ! print *, 'BBBBB 09',elemR(printJB,er_Head)
+        ! end if
+
+        ! if (setting%Time%Step > stepcut) then 
+        !     print *, ' '
+        !     print *, 'in junction top level IIII'
+        !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+        !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+        !     print *, ' '
+        ! end if
 
         ! call util_utest_CLprint('hhh after updates JB -------------------------------------')
 
@@ -693,7 +1113,7 @@ module junction_elements
             integer, intent(in) :: Npack, istep
             integer, dimension(Npack), intent(in) :: thisJM 
 
-            integer :: mm, JMidx
+            integer :: mm, JMidx, kk
 
             real(8), pointer :: Qstorage(:), Qoverflow(:), Qlateral(:)
             real(8), pointer :: MinHeadForOverflowPonding
@@ -736,11 +1156,18 @@ module junction_elements
                 canOverflowOrPond = .true.
             end if
 
+            ! if ((setting%Time%Step > stepcut).and. (JMidx == printJM)) then 
+            !     print *, ' '
+            ! !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+            ! !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            ! !     print *, ' '
+            ! end if
+
             ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
-                    ! print *, '***AAAA JB flowrate ',elemR(printJB,er_Flowrate)
-            ! !         print *, 'plan area        ',elemSR(JMidx,esr_JM_Present_PlanArea)
-            ! !         print *, 'slot width       ',elemR(JMidx,er_SlotWidth)
-            ! !         print *, 'length           ',elemR(JMidx,er_Length)
+            !         print *, '***AAAA JB flowrate ',elemR(printJB,er_Flowrate)
+            !         ! print *, 'plan area        ',elemSR(JMidx,esr_JM_Present_PlanArea)
+            !         ! print *, 'slot width       ',elemR(JMidx,er_SlotWidth)
+            !         ! print *, 'length           ',elemR(JMidx,er_Length)
             ! end if
 
             ! !% --- 20230913 -- presently sets large values
@@ -752,9 +1179,17 @@ module junction_elements
             !% --- set the present plan area
             elemSR(JMidx,esr_JM_Present_PlanArea) = lljunction_main_plan_area(JMidx)
 
+            ! if ((setting%Time%Step > stepcut).and. (JMidx == printJM)) then 
+            !     print *, ' '
+            !     print *, 'in junction calc  bbb222'
+            !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+            !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            !     print *, ' '
+            ! end if
+
             ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
             !     print *, '***BBBB JB flowrate ',elemR(printJB,er_Flowrate)
-            ! !     print *, 'plan area        ',elemSR(JMidx,esr_JM_Present_PlanArea)
+            !     ! print *, 'plan area        ',elemSR(JMidx,esr_JM_Present_PlanArea)
             ! end if
 
             !% --- set the overflow/ponding heads
@@ -762,7 +1197,20 @@ module junction_elements
 
             ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
             !     print *, '***CCCC JB flowrate ',elemR(printJB,er_Flowrate)
-            ! !     print *, 'plan area        ',elemSR(JMidx,esr_JM_Present_PlanArea)
+            ! end if
+
+
+            ! if ((setting%Time%Step > stepcut).and. (JMidx == printJM)) then 
+            !     print *, ' '
+            !     print *, 'in junction calc  ccc333'
+            !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+            !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            !     print *, ' '
+            ! end if
+
+            ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
+            !     print *, '***CCCC JB flowrate ',elemR(printJB,er_Flowrate)
+            !     print *, 'plan area        ',elemSR(JMidx,esr_JM_Present_PlanArea)
             ! end if
 
             !% --- get the net flowrate based on n data from all sources
@@ -773,9 +1221,27 @@ module junction_elements
             call lljunction_main_netFlowrate &
                  (JMidx, Qnet, canOverflowOrPond, isOverflow, isPonding)
 
+                ! if ((setting%Time%Step > stepCut) .and. (JMidx .eq. printJM)) then 
+                !     print *, '***DDDD  Qnet ',Qnet
+                ! end if
+
+
                 ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
                 !     print *, '***DDDD JB flowrate ',elemR(printJB,er_Flowrate)
-                ! !     print *, 'plan area        ',elemSR(JMidx,esr_JM_Present_PlanArea)
+                !     ! print *, 'plan area        ',elemSR(JMidx,esr_JM_Present_PlanArea)
+
+                ! end if
+
+                !  if ((setting%Time%Step > stepcut).and. (JMidx == printJM)) then 
+                !     print *, ' '
+                !     print *, 'in junction calc  ddd444'
+                !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+                !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+                !     print *, ' '
+                ! end if
+
+                ! if ((setting%Time%Step > 30686) .and. (JMidx .eq. printJM)) then 
+                !     print *, 'EEEE ',elemR(printJB,er_Flowrate)
                 ! end if
 
             !% --- fix flowrates if drying junction
@@ -783,9 +1249,22 @@ module junction_elements
                 call lljunction_main_dryingfix (JMidx, Qnet)     
             end if
 
+            ! if ((setting%Time%Step > stepCut) .and. (JMidx .eq. printJM)) then 
+            !     print *, '***FFFF Qnet ',Qnet
+            ! end if
+
+
+            ! if ((setting%Time%Step > stepcut).and. (JMidx == printJM)) then 
+            !     print *, ' '
+            !     print *, 'in junction calc  eee555'
+            !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+            !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+            !     print *, ' '
+            ! end if
+
             ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
             !     print *, '***EEEE JB flowrate ',elemR(printJB,er_Flowrate)
-            ! !     print *, 'plan area        ',elemSR(JMidx,esr_JM_Present_PlanArea)
+            !     ! print *, 'plan area        ',elemSR(JMidx,esr_JM_Present_PlanArea)
             ! end if
 
                 !  if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
@@ -793,8 +1272,14 @@ module junction_elements
                 !     print *, 'in junction calculation after net flowrate'
                 !     print *, 'net flowrate vol', Qnet  * setting%Time%Hydraulics%Dt
                 !     print *, 'volumes ',elemR(JMidx,er_Volume), elemR(JMidx,er_Volume_N0)
-                !     print *, 'Q vol up',elemR(JMidx+1,er_Flowrate) * setting%Time%Hydraulics%Dt
-                !     print *, 'Q vol dn',elemR(JMidx+2,er_Flowrate) * setting%Time%Hydraulics%Dt
+                !     do kk=1,max_branch_per_node
+                !         if (elemSI(JMidx+kk,esi_JB_Exists) .ne. oneI) cycle
+                !         if (mod(kk,2) .eq. zeroI) then 
+                !             print *, 'Q vol dn',elemR(JMidx+kk,er_Flowrate) * setting%Time%Hydraulics%Dt
+                !         else
+                !             print *, 'Q vol up',elemR(JMidx+kk,er_Flowrate) * setting%Time%Hydraulics%Dt
+                !         end if
+                !     end do
                 !     print *, 'Qlat    ',elemR(JMidx,er_FlowrateLateral)  * setting%Time%Hydraulics%Dt
                 !     print *, 'sum flow', &
                 !        elemR(JMidx+1,er_Flowrate) * setting%Time%Hydraulics%Dt &
@@ -803,12 +1288,16 @@ module junction_elements
                 !     print *, ' '
                 ! end if
 
+                ! if ((setting%Time%Step > 30686) .and. (JMidx .eq. printJM)) then 
+                !     print *, 'GGGG Qnet ',Qnet
+                ! end if
+
             ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
             !      print *, 'Overflow rate:  ',elemSR(JMidx,esr_JM_OverflowPondingRate)
             ! end if
 
                 ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
-                !     print *, 'CCCC'
+                !     print *, '****CCCC before dH compute'
                 !     print *, 'dH           ',dH
                 !     print *, 'Storage rate ',elemSR(JMidx,esr_JM_StorageRate)
                 ! end if
@@ -822,8 +1311,20 @@ module junction_elements
                 (JMidx, dH, dQdHoverflow,  dQdHstorage, Qnet, Hbound, istep, &
                 isOverflow, isPonding, .false., .false.)
 
+                ! if ((setting%Time%Step > stepCut) .and. (JMidx .eq. printJM)) then 
+                !     print *, '***GGGG JB flowrate ',elemR(printJB,er_Flowrate)
+                !     print *, '                 dH ',dH
+                ! end if
+
+                ! if ((setting%Time%Step > stepcut).and. (JMidx == printJM)) then 
+                !     print *, ' '
+                !     print *, 'in junction calc  ff666'
+                !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+                !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+                !     print *, ' '
+                ! end if
                 ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
-                !     print *, '***FFFF JB flowrate ',elemR(printJB,er_Flowrate), dH
+                !     print *, '***FFFF dH after compute',dH
                 ! end if
 
             !% --- Limit head increase for cases of in/out of surcharge or overflow
@@ -899,6 +1400,18 @@ module junction_elements
                  isCrossingIntoSurcharge, isCrossingOutofSurcharge)
 
 
+                ! if ((setting%Time%Step > stepCut) .and. (JMidx .eq. printJM)) then 
+                !     print *, '***HHHH JB flowrate ',elemR(printJB,er_Flowrate)
+                ! end if
+
+                !  if ((setting%Time%Step > stepcut).and. (JMidx == printJM)) then 
+                !     print *, ' '
+                !     print *, 'in junction calc  ggg777'
+                !     print *, elemR(printJM,er_Volume_N0), elemR(printJM,er_Volume), elemR(printJM,er_Volume)-elemR(printJM,er_Volume_N0)
+                !     print *, elemR(printJM,er_Depth), elemR(printJM,er_VolumeArtificialInflow)
+                !     print *, ' '
+                ! end if
+
                 ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
                 !     print *, '***GGGG JB flowrate ',elemR(printJB,er_Flowrate), dH
                 ! end if
@@ -962,6 +1475,10 @@ module junction_elements
             ! end if
 
         end do
+
+        ! if (setting%Time%Step == 38270) then
+        !     stop 709873
+        ! end if
 
     end subroutine junction_calculation
 !%

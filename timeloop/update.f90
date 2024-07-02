@@ -33,7 +33,7 @@ module update
     public :: update_Froude_number_element
     public :: update_wavespeed_element
     public :: update_interpweights_JB
-    public :: update_interpweights_Diag
+    !public :: update_interpweights_Diag
     
 
     contains
@@ -169,15 +169,16 @@ module update
             end if
         !%------------------------------------------------------------------
 
-            ! if (.not. isSingularYN) call util_utest_CLprint('    aaa update - - - - - - - - - - ')
+           ! if (.not. isSingularYN) call util_utest_CLprint('    aaa update - - - - - - - - - - ')
 
         !% --- update the head (non-surcharged) and geometry
         call geometry_toplevel_CC ( &
             thisP, npackP, thisP_Open, npackP_Open, thisP_Closed, npackP_Closed, &
              isSingularYN, isAllYN)
 
-            !  if (.not. isSingularYN)  call util_utest_CLprint('    bbb update - - - - - - - - - - ')
-        
+             ! if (.not. isSingularYN)  call util_utest_CLprint('    bbb update - - - - - - - - - - ')
+
+
         if (npackP > 0) then
             !% --- Compute the flowrate on CC.
             call update_flowrate_CC (thisP)
@@ -395,36 +396,36 @@ module update
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine update_interpweights_Diag (thisP, Npack)
-        !%-----------------------------------------------------------------
-        !% Description:
-        !% Sets the interpolation weights for diagnostic elements
-        !% only called during initialization
-        !%-----------------------------------------------------------------
-        !% Declarations
-          integer, intent(in) :: thisP(:), Npack
-          real(8), pointer    :: w_uQ(:), w_dQ(:), w_uG(:), w_dG(:), w_uH(:), w_dH(:)
-        !%-----------------------------------------------------------------
-        !% Aliases
-          w_uQ      => elemR(:,er_InterpWeight_uQ)
-          w_dQ      => elemR(:,er_InterpWeight_dQ)
-          w_uG      => elemR(:,er_InterpWeight_uG)
-          w_dG      => elemR(:,er_InterpWeight_dG)
-          w_uH      => elemR(:,er_InterpWeight_uH)
-          w_dH      => elemR(:,er_InterpWeight_dH)
-        !%-----------------------------------------------------------------
-        if (Npack >0) then
-          w_uQ(thisP) = setting%Limiter%Interpweight%Minimum
-          w_dQ(thisP) = setting%Limiter%Interpweight%Minimum
+    ! subroutine update_interpweights_Diag (thisP, Npack)
+    !     !%-----------------------------------------------------------------
+    !     !% Description:
+    !     !% Sets the interpolation weights for diagnostic elements
+    !     !% only called during initialization
+    !     !%-----------------------------------------------------------------
+    !     !% Declarations
+    !       integer, intent(in) :: thisP(:), Npack
+    !       real(8), pointer    :: w_uQ(:), w_dQ(:), w_uG(:), w_dG(:), w_uH(:), w_dH(:)
+    !     !%-----------------------------------------------------------------
+    !     !% Aliases
+    !       w_uQ      => elemR(:,er_InterpWeight_uQ)
+    !       w_dQ      => elemR(:,er_InterpWeight_dQ)
+    !       w_uG      => elemR(:,er_InterpWeight_uG)
+    !       w_dG      => elemR(:,er_InterpWeight_dG)
+    !       w_uH      => elemR(:,er_InterpWeight_uH)
+    !       w_dH      => elemR(:,er_InterpWeight_dH)
+    !     !%-----------------------------------------------------------------
+    !     if (Npack >0) then
+    !       w_uQ(thisP) = setting%Limiter%Interpweight%Minimum
+    !       w_dQ(thisP) = setting%Limiter%Interpweight%Minimum
 
-          w_uG(thisP) = setting%Limiter%Interpweight%Maximum
-          w_dG(thisP) = setting%Limiter%Interpweight%Maximum
+    !       w_uG(thisP) = setting%Limiter%Interpweight%Maximum
+    !       w_dG(thisP) = setting%Limiter%Interpweight%Maximum
 
-          w_uH(thisP) = setting%Limiter%Interpweight%Maximum
-          w_dH(thisP) = setting%Limiter%Interpweight%Maximum
-        end if
+    !       w_uH(thisP) = setting%Limiter%Interpweight%Maximum
+    !       w_dH(thisP) = setting%Limiter%Interpweight%Maximum
+    !     end if
 
-    end subroutine update_interpweights_Diag
+    ! end subroutine update_interpweights_Diag
 !%
 !%==========================================================================
 !% PRIVATE

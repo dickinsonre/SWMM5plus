@@ -43,7 +43,7 @@ THREADS              1
 
 [FILES]
 ;;Interfacing Files
-SAVE Outflows/Calibration "Extran4.txt"
+;;SAVE Outflows/Calibration "Extran4.txt"
 
 [EVAPORATION]
 ;;Data Source    Parameters
@@ -165,4 +165,11 @@ Units      None
 9780.790           8204.590           "Inflow" "" "Arial" 10 0 0
 4655.530           8141.960           "Inflow" "" "Arial" 10 0 0
 9694.740           2084.210           "Inflow" "" "Arial" 10 0 0
+
+[PROFILES]
+;;Name           Links     
+;;-------------- ----------
+"P1              " 8040 8060 1602 1600 1630 1030
+"P2              " 8040 8060 90010 1570 1630 1030
+"P3              " 8130 1570 1630 1030
 

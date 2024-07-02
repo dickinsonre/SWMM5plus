@@ -20,8 +20,9 @@ module orifice_elements
     use geometry_lowlevel
     use irregular_channel, only: irregular_geometry_from_depth_singular
     use define_xsect_tables
-    use utility, only: util_sign_with_ones
+    !use utility, only: util_sign_with_ones, util_get_adjacent_CC_link !
     use xsect_tables
+
     use utility_crash, only: util_crashpoint
 
     implicit none
@@ -30,6 +31,10 @@ module orifice_elements
 
     public :: orifice_toplevel
     public :: orifice_set_setting
+    !public :: orifice_upstream_geometry
+
+    integer :: printIdx = 923
+    integer :: stepcut  = 120908
 
     contains
 !%
@@ -55,8 +60,16 @@ module orifice_elements
         !% --- NOTE the opening of the orifice due to control intervention
         !%     is already set in control_update_setting subroutine
 
-        !% --- if is JB is upstream of orifice, compute the weir flowrate for
-        !%     head increase of magnitude delta
+
+            ! if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then  
+            !     print *, ' '
+            !     print *, 'in orifice toplevel 0'
+            !     print *, 'heads            ', faceR(iupf,fr_Head_d),faceR(idnf,fr_Head_u)
+            !     print *, 'heads + delta    ', faceR(iupf,fr_Head_d) + setting%Orifice%delta, faceR(idnf,fr_Head_u) + setting%Orifice%delta
+            ! end if
+
+        !% --- if orifice is downstream of JB, compute the flowrate for
+        !%     upstream (of orifice) head increase of magnitude delta
         if (elemYN(eIdx,eYN_isElementDownstreamOfJB)) then 
             !print *, 'in isElementDownstreamOfJB'
             !% --- temporary storage
@@ -65,16 +78,31 @@ module orifice_elements
             !% --- upstream perturbation of head
             faceR(iupf,fr_Head_d) = faceR(iupf,fr_Head_d) + setting%Orifice%delta
             !% --- compute orifice flow at delta increment for upstream head
+
+            ! if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then 
+            !     print *, ' '
+            !     print *, 'CALLING ORIFICE COMPUTE FOR UPSTREAM HEAD CHANGE'
+            ! end if
+
             call orifice_compute (eIdx, .true.)
             !% --- temporary store of the flowrate for later dQdH compute
             elemSR(eIdx,esr_Orifice_dQdH_upstream) = elemR(eIdx,er_Flowrate)
             !% --- reverse temporary storage
             faceR(iupf,fr_Head_d)   = HeadStore
             elemR(eIdx,er_Flowrate) = FlowrateStore
+
+            ! if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then  
+            !     print *, ' '
+            !     print *, 'in orifice toplevel A: Downstream of JB'
+            !     print *, 'orifice Q after Delta ',elemSR(eIdx,esr_Orifice_dQdH_upstream) 
+            !     print *, ' '
+            ! end if
+
         end if
 
         !% --- if is JB is downstream, compute the weir flowrate for head increase of delta
         if (elemYN(eIdx,eYN_isElementUpstreamOfJB)) then 
+
             !print *, 'in isElementUpstreamOfJB'
             !% --- temporary storage
             HeadStore     = faceR(idnf,fr_Head_u)
@@ -82,18 +110,49 @@ module orifice_elements
             !% --- downstream perturbation of head
             faceR(idnf,fr_Head_u) = faceR(idnf,fr_Head_u) + setting%Orifice%delta
             !% --- compute orifice flow at delta increament for lower downstream head
+
+            ! if ((setting%Time%Step > stepCut) .and. (eIdx == printIdx)) then 
+            !     print *, ' '
+            !     print *, 'CALLING ORIFICE COMPUTE FOR DOWNSTREAM HEAD CHANGE'
+            ! end if
+
             call orifice_compute (eIdx, .true.)
             !% --- temporary store of the flowrate for later dQdH compute
             elemSR(eIdx,esr_Orifice_dQdH_downstream) = elemR(eIdx,er_Flowrate)
             !% --- reverse temporary storage
             faceR(idnf,fr_Head_u)   = HeadStore
             elemR(eIdx,er_Flowrate) = FlowrateStore
+
+            ! if ((setting%Time%Step > stepCut) .and. (eIdx == printIdx)) then  
+            !     print *, ' '
+            !     print *, 'in orifice elements A: upstream of JB'
+            !     print *, 'flowrate after Delta ',elemSR(eIdx,esr_Orifice_dQdH_downstream) 
+            !     print *, ' '
+            ! end if
+
         end if
 
         !% --- compute standard orifice flow
+        ! if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then 
+        !     print *, ' '
+        !     print *, 'CALLING ORIFICE COMPUTE FOR STANDARD HEAD DIF'
+        ! end if
+
         call orifice_compute (eIdx, .false.)
 
-        !% --- compute dQdH for an upstream JB element
+        ! if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then  
+        !     print *, ' '
+        !     print *, 'in orifice toplevel B: Downstream of JB'
+        !     print *, 'flowrate          ',elemR(eIdx,er_Flowrate), elemSR(eIdx,esr_Orifice_dQdH_upstream) 
+        !     print *, 'difference ',elemSR(eIdx,esr_Orifice_dQdH_upstream)- elemR(eIdx,er_Flowrate) 
+        !     print *, ' '
+        !     print *, 'in orifice toplevel B: Upstream of JB'
+        !     print *, 'flowrate          ',elemR(eIdx,er_Flowrate), elemSR(eIdx,esr_Orifice_dQdH_downstream) 
+        !     print *, 'difference ',elemSR(eIdx,esr_Orifice_dQdH_downstream)- elemR(eIdx,er_Flowrate) 
+        !     print *, ' '
+        ! end if
+
+        !% --- compute dQdH for an element downstream of JB
         !%     esr_Orifice_dQdH_upstream stores the delta perturbed flowrate
         if (elemYN(eIdx,eYN_isElementDownstreamOfJB)) then 
             elemSR(eIdx,esr_Orifice_dQdH_upstream)                                 &
@@ -101,14 +160,57 @@ module orifice_elements
                 / setting%Orifice%delta
         end if
 
-        !% --- compute dQdH for a downstream JB element
+        !% --- compute dQdH for an element upstream of JB
         !%     esr_Orifice_dQdH_downstream  stores the delta perturbed flowrate
         if (elemYN(eIdx,eYN_isElementUpstreamOfJB)) then 
             elemSR(eIdx,esr_Orifice_dQdH_downstream)                                 &
              =  (elemSR(eIdx,esr_Orifice_dQdH_downstream) - elemR(eIdx,er_Flowrate)) &
-                / setting%Weir%delta
+                / setting%Orifice%delta
         end if
 
+
+        ! if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then  
+        !     print *, ' '
+        !     print *, 'in orifice toplevel c'
+        !     print *, 'delta     ',setting%Orifice%delta
+        !     print *, 'dQdH down      ',elemSR(eIdx,esr_Orifice_dQdH_downstream) 
+        !     print *, 'dQdH up        ',elemSR(eIdx,esr_Orifice_dQdH_upstream) 
+        !     print *, ' '
+        ! end if
+
+        !% ---- functions that do not apply to dQdH computation
+    
+        !% --- limit orifice flow change for stability
+        call common_flowchange_limiter_singular (eIdx)
+
+        ! if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then  
+        !     print *, ' '
+        !     print *, 'in orifice toplevel d -- after 2nd corrections'
+        !     print *, 'equivalent flow ',elemR(eIdx,er_Flowrate)
+        !     print *, ' '
+        ! end if
+
+
+        !% --- update velocity from flowrate and area
+        call common_velocity_from_flowrate_singular (eIdx)
+
+        ! if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then  
+        !     print *, ' '
+        !     print *, 'in orifice toplevel e -- after 3rd corrections'
+        !     print *, 'equivalent flow ',elemR(eIdx,er_Flowrate)
+        !     print *, ' '
+        ! end if
+
+        !% --- compute downstream energy head
+        call common_outflow_energyhead_singular &
+            (eIdx, esr_Orifice_NominalDownstreamHead, esi_Orifice_FlowDirection)
+
+            ! if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then  
+            !     print *, ' '
+            !     print *, 'in orifice toplevel f -- after 4th corrections'
+            !     print *, 'equivalent flow ',elemR(eIdx,er_Flowrate)
+            !     print *, ' '
+            ! end if
 
     end subroutine orifice_toplevel
 !%
@@ -175,6 +277,47 @@ module orifice_elements
     end subroutine orifice_set_setting
 !%
 !%==========================================================================
+!%==========================================================================
+!%
+    ! subroutine orifice_upstream_geometry (eIdx)   
+    !     !%------------------------------------------------------------------ 
+    !     !% Description:
+    !     !% sets the orifice upstream 
+    !     !% As this is not provided by SWMM input file, we use the 
+    !     !% full area of the upstream link, 
+    !     !%------------------------------------------------------------------ 
+    !     integer, intent(in) :: eIdx
+    !     integer, pointer    :: thisLink, upNode, upJM
+    !     integer             :: upLink
+    !     logical             :: useNodeValues
+    ! !%------------------------------------------------------------------ 
+
+    !     thisLink => elemI(eIdx,ei_link_Gidx_BIPquick)
+    !     upNode   => link%I(thisLink,li_Mnode_u)
+    !     upJM     => node%I(upNode,ni_elem_idx)
+        
+    !     upLink = util_get_adjacent_CC_link (upNode, thisLink,.true.)
+
+    !     if (upLink < 1) then 
+    !         !% --- no upstream link found
+    !         !%     set full depth to JM full depth
+    !         elemR(eIdx,er_FullDepth) = elemR(upJM,er_FullDepth)
+    !         elemI(eIdx,ei_geometryType) = nullvalueI !% --- call to geometry will fail
+    !     else
+    !         select case (link%I(upLink,li_link_type))
+    !         case (lChannel) 
+    !             call IC_get_channel_geometry(upLink,eIdx)
+    !         case (lPipe)
+    !             call IC_get_conduit_geometry(upLink,eIdx)
+    !         case default 
+    !             print *, 'CODE ERROR: unexpected case default'
+    !             call util_crashpoint(6119873)
+    !         end select
+    !     end if
+        
+    ! end subroutine orifice_upstream_geometry
+!%
+!%==========================================================================
 !% PRIVATE
 !%==========================================================================
 !%
@@ -202,6 +345,14 @@ module orifice_elements
         !% --- find effective head difference across orifice element
         call orifice_effective_head_delta (eIdx)
 
+        ! if ((setting%Time%Step > stepCut) .and. (eIdx == printIdx)) then  
+        !     print *, ' '
+        !     print *, '    in orifice compute'
+        !     print *, '    effective head delta ',elemSR(eIdx,esr_Orifice_EffectiveHeadDelta)
+        !     print *, '    Orifice FLow Dir     ',elemSI(eIdx,esi_Orifice_FlowDirection)
+        !     print *, ' '
+        ! end if
+
         if ((SpecificOrificeType .eq. (equivalent_orifice_channel)) .or. &
             (SpecificOrificeType .eq. (equivalent_orifice_pipe))            ) then
             !% --- update geometry in elemR for channel/conduit based on
@@ -211,6 +362,14 @@ module orifice_elements
             call orifice_equivalent_dischargeCoef (eIdx)
             !% --- compute the equivalent orifice flowrate
             call orifice_equivalent_flow (eIdx)
+
+            ! if ((setting%Time%Step > stepCut) .and. (eIdx == printIdx)) then  
+            !     print *, ' '
+            !     print *, '    in orifice compute -- equivalent'
+            !     print *, '    discharge coef  ',elemSR(eIdx,esr_Orifice_DischargeCoeff)
+            !     print *, '    equivalent flow ',elemR(eIdx,er_Flowrate)
+            !     print *, ' '
+            ! end if
         else
             !% --- find the effective full area of orifice
             call orifice_effective_full_area (eIdx)
@@ -235,19 +394,12 @@ module orifice_elements
                 !% --- no action for equivalent orifices
         end if
 
-        !% --- functions below are not needed in the dQdH computation
-        if (.not. isdelta) then
-            !% --- limit orifice flow for stability
-            call common_flowchange_limiter_singular (eIdx)
-
-            !% --- update velocity from flowrate and area
-            call common_velocity_from_flowrate_singular (eIdx)
-
-            !% --- compute downstream energy head
-            call common_outflow_energyhead_singular &
-                (eIdx, esr_Orifice_NominalDownstreamHead, esi_Orifice_FlowDirection)
-
-        end if
+        ! if ((setting%Time%Step > stepCut) .and. (eIdx == printIdx)) then  
+        !     print *, ' '
+        !     print *, '    in orifice compute -- after corrections'
+        !     print *, '    equivalent flow ',elemR(eIdx,er_Flowrate)
+        !     print *, ' '
+        ! end if
 
     end subroutine orifice_compute
 !%
@@ -318,6 +470,11 @@ module orifice_elements
                     end if
 
                 case (equivalent_orifice_channel,equivalent_orifice_pipe)
+                    ! if ((setting%Time%Step > stepCut) .and. (eIdx == printIdx)) then  
+                    !     print *, 'in effective head delta '
+                    !     print *, 'Head ',Head, NominalDSHead 
+                    !     print *, 'Z    ',elemR(eIdx,er_Zbottom) + setting%ZeroValue%Depth
+                    ! end if
                     if (Head <= elemR(eIdx,er_Zbottom) + setting%ZeroValue%Depth) then
                         !% --- driving head is too small to generate flow
                         EffectiveHeadDelta = zeroR
@@ -699,7 +856,7 @@ module orifice_elements
         end if
 
         !% --- apply geometry limiters
-        call adjust_limit_by_zerovalues_singular (eIdx, er_Area, setting%ZeroValue%Area, .false.)
+        call adjust_limit_by_zerovalues_singular (eIdx, er_Area, setting%ZeroValue%Area, .false.,zeroI)
 
         !%------------------------------------------------------------------
         !% Closing
@@ -741,6 +898,8 @@ module orifice_elements
         !%------------------------------------------------------------------
         !% Closing             
     end subroutine  orifice_submergence_correction
+!%
+!%==========================================================================
 !%==========================================================================
 !%
     subroutine orifice_geometry_update (eIdx)
@@ -840,13 +999,13 @@ module orifice_elements
         end if
 
         !% apply geometry limiters
-        call adjust_limit_by_zerovalues_singular (eIdx, er_Area,      setting%ZeroValue%Area,     .false.)
-        call adjust_limit_by_zerovalues_singular (eIdx, er_Depth,     setting%ZeroValue%Depth,    .false.)
-        call adjust_limit_by_zerovalues_singular (eIdx, er_EllDepth,  setting%ZeroValue%Depth,    .false.)
-        call adjust_limit_by_zerovalues_singular (eIdx, er_HydRadius, setting%ZeroValue%Depth,    .false.)
-        call adjust_limit_by_zerovalues_singular (eIdx, er_Topwidth,  setting%ZeroValue%Topwidth, .false.)
-        call adjust_limit_by_zerovalues_singular (eIdx, er_Perimeter, setting%ZeroValue%Topwidth, .false.)
-        call adjust_limit_by_zerovalues_singular (eIdx, er_Volume,    setting%ZeroValue%Volume,   .true.)
+        call adjust_limit_by_zerovalues_singular (eIdx, er_Area,      setting%ZeroValue%Area,     .false., zeroI)
+        call adjust_limit_by_zerovalues_singular (eIdx, er_Depth,     setting%ZeroValue%Depth,    .false., zeroI)
+        call adjust_limit_by_zerovalues_singular (eIdx, er_EllDepth,  setting%ZeroValue%Depth,    .false., zeroI)
+        call adjust_limit_by_zerovalues_singular (eIdx, er_HydRadius, setting%ZeroValue%Depth,    .false., zeroI)
+        call adjust_limit_by_zerovalues_singular (eIdx, er_Topwidth,  setting%ZeroValue%Topwidth, .false., zeroI)
+        call adjust_limit_by_zerovalues_singular (eIdx, er_Perimeter, setting%ZeroValue%Topwidth, .false., zeroI)
+        call adjust_limit_by_zerovalues_singular (eIdx, er_Volume,    setting%ZeroValue%Volume,   .true., zeroI)
 
         !%------------------------------------------------------------------
         !% Closing
@@ -898,12 +1057,15 @@ module orifice_elements
         HydRadius     = elemR (eIdx,er_HydRadius)
         eIdxA         = eIdx
 
+        !% --- use the upstream depth to compute the A and R_h
         if (FlowDirection < oneI ) then 
             !% --- reversed flow
-            Depth = Head - ZbtmDn
+            !Depth = Head - ZbtmDn
+            Depth = faceR(fDn,fr_Head_u) - ZbtmDn
         else
             !% --- nominal downstream flow
-            Depth = Head - ZbtmUp
+            !Depth = Head - ZbtmUp
+            Depth = faceR(fUp,fr_Head_d) - ZbtmUp
         end if    
 
         if (SpecificOrificeType .eq. equivalent_orifice_channel) then
@@ -1073,6 +1235,7 @@ module orifice_elements
                        * sqrt(twoR * grav * EffectiveHeadDelta)
             
             !dQdH = onehalfR * Flowrate / EffectiveHeadDelta
+
         end if
 
     end subroutine orifice_equivalent_flow

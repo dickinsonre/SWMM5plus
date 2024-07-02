@@ -40,8 +40,8 @@ module runge_kutta2
 
     public :: rk2_toplevel
 
-    integer :: printIdx = 1
-    integer :: stepcut = 13452
+    integer :: printIdx = 377
+    integer :: stepcut = 120908
     contains
 !%==========================================================================
 !% PUBLIC
@@ -54,9 +54,11 @@ module runge_kutta2
         !%------------------------------------------------------------------
         !% Declarations:
             integer          :: istep, ii, kk
-            integer, pointer :: Npack, thisP(:), fup, fdn
+            integer, pointer :: Npack, thisP(:), fup, fdn, tempP(:)
 
             integer          :: thisDiag
+
+            logical          :: isConservativeTF(2)
             
             real(8), pointer :: grav, dt
             real(8)          :: volume1, volume2, inflowVolume, outflowVolume
@@ -68,23 +70,23 @@ module runge_kutta2
         !% --- reset the overflow counter for this time level
             elemR(:,er_VolumeOverFlow)         = zeroR     
             elemR(:,er_VolumeArtificialInflow) = zeroR   
+            isConservativeTF(1) = .false.
+            isConservativeTF(2) = .true.
         !%-----------------------------------------------------------------
         !% Aliases
             grav => setting%Constant%gravity
             dt   => setting%Time%Hydraulics%Dt
         !%-----------------------------------------------------------------
 
-        !% AIR --- assume that er_Head everywhere has air head already added from last time step
+            tempP => elemP(1:npack_elemP(ep_CCJM),ep_CCJM)
 
-        !% --- debug total volume conservation
-        if (setting%Debug%isGlobalVolumeBalance) then
-            volume1 = zeroR
-            Npack => npack_elemP(ep_CCJM)
-            if (Npack > 0) then 
-                thisP => elemP(1:Npack,ep_CCJM)
-                volume1 = sum(elemR(thisP,er_Volume))
-            endif
-        end if
+            ! print *, ' '
+            ! print *, 'volume at start of RK   ', sum(elemR(tempP,er_Volume_N0)), sum(elemR(tempP,er_Volume))
+
+            ! print *, 'JB 616 flowrate ',elemR(616,er_Flowrate)
+            ! stop 66987
+
+        !% AIR --- assume that er_Head everywhere has air head already added from last time step
                     
         !% --- istep is the RK substep counter, initially set to zero
         !%     for preliminaries
@@ -118,29 +120,54 @@ module runge_kutta2
                 ! call util_utest_CLprint('DDDD after update auxiliary CC')
 
             !% --- zero and small depth adjustment for elements
-            call adjust_element_toplevel (CC)
             
+            call adjust_element_toplevel (CC,isConservativeTF(istep))
+            
+                ! print *, 'istep ',istep
                 ! call util_utest_CLprint('EEEE after adjust element toplevel CC')
 
             !% --- JUNCTION 1st Step setup, 2nd Step compute
             if (N_nJM > 0) then 
                 if (istep == 1) then
-                    !% --- update JB interpweights without forcing
+                    !% --- update JB interpweights 
+                    !%     uses Q(JB) forcing (true) so that junction_preliminaries
+                    !%     affects flowrate. This is needed so that a strong head
+                    !%     gradient in/out of JM will drive up/dn flow.
                     Npack => npack_elemP(ep_JB)
                     if (Npack > 0) then 
                         thisP => elemP(1:Npack, ep_JB)
-                        call update_interpweights_JB (thisP, Npack, .false.)
+                        call update_interpweights_JB (thisP, Npack, .true.)
 
                         ! call util_utest_CLprint('FFF after update interpweights JB')
+
                     end if
                 else if (istep == 2) then 
-                    ! call util_utest_CLprint('TTTT before junction second step')
+                    ! ! call util_utest_CLprint('TTTT before junction second step')
                     !% --- conservative storage advance for junction, second step
+                    ! print *, 'going into junction 2nd step'
                     call junction_second_step ()
+
                     ! call util_utest_CLprint('UUUU after junction second step')
+
+                    ! print *, 'volume after junction 2 ', sum(elemR(tempP,er_Volume_N0)), sum(elemR(tempP,er_Volume))
+
+                    ! do ii=1,N_elem(this_image())
+                    !     if ((elemI(ii,ei_elementType) .eq. CC) .or. (elemI(ii,ei_elementType) .eq. JM)) then 
+                    !         if (abs(elemR(ii,er_Volume) - elemR(ii,er_Volume_N0)) > 1.0d-5) then
+                    !         print *, trim(reverseKey(elemI(ii,ei_elementType)))
+                    !         print *, ii, elemR(ii,er_Volume) - elemR(ii,er_Volume_N0)
+                    !         end if
+                    !     end if
+                    ! end do
+
+                    ! print *, ' '
+                    ! print *, 'in RK after junction second step'
+                    ! print *, elemR(printIdx,er_Volume), elemR(printIdx,er_Volume_N0), elemR(printIdx,er_Volume) -elemR(printIdx,er_Volume_N0)
+                    ! print *, ' '
                 end if
             end if  
 
+            ! call util_utest_CLprint('FFF2 before face interpolation')
 
             !% --- interpolate all data to faces
             !%     NOTE: in 1st iter, the diag elements have time n values, this should get
@@ -163,13 +190,20 @@ module runge_kutta2
                     print *, 'CODE ERROR: unexpected else'
                     call util_crashpoint(698734)
                 end if
-                call diagnostic_push_adjacent_elemdata_to_face (thisDiag)
+                !call diagnostic_push_adjacent_elemdata_to_face (thisDiag)
+                ! ! call util_utest_CLprint('HHH0 after push')
+
                 !% --- update flowrates for diagnostic elements adjacent to CC
                 call diagnostic_by_type (thisDiag, istep)  
+
+                ! call util_utest_CLprint('HHH1 after diagnostic')
+
                 !% --- push the diagnostic flowrate data to faces -- true is upstream, false is downstream
                 call face_push_elemdata_to_face (thisDiag, fr_Flowrate, er_Flowrate, elemR, .true.)
                 call face_push_elemdata_to_face (thisDiag, fr_Flowrate, er_Flowrate, elemR, .false.)
                 !call face_interpolation(fp_Diag_IorS, .true., .true., .true., .false., .true.)
+
+                ! call util_utest_CLprint('HHH2 after push')
             end if
             !% --- face sync
             !%     sync all the images first. then copy over the data between
@@ -187,7 +221,7 @@ module runge_kutta2
                 call face_update_velocities (fp_Diag_IorS)
             end if
  
-            ! call util_utest_CLprint('HHH after diagnostic')
+            ! call util_utest_CLprint('HHH after ALL diagnostic')
 
             !% --- update various packs of zeroDepth faces for changes in depths
             call pack_CC_zeroDepth_interior_faces ()
@@ -224,7 +258,7 @@ module runge_kutta2
             call face_shared_face_sync (fp_noBC_IorS, [fr_flowrate,fr_Velocity_d,fr_Velocity_u])
             sync all
 
-            ! call util_utest_CLprint('OOOO before adjust Vfilter')
+            !  call util_utest_CLprint('OOOO before adjust Vfilter')
 
             !% --- Filter flowrates to remove grid-scale checkerboard
             !% 20240209brh moved before junction first step
@@ -234,13 +268,15 @@ module runge_kutta2
 
             !% --- JUNCTION -- first step compute
             if (istep == 1) then 
-                ! call util_utest_CLprint('PPPP before junction first step')
+                ! ! call util_utest_CLprint('PPPP before junction first step')
                 !% --- Junction first step RK estimate
                 !%     Note that this must be called in every image, including
                 !%     those that do not have junctions as it contains a sync
                 call junction_first_step ()
 
                 ! call util_utest_CLprint('RRRR after junction first step')
+
+                ! print *, 'volume after junction 1 ', sum(elemR(tempP,er_Volume_N0)), sum(elemR(tempP,er_Volume))
             end if
 
             if (istep == 1) then 
@@ -248,7 +284,7 @@ module runge_kutta2
                 !%    in second step
                 call rk2_store_conservative_fluxes (ALL) 
 
-                ! call util_utest_CLprint('SSSS end of RK2 first step')
+                ! call util_utest_CLprint('SSSS after 1st step cons fluxes')
             else 
                 !%  --- no action 
             end if
@@ -260,103 +296,13 @@ module runge_kutta2
                 call air_entrapment_toplevel (istep)
             end if 
 
-            ! call util_utest_CLprint('YYYY after air entrapment, END OF RK STEP')
+            ! call util_utest_CLprint('YYYY after air entrapment, one step finished')
 
         end do
 
+        ! print *, 'volume at end           ', sum(elemR(tempP,er_Volume_N0)), sum(elemR(tempP,er_Volume))
+
         ! call util_utest_CLprint('ZZZZ end RK2')
-
-        !% HACK --- this needs to be setup for multiple images and moved to the utility_debug
-        if (setting%Debug%isGlobalVolumeBalance) then
-            !% --- overall volume conservation
-            !% --- initialization
-            elemR(:,er_Temp01) = zeroR
-            inflowVolume  = zeroR
-            outflowVolume = zeroR
-            sumlocaldiff  = zeroR
-            !% --- get all in-line inflows
-            Npack => npack_faceP(fp_BCup)
-            if (Npack > 0) then 
-                thisP => faceP(1:Npack,fp_BCup)
-                inflowVolume  = inflowVolume + sum(faceR(thisP,fr_Flowrate)) * setting%Time%Hydraulics%Dt
-            end if
-            !% --- get all outfall outflows
-            Npack => npack_faceP(fp_BCdn)
-            if (Npack > 0) then 
-                thisP => faceP(1:Npack,fp_BCdn)
-                outflowVolume  = outflowVolume + sum(faceR(thisP,fr_Flowrate_Conservative)) * setting%Time%Hydraulics%Dt
-            end if
-            !% --- net inflows due to lateral (negatives are outflows)
-            Npack => npack_elemP(ep_CCJM)
-            thisP => elemP(1:Npack,ep_CCJM)
-            volume2 = sum(elemR(thisP,er_Volume))
-            inflowVolume = inflowVolume + sum(elemR(thisP,er_FlowrateLateral)) * setting%Time%Hydraulics%Dt
-            !% --- compute local volume conservation for CC
-            Npack => npack_elemP(ep_CC)
-            thisP => elemP(1:Npack,ep_CC)
-            elemR(thisP,er_Temp01) = setting%Time%Hydraulics%Dt               &
-                * (  elemR(thisP,er_FlowrateLateral)                          &
-                   + faceR(elemI(thisP,ei_Mface_uL),fr_Flowrate_Conservative) &
-                   - faceR(elemI(thisP,ei_Mface_dL),fr_Flowrate_Conservative) &
-                  )                                                           &
-                - (elemR(thisP,er_Volume) - elemR(thisP,er_Volume_N0))
-            sumlocaldiff = sumlocaldiff + sum(elemR(thisP,er_Temp01)) 
-            !% --- compute local volume conservation for JM 
-            !%     start with lateral inflows
-            Npack =>   npack_elemP(ep_JM)
-            thisP => elemP(1:Npack,ep_JM)
-            elemR(thisP,er_Temp01) = elemR(thisP,er_FlowrateLateral) * setting%Time%Hydraulics%Dt &
-                 - (elemR(thisP,er_Volume) - elemR(thisP,er_Volume_N0))
-            !% --- next are branch flows, so we shift the packed array
-            Npack =>   npack_elemP(ep_JB)
-            thisP => elemP(1:Npack,ep_JB)
-            !% --- accumulate flow volumes for upstream JB
-            where ((elemSI(thisP,esi_JB_IsUpstream) .eq. oneI) .and. (elemSI(thisP,esi_JB_Exists) .eq. oneI))
-                elemR  (elemSI(thisP,esi_JB_Main_Index),er_Temp01)     &
-                = elemR(elemSI(thisP,esi_JB_Main_Index),er_Temp01)     &
-                + faceR( elemI(thisP,ei_Mface_uL),fr_Flowrate_Conservative) * setting%Time%Hydraulics%Dt
-            endwhere
-            !% ---- accumulate flow volumes for downstream JB
-            where ((elemSI(thisP,esi_JB_IsUpstream) .eq. zeroI) .and. (elemSI(thisP,esi_JB_Exists) .eq. oneI))
-                elemR  (elemSI(thisP,esi_JB_Main_Index),er_Temp01)       &
-                = elemR(elemSI(thisP,esi_JB_Main_Index),er_Temp01)     &
-                + faceR( elemI(thisP,ei_Mface_dL),fr_Flowrate_Conservative) * setting%Time%Hydraulics%Dt
-            endwhere
-            !% --- create sum for JM
-            Npack =>   npack_elemP(ep_JM)
-            thisP => elemP(1:Npack,ep_JM)
-            sumlocaldiff = sumlocaldiff + sum(elemR(thisP,er_Temp01)) 
-            
-            totalvolume  = max(volume1, volume2)
-            if (totalvolume > oneR) then
-                !% --- use normalized volume for large volumes
-                setting%Debug%GlobalVolumeBalance = setting%Debug%GlobalVolumeBalance & 
-                + (volume2 - volume1 - inflowVolume + outflowVolume)  / totalvolume
-            else
-                !% --- use raw values
-                setting%Debug%GlobalVolumeBalance = setting%Debug%GlobalVolumeBalance & 
-                    + (volume2 - volume1 - inflowVolume + outflowVolume)  
-            end if
-
-            ! !% DEBUG PRINTING DO NOT DELETE
-            !  print *, setting%Time%Step, volume1, volume2, volume2 - volume1, &
-            !       inflowVolume, outflowVolume,                                &
-            !       volume2 - volume1 - inflowVolume + outflowVolume,           &
-            !       setting%Debug%GlobalVolumeBalance 
-
-            ! print *, 'Local conservation'
-            ! localcons = zeroR
-            ! do ii=1,N_elem(this_image())
-            !     if ((elemI(ii,ei_elementType) .eq. CC) .or. (elemI(ii,ei_elementType) .eq. JM)) then
-            !         localcons = localcons + elemR(ii,er_Temp01)
-            !         !print *, ii, elemR(ii,er_Temp01)
-            !         write(*,"(i4,12e12.4)") ii, elemR(ii,er_Volume), elemR(ii,er_Volume_N0), elemR(ii,er_Volume) -elemR(ii,er_Volume_N0)
-            !     end if
-                
-            ! end do   
-            ! print *, 'local cons ',localcons
-        end if
-
 
     end subroutine rk2_toplevel
 !%
@@ -376,25 +322,37 @@ module runge_kutta2
             integer, pointer    :: FMpackCol, nFMpack, thisP(:)
         !%------------------------------------------------------------------
 
+
+
         !% --- CONTINUITY
         thisPackCol => col_elemP(ep_CC_H)
         Npack       => npack_elemP(thisPackCol)
         if (Npack > 0) then
             thisP => elemP(1:Npack,thisPackCol)
+            elemR(thisP,er_SourceContinuity) = zeroR
+
+            ! call util_utest_CLprint('inside aaaa --------------------')
 
             !% --- Compute net flowrates for CC as source termo
             call ll_continuity_netflowrate_CC (er_SourceContinuity, thisPackCol, Npack)
 
+            ! call util_utest_CLprint('inside aaaa2 --------------------')
+
             !% --- Solve for new volume
             call ll_continuity_volume_CC (er_Volume, thisPackCol, Npack, istep)
 
-            ! !call util_utest_CLprint('inside bbbb --------------------')
+            ! call util_utest_CLprint('inside bbbb --------------------')
 
             !% --- adjust extremely small volumes that might be been introduced
+            !%     this needs to be done before momentum so that the volume is
+            !%     correct.  However, the storage of VolumeArtificialInflow is only
+            !%     in a flux-conservative step
             call adjust_limit_by_zerovalues &
-                (er_Volume, setting%ZeroValue%Volume, thisP, .true.)
+                (er_Volume, setting%ZeroValue%Volume, thisP, .true.,istep)
 
         end if  
+
+        ! call util_utest_CLprint('inside cccc --------------------')
 
         !% --- MOMENTUM
         thisPackCol => col_elemP(ep_CC_Q)
@@ -404,12 +362,18 @@ module runge_kutta2
             !% --- momentum K source terms for different methods for ETM
             call ll_momentum_Ksource_CC (er_Ksource, thisPackCol, Npack)
 
+            ! call util_utest_CLprint('inside dddd --------------------')
+
             !% --- Common source for momentum on channels and conduits for ETM
             call ll_momentum_source_CC (er_SourceMomentum, thisPackCol, Npack)
+
+            ! call util_utest_CLprint('inside eeee --------------------')
 
             !% --- Common Gamma for momentum on channels and conduits for  ETM
             !%     Here for all channels and conduits, assuming CM roughness
             call ll_momentum_gammaCM_CC (er_GammaM, thisPackCol, Npack)
+
+            ! call util_utest_CLprint('inside ffff --------------------')
 
             !% --- handle force mains as Gamma terms
             !%     These overwrite the gamma from the CM roughness above
@@ -426,24 +390,36 @@ module runge_kutta2
                 if (nFMpack > 0) call ll_momentum_gammaFM_CC (er_GammaM, FMPackCol, nFMpack, DarcyWeisbach)
             end if
 
+            ! call util_utest_CLprint('inside jjjj --------------------')
+
             !% --- add minor loss term to gamma for all conduits
             call ll_minorloss_friction_gamma_CC (er_GammaM, thisPackCol, Npack)   
+
+            ! call util_utest_CLprint('inside kkkk --------------------')
 
             !% --- Advance flowrate to n+1/2 for conduits and channels with ETM
             call ll_momentum_solve_CC (er_Velocity, thisPackCol, Npack, istep)
 
+            ! call util_utest_CLprint('inside llll --------------------')
+
             !% --- velocity for ETM time march
             call ll_momentum_velocity_CC (er_Velocity, thisPackCol, Npack)
+
+            ! call util_utest_CLprint('inside mmmm --------------------')
 
             !% --- prevent backflow through flapgates
             call ll_enforce_flapgate_CC (er_Velocity, thisPackCol, Npack)
 
+            ! call util_utest_CLprint('inside nnnn --------------------')
+
             !% --- enforce zero velocity on elements that began as ZeroDepth
             call ll_enforce_zerodepth_velocity (er_Velocity, thisPackCol, Npack)
 
+            ! call util_utest_CLprint('inside oooo --------------------')
+
         end if
 
-        ! !call util_utest_CLprint('inside cccc --------------------')
+        ! !! ! ! call util_utest_CLprint('inside cccc --------------------')
         
     end subroutine rk2_step_CC
 !%
@@ -472,15 +448,15 @@ module runge_kutta2
                     faceR(thisF,fr_Flowrate_Conservative) = faceR(thisF,fr_Flowrate)
                 end if
             case (JBDiag)
-                npack => npack_faceP(fp_JBorDiag_all)
+                npack => npack_faceP(fp_JBorDiag_any)
                 if (npack > 0) then 
-                    thisF => faceP(1:npack,fp_JBorDiag_all)
+                    thisF => faceP(1:npack,fp_JBorDiag_any)
                     faceR(thisF,fr_Flowrate_Conservative) = faceR(thisF,fr_Flowrate)
                 end if
             case (JB)
-                npack => npack_faceP(fp_JB_all)
+                npack => npack_faceP(fp_JB_any)
                 if (npack > 0) then
-                    thisF => faceP(1:npack,fp_JB_all)
+                    thisF => faceP(1:npack,fp_JB_any)
                     faceR(thisF,fr_Flowrate_Conservative) = faceR(thisF,fr_Flowrate)
                 end if
             case default

@@ -35,28 +35,29 @@ module define_indexes
     !%-------------------------------------------------------------------------
     enum, bind(c)
         enumerator :: li_idx = 1
-        enumerator :: li_link_type           ! KEY type of links (i.e. conduit, orifice, weir, etc.)   
-        enumerator :: li_link_sub_type       ! KEY link subtype (i.e. vnotch weir, side orifice, etc.)
-        enumerator :: li_link_direction      ! link direction
-        enumerator :: li_geometry            ! KEY link geometry type
-        enumerator :: li_barrels             ! KEY link # of barrels
-        enumerator :: li_culvertCode         ! KEY culvert code for conduit
-        enumerator :: li_N_element           ! Number of elements in this link
-        enumerator :: li_Mnode_u             ! map to upstream node connecting to link
-        enumerator :: li_Mnode_d             ! map to downstram node connecting to link
-        enumerator :: li_assigned            ! given 1 when link is assigned
-        enumerator :: li_InitialDepthType    ! NOT WORKING: KEY UniformDepth, LinearlyVaryingDepth, IncreasingDepth, FixedHead
-        enumerator :: li_length_adjusted     ! 1 = length was not adjusted, 2 = one side was adjusted, 3 = both side was adjusted
-        enumerator :: li_P_image             ! image number assigned from BIPquick
-        enumerator :: li_parent_link         ! A map to the corresponding SWMM link after a BIPquick link-split
-        enumerator :: li_weir_EndContractions ! (0,1) to indicate contraction
-        enumerator :: li_RoadSurface         ! roadsurface type for roadway weir
-        enumerator :: li_curve_id            ! curve id if the link is associated with any curve
-        enumerator :: li_lateralInflowNode   ! downstream node from which the lateral inflow is coming from
-        enumerator :: li_lateralInflowBCidx  ! The idx position in the BC%flowX(idx,:) array for lateral inflow
-        enumerator :: li_first_elem_idx
-        enumerator :: li_last_elem_idx
-        enumerator :: li_transect_idx         ! transect index if the link is associated with an irregular geometry transect
+        enumerator :: li_link_type            ! KEY type of links (from SWMM.inp) i.e. conduit, orifice, weir, etc.
+        enumerator :: li_link_sub_type        ! KEY link subtype (from SWMM.in0) i.e. vnotch weir, side orifice, etc.
+        enumerator :: li_link_direction       ! link direction (from SWMM.inp)
+        enumerator :: li_geometry             ! KEY link geometry type (from SWMM.inp)
+        enumerator :: li_geometry_background  ! KEY background geometry of diagnostic element
+        enumerator :: li_barrels              ! number of barrels (from SWMM.inp)
+        enumerator :: li_culvertCode          ! KEY culvert code for conduit (from SWMM.inp)
+        enumerator :: li_N_element            ! Number of elements in this link
+        enumerator :: li_Mnode_u              ! map to upstream node connecting to link
+        enumerator :: li_Mnode_d              ! map to downstram node connecting to link
+        enumerator :: li_assigned             ! given 1 when link is assigned
+        enumerator :: li_InitialDepthType     ! NOT WORKING: KEY UniformDepth, LinearlyVaryingDepth, IncreasingDepth, FixedHead
+        enumerator :: li_length_adjusted      ! 1 = length was not adjusted, 2 = one side was adjusted, 3 = both side was adjusted
+        enumerator :: li_P_image              ! image number assigned from BIPquick
+        enumerator :: li_parent_link          ! A map to the corresponding SWMM link after a BIPquick link-split
+        enumerator :: li_weir_EndContractions ! (0,1) to indicate contraction (from SWMM.inp)
+        enumerator :: li_RoadSurface          ! roadsurface type for roadway weir (from SWMM.inp)
+        enumerator :: li_curve_id             ! curve id if the link is associated with any curve (from SWMM.inp)
+        enumerator :: li_lateralInflowNode    ! downstream node from which the lateral inflow is coming from
+        enumerator :: li_lateralInflowBCidx   ! The idx position in the BC%flowX(idx,:) array for lateral inflow
+        enumerator :: li_first_elem_idx       ! first SWMM5+ elem in the link
+        enumerator :: li_last_elem_idx        ! last SWMM5+ elem in the link
+        enumerator :: li_transect_idx         ! transect index if the link is associated with an irregular geometry transect (from SWMM.inp)
         enumerator :: li_lastplusone !% must be last enum item
     end enum
     integer, target :: Ncol_linkI = li_lastplusone-1
@@ -67,15 +68,28 @@ module define_indexes
     !%-------------------------------------------------------------------------
     enum, bind(c)
         enumerator :: lr_Length = 1
-        enumerator :: lr_AdjustedLength ! length adjustment if multi-link junction is present
+        !enumerator :: lr_AdjustedLength !  OBSOLETE length adjustment if multi-link junction is present
         enumerator :: lr_Air_Volume
-        enumerator :: lr_InletOffset    ! Every links should have a inlet and oulet offset
-        enumerator :: lr_OutletOffset   ! to make it consistent with SWMM.
-        enumerator :: lr_FullArea
-        enumerator :: lr_FullHydRadius
-        enumerator :: lr_BottomDepth 
-        enumerator :: lr_BottomRadius  
-        enumerator :: lr_BreadthScale
+        enumerator :: lr_InletOffset     ! Every link should have a inlet and oulet offset (from SWMM.inp)
+        enumerator :: lr_OutletOffset    ! to make it consistent with SWMM. (from SWMM.inp)
+        enumerator :: lr_FullArea        ! Full cross-section area (aFull from SWMM.inp)
+        enumerator :: lr_FullHydRadius   ! Full cross-section hydraulic radius (rFull from SWMM.inp)
+        enumerator :: lr_yBot            ! length with multiple meanings(yBot from SWMM.inp)
+                                         ! Sediment bottom depth in FILLED_CIRCULAR,
+                                         ! Height of bottom triangle in RECT_TRIANG
+                                         ! Height of lower section in MOD_BASKET
+                                         ! Bottom width in TRAPEZOIDAL
+        enumerator :: lr_rBot            ! length with multiple meanings (rBot from SWMM.inp)
+                                         ! C factor or roughness in FORCE_MAIN
+                                         ! sediment perimeter of filled bottom in FILLED_CIRCULAR
+                                         ! length of sidewall per unit depth in RECT_TRIANG
+                                         ! bottom radius in RECT_ROUND
+                                         ! circular top arc radieus in MOD_BASKET
+                                         ! length of sidewall per unit depth in TRAPEZOIDAL
+                                         ! length of sidewall per unit depth in TRIANGULAR
+                                         ! TopWidth / ((1+ 1/Exponent) * (FullHeight**(1/Exponent)) ) in POWERFUNC
+                                         ! Topwidth /( 2 * sqrt(FullHeight) ) in PARABOLIC
+        enumerator :: lr_wMax
         enumerator :: lr_TopWidth
         enumerator :: lr_ElementLength
         enumerator :: lr_Slope
@@ -106,6 +120,8 @@ module define_indexes
         enumerator :: lr_InflowVolumeFraction    !% fraction of inflow delivered to this link
         enumerator :: lr_ZbottomUp             ! Z bottom of upstream node
         enumerator :: lr_ZbottomDn             ! Z bottom of downstream node
+        enumerator :: lr_BackgroundScale1      ! length or area scale used for defining background geometry of diagnostice element
+        enumerator :: lr_BackgroundScale2
         enumerator :: lr_lastplusone !% must be last enum item
     end enum
     integer, target :: Ncol_linkR = lr_lastplusone-1
@@ -118,6 +134,7 @@ module define_indexes
         enumerator :: lYN_weir_CanSurcharge = 1
         enumerator :: lYN_is_nj2_connection
         enumerator :: lYN_isOutput
+        enumerator :: lYN_isEquivalentOrifice
         enumerator :: lYN_isPhantomLink
         enumerator :: lYN_hasFlapGate
         enumerator :: lYN_isUpSurcharge
@@ -343,7 +360,7 @@ module define_indexes
         enumerator :: er_BreadthMax                 !% maximum breadth of conduit (static)
         enumerator :: er_Depth                      !% actual maximum depth of open-channel flow
         enumerator :: er_DepthAtBreadthMax          !% depth below the point of maximum breadth
-        enumerator :: er_dHdA                       !% geometric change in elevation with area (used in AC only)
+        !enumerator :: er_dHdA                       !% geometric change in elevation with area (used in AC only)
         enumerator :: er_DeltaQ                     !% change in flowrate due to junction
         enumerator :: er_dSlotArea                  !% change in slot volume
         enumerator :: er_dSlotDepth                 !% change in slot depth
@@ -421,7 +438,8 @@ module define_indexes
         enumerator :: er_Volume                     !% volume (latest)
         enumerator :: er_Volume_N0                  !% volume (time N)
         enumerator :: er_Volume_N1                  !% volume (time N-1)
-        enumerator :: er_VolumeConservation         !% cumulative volume conservation
+        enumerator :: er_VolumeConservation         !% this time step volume conservation
+        enumerator :: er_VolumeConservationTotal    !% cumulative volume conservation
         enumerator :: er_VolumeLastAC               !% volume at start of last AC step
         enumerator :: er_VolumeOverFlow             !% volume lost for overflow in this time step.  20220124brh
         enumerator :: er_VolumeOverFlowTotal        !% total volume lost to overflow       20220124brh 
@@ -523,7 +541,7 @@ module define_indexes
         enumerator :: ep_CCJM_NOTsmalldepth         !% alternate elements for CFL computation 
         enumerator :: ep_CCJM_NOTzerodepth
         enumerator :: ep_CC_Transect                !% all channel elements with irregular transect
-        enumerator :: ep_FM_HW_all                  !% all Hazen-Williams Force Main elements
+        enumerator :: ep_FM_HW                  !% all Hazen-Williams Force Main elements
         enumerator :: ep_FM_HW_PSsurcharged      !% all Hazen-Williams Force Main elements Preissmann Slot method that are surcharged
         enumerator :: ep_FM_dw_PSsurcharged      !% all Darcy-Weisbach Force Main elements Preissmann Slot method that are surcharged
         enumerator :: ep_FM_dw_PSnonSurcharged     !% all Darcy-Weisbach Force Main elements with Preissmann Slot that are not surcharged
@@ -639,6 +657,7 @@ module define_indexes
         enumerator :: esi_Weir_SpecificType             !% KEY specific weir type
         enumerator :: esi_Weir_GeometryType             !% KEY specific weir geometry type
         enumerator :: esi_Weir_RoadSurface              !% road surface type for roadway weir
+        enumerator :: esi_Weir_BackgroundGeometryType   !% background geometry (upstream) of weir
         enumerator :: esi_Weir_lastplusone !% must be last enum item
     end enum
 
@@ -649,6 +668,7 @@ module define_indexes
         enumerator :: esi_Orifice_FlowDirection = 1     !% orifice flow direction (-1, +1)
         enumerator :: esi_Orifice_SpecificType          !% KEY specific orifice type
         enumerator :: esi_Orifice_GeometryType          !% KEY specific orifice geometry type
+        enumerator :: esi_Orifice_BackgroundGeometryType   !% background geometry (upstream) of orifice
         enumerator :: esi_Orifice_lastplusone !% must be last enum item
     end enum
     integer, parameter :: Ncol_elemSI_orifice = esi_Orifice_lastplusone-1
@@ -659,6 +679,7 @@ module define_indexes
         enumerator :: esi_Outlet_SpecificType          !% KEY specific outlet type
         enumerator :: esi_Outlet_CurveID               !% outlet curve id
         enumerator :: esi_Outlet_hasFlapGate           !% 1 if true, 0 if false
+        enumerator :: esi_Outlet_BackgroundGeometryType   !% background geometry (upstream) of outlet
         enumerator :: esi_Outlet_lastplusone !% must be last enum item
     end enum
     integer, parameter :: Ncol_elemSI_outlet = esi_Orifice_lastplusone-1
@@ -669,6 +690,7 @@ module define_indexes
         enumerator :: esi_Pump_SpecificType          !% KEY specific pump type
         enumerator :: esi_Pump_CurveID               !% pump curve id
         enumerator :: esi_Pump_IsControlled          !% 1 for external control, 0 for upstream control
+        enumerator :: esi_Pump_BackgroundGeometryType   !% background geometry (upstream) of pump
         enumerator :: esi_Pump_lastplusone !% must be last enum item
     end enum
     integer, parameter :: Ncol_elemSI_Pump = esi_Pump_lastplusone-1
@@ -720,8 +742,9 @@ module define_indexes
         enumerator ::  esr_JM_ExternalPondedDepth
         enumerator ::  esr_JM_ExternalPondedHead
         enumerator ::  esr_JM_ExternalPondedHeadDiff
-        enumerator ::  esr_JM_FlowrateTotalIn
-        enumerator ::  esr_JM_FlowrateTotalOut
+        enumerator ::  esr_JM_FlowrateTotalIn  !% not the conservative values
+        enumerator ::  esr_JM_FlowrateTotalOut !% not the conservative values
+        enumerator ::  esr_JM_FlowrateNetConservative !% net conservative flow from faces (+ is in)
         enumerator ::  esr_JM_HeadMax !% maximum head of surrounding elements
         enumerator ::  esr_JM_HeadMin !% minimum head of surrounding elements
         enumerator ::  esr_JM_PondedVolumeTotal
@@ -737,9 +760,9 @@ module define_indexes
         enumerator ::  esr_JM_VolumeInflowLimit
         enumerator ::  esr_JB_Air_Volume
         enumerator ::  esr_JB_Kfactor
-        enumerator ::  esr_JB_fa !% constant factor in dQdH
-        enumerator ::  esr_JB_fb !% linear factor in dQdH
-        enumerator ::  esr_JB_dQdH !% rate of change of Q with H in JM
+        !enumerator ::  esr_JB_fa !% constant factor in dQdH
+        !enumerator ::  esr_JB_fb !% linear factor in dQdH
+        enumerator ::  esr_JB_dQdHjm !% rate of change of Q with H in JM
         enumerator ::  esr_Storage_Constant
         enumerator ::  esr_Storage_Coefficient
         enumerator ::  esr_Storage_Exponent
@@ -768,6 +791,8 @@ module define_indexes
         enumerator ::  esr_Orifice_RectangularBreadth       !% rectangular orifice breadth
         enumerator ::  esr_Orifice_Zcrown                   !% orifice "crown" elevation - highest edge of orifice
         enumerator ::  esr_Orifice_Zcrest                   !% orifice "crest" elevation - lowest edge of orifice
+        enumerator ::  esr_Orifice_BackgroundScale1         !% background geometry (upstream) 
+        enumerator ::  esr_Orifice_BackgroundScale2         !% background geometry (upstream) 
         enumerator ::  esr_Orifice_lastplusone !% must be last enum item
     end enum
     integer, parameter :: Ncol_elemSR_Orifice = esr_Orifice_lastplusone-1
@@ -780,7 +805,7 @@ module define_indexes
         enumerator ::  esr_Outlet_Exponent                 !% exponent for outlet dishcharge relation
         enumerator ::  esr_Outlet_Coefficient              !% power for outlet dishcharge relation
         enumerator ::  esr_Outlet_Zcrest                   !% outlet "crest" elevation - lowest edge of outlet
-        enumerator ::  esr_Outlet_dQdHe
+        enumerator ::  esr_Outlet_dQdH_upstream            !% dQ for dH of usptream head
         enumerator ::  esr_Outlet_lastplusone !% must be last enum item
     end enum
     integer, parameter :: Ncol_elemSR_Outlet = esr_Outlet_lastplusone-1
@@ -793,11 +818,14 @@ module define_indexes
         enumerator ::  esr_Pump_yOff                       !% pump shutoff depth
         enumerator ::  esr_Pump_xMin                       !% minimum pt. on pump curve 
         enumerator ::  esr_Pump_xMax                       !% maximum pt. on pump curve
-        enumerator ::  esr_Pump_dQdHp                      !% rate of change of Q with pump head
+        enumerator ::  esr_Pump_dQdH_upstream              !% rate of change of Q with upstream head
+        enumerator ::  esr_Pump_dQdH_downstream            !% rate of change of Q with downstream head
         enumerator ::  esr_Pump_Zcrest
         enumerator ::  esr_Pump_Rampup_Time                !% Time interval for pump startup 
         enumerator ::  esr_Pump_MinShutoffTime             !% Minimum shutoff time before pump can restart
         enumerator ::  esr_Pump_TimeSinceStartOrShutdown   !% Time since last change in status
+        enumerator ::  esr_Pump_InletDiameter              !% upstream inlet diameter of circular conduit
+        enumerator ::  esr_Pump_OutletDiameter             !% 
         enumerator ::  esr_Pump_lastplusone                !% must be last enum item
     end enum
     integer, parameter :: Ncol_elemSR_Pump = esr_Pump_lastplusone-1
@@ -1219,6 +1247,8 @@ module define_indexes
         enumerator ::  fi_BCtype                    !% KEY type of BC on face
         enumerator ::  fi_barrels                   !% number of barrels for the face
         enumerator ::  fi_jump_type                 !% KEY Type of hydraulic jump
+        enumerator ::  fi_eType_uL                  !% element type upstream 
+        enumerator ::  fi_eType_dL                  !% element type downstream
         enumerator ::  fi_Melem_uL                  !% map to element upstream (local index)
         enumerator ::  fi_Melem_dL                  !% map to element downstream (local index)
         enumerator ::  fi_GhostElem_uL              !% map to upstream ghost element
@@ -1255,15 +1285,16 @@ module define_indexes
         enumerator :: fr_GammaM                 !% gamma momentum source term
         enumerator :: fr_Head_u                 !% piezometric head on upstream side of face
         enumerator :: fr_Head_d                 !% piezometric head on downstream side of face
-        enumerator :: fr_Head_Adjacent          !% head of adjacent upstream or downstream element for JB faces
-        enumerator :: fr_EnergyHead_Adjacent        !% total energy of adjacent upstram or downstram element for JB faces
-        enumerator :: fr_Topwidth_Adjacent      !% topwidth of adjacent upstream or downstream element
-        enumerator :: fr_Length_Adjacent        !% length of adjacent upstream or downstream element
-        enumerator :: fr_Zcrest_Adjacent
-        enumerator :: fr_dQdH_Adjacent          !% dQdH of JB-adjacent diagnostic element
-        enumerator :: fr_Velocity_Adjacent      !% velocity of an adjacent CC element
-        enumerator :: fr_Froude_Adjacent        !% Froude number of adjacent element
-        enumerator :: fr_Depth_Adjacent         !% Depth of adjacent element
+        enumerator :: fr_Head_Adjacent_to_JB          !% head of adjacent upstream or downstream element for JB faces
+        enumerator :: fr_EnergyHead_Adjacent_to_JB        !% total energy of adjacent upstram or downstram element for JB faces
+        enumerator :: fr_Flowrate_Adjacent_to_JB      !% flowrate of adjacent upstream or dowstream element to JB
+        enumerator :: fr_Topwidth_Adjacent_to_JB      !% topwidth of adjacent upstream or downstream element to JB
+        enumerator :: fr_Length_Adjacent_to_JB        !% length of adjacent upstream or downstream element to JB
+        enumerator :: fr_Zcrest_Adjacent_to_JB        !% Zcrest of adjacent diagnostic element
+        enumerator :: fr_dQdH_Adjacent_to_JB          !% dQdH of JB-adjacent diagnostic element
+        enumerator :: fr_Velocity_Adjacent_to_JB      !% velocity of an adjacent CC element
+        enumerator :: fr_Froude_Adjacent_to_JB        !% Froude number of adjacent element
+        enumerator :: fr_Depth_Adjacent_to_JB         !% Depth of adjacent element
         enumerator :: fr_KJunction_MinorLoss    !% K factor for entrance/exit loss from element adjacent to nJM
         enumerator :: fr_psiL2                  !% head loss term for juction computation
         enumerator :: fr_Zbottom                !% zbottom of faces
@@ -1295,9 +1326,9 @@ module define_indexes
         enumerator :: fYN_isFaceDownstreamOfJB
         enumerator :: fYN_isFaceUpstreamOfJB
         enumerator :: fYN_isFaceOut
-        enumerator :: fYN_isDiag_adjacent_all
+        enumerator :: fYN_isDiag_adjacent_any
         enumerator :: fYN_isDiag_adjacent_interior
-        enumerator :: fYN_isCC_adjacent_all
+        enumerator :: fYN_isCC_adjacent_any
         enumerator :: fYN_isJB_QfrozenByDiag
         enumerator :: fYN_lastplusone !% must be last enum item
     end enum
@@ -1333,10 +1364,10 @@ module define_indexes
 
         !% ==========================================
         !% --- STATIC packed maps that cannot be used with up/down element mapping and are only used with faceP array
-        enumerator :: fp_Diag_all               !% any face with adjacent Diag. -- cannot be used with interp  
-        enumerator :: fp_JB_all                 !% any face with adjacent JB -- cannot be used with interp
-        enumerator :: fp_JBorDiag_all              !% any face that adjacent oto JB or CC
-        enumerator :: fp_notJB_all              !% any face not adjacent to JB
+        enumerator :: fp_Diag_any               !% any face with an adjacent Diag. -- cannot be used with interp  
+        enumerator :: fp_JB_any                 !% any face with an adjacent JB -- cannot be used with interp
+        enumerator :: fp_JBorDiag_any           !% any face that is adjacent to either JB or CC
+        enumerator :: fp_notJB_all              !% not JB adjacent on all sides
 
         !% --- STATIC columns that are (by definition) not shared
         enumerator :: fp_J1                     !% faces that are dead-ends of link without inflow BC
@@ -1458,25 +1489,25 @@ module define_indexes
         enumerator :: pfc_initialize_all = 1
         enumerator :: pfc_init_partitioning
         enumerator :: pfc_init_BIPquick
-        enumerator :: pfc_init_network_define_toplevel
-        enumerator :: pfc_init_bc
-        enumerator :: pfc_init_IC_setup
-        enumerator :: pfc_init_IC_from_linkdata
-        enumerator :: pfc_init_IC_get_depth_from_linkdata
-        enumerator :: pfc_init_IC_get_flow_roughness_from_linkdata
-        enumerator :: pfc_init_IC_get_elemtype_from_linkdata
-        enumerator :: pfc_init_IC_get_geometry_from_linkdata
-        enumerator :: pfc_init_IC_get_channel_geometry
-        enumerator :: pfc_init_IC_get_conduit_geometry
-        enumerator :: pfc_init_IC_get_weir_geometry
-        enumerator :: pfc_init_IC_get_orifice_geometry
-        enumerator :: pfc_init_IC_get_channel_conduit_velocity
-        enumerator :: pfc_init_IC_from_nodedata
-        enumerator :: pfc_init_IC_get_junction_data
+        enumerator :: pfc_network_define_toplevel
+        enumerator :: pfc_IC_bc
+        enumerator :: pfc_IC_setup
+        enumerator :: pfc_IC_from_linkdata
+        enumerator :: pfc_IC_get_depth_from_linkdata
+        enumerator :: pfc_IC_get_flow_roughness_from_linkdata
+        enumerator :: pfc_IC_get_elemtype_from_linkdata
+        enumerator :: pfc_IC_get_geometry_from_linkdata
+        enumerator :: pfc_IC_get_channel_geometry
+        enumerator :: pfc_IC_get_conduit_geometry
+        enumerator :: pfc_IC_get_weir_geometry
+        enumerator :: pfc_IC_get_orifice_geometry
+        enumerator :: pfc_IC_get_channel_conduit_velocity
+        enumerator :: pfc_IC_from_nodedata
+        enumerator :: pfc_IC_get_junction_data
         enumerator :: pfc_geo_assign_JB_from_head
         enumerator :: pfc_update_auxiliary_variables
-        enumerator :: pfc_init_IC_set_SmallVolumes
-        enumerator :: pfc_init_IC_diagnostic_interpolation_weights
+        enumerator :: pfc_IC_set_SmallVolumes
+        enumerator :: pfc_IC_diagnostic_interpolation_weights
         enumerator :: pfc_face_interpolation
         enumerator :: pfc_diagnostic_toplevel
         enumerator :: pfc_lastplusone  !% must be last enum item

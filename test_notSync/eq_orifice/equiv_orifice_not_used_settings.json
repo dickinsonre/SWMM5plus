@@ -1,0 +1,17 @@
+{
+    "JSON_FoundFileYN" : true,
+    "JSON_CheckAllInputYN" : false,
+    
+    "CaseName" : {
+        "Long"  : "no equivalent orifice",
+        "Short" : "NoEquivO"
+    },
+    "Discretization" : {
+        "NominalElemLength"     : 100.00,
+        "SmallElementHandling"  : "AllowSmallLinks"
+    },
+    "AirTracking" :{
+        "UseAirTrackingYN"          : false
+    }
+}
+

@@ -26,7 +26,7 @@ module utility_allocate
     use define_indexes
     use define_settings, only: setting
     use interface_
-    use utility
+    use utility, only : util_count_node_types !
     use utility_crash, only: util_crashpoint
 
     implicit none
@@ -36,7 +36,8 @@ module utility_allocate
 
     public :: util_allocate_scalar_for_images
     public :: util_allocate_secondary_coarrays
-    public :: util_allocate_linknode
+    public :: util_allocate_link
+    public :: util_allocate_node
     public :: util_allocate_monitor_points
     public :: util_allocate_action_points
     public :: util_allocate_link_transect
@@ -127,7 +128,76 @@ module utility_allocate
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine util_allocate_linknode()
+    subroutine util_allocate_link()
+        !%------------------------------------------------------------------
+        !% Description:
+        !%   Allocates the link storage used for the coarse representation
+        !%   of the network connectivity
+        !%
+        !% Method:
+        !%   The tables link%I, link%R,  link%YN, are allocated
+        !%   These are defined in globals.f08). Every time memory is allocated, the
+        !%   util_allocate_check functionality (from utility.f08) is used to
+        !%   determine wheter or not there was an error during the allocation.
+        !-------------------------------------------------------------------
+        !% Declarations
+            character(64) :: subroutine_name = 'util_allocate_link'
+            integer       :: additional_rows = 0
+            integer       :: ii, obj_name_len
+        !%-------------------------------------------------------------------
+        !% Preliminaries
+        !%-------------------------------------------------------------------
+        !% --- If BIPquick is being used for Partitioning, 
+        !%     include additional rows to the link-node arrays
+        if (setting%Partitioning%PartitioningMethod == BQuick) then
+            additional_rows = num_images() - 1
+        end if
+
+        allocate(link%I(setting%SWMMinput%N_link + additional_rows, Ncol_linkI)[*], stat=allocation_status, errmsg=emsg)
+        call util_allocate_check(allocation_status, emsg, 'link%I')
+        link%I(:,:) = nullvalueI
+
+        allocate(link%R(setting%SWMMinput%N_link + additional_rows, Ncol_linkR)[*], stat=allocation_status, errmsg=emsg)
+        call util_allocate_check(allocation_status, emsg, 'link%R')
+        link%R(:,:) = nullvalueR
+
+        allocate(link%YN(setting%SWMMinput%N_link + additional_rows, Ncol_linkYN)[*], stat=allocation_status, errmsg=emsg)
+        call util_allocate_check(allocation_status, emsg, 'link%YN')
+        link%YN(:,:) = nullvalueL
+
+        !% --- allocate storage for link names
+        !%     Only names of objects present in EPA-SWMM are stored
+        allocate(link%Names(N_link), stat=allocation_status, errmsg=emsg)
+        call util_allocate_check(allocation_status, emsg, 'link%Names')
+
+        !% --- get the length of the link names and allocate link%Names(:)%str to the correct size
+        do ii = 1, N_link
+            obj_name_len = interface_get_obj_name_len(ii, API_LINK)
+            !% --- check to see if this is the longest name
+            max_names_string_length = max(max_names_string_length, obj_name_len)
+            allocate(character(obj_name_len) :: link%Names(ii)%str, stat=allocation_status, errmsg=emsg)
+            call util_allocate_check(allocation_status, emsg, 'character(obj_name_len) :: link%Names(ii)%str')
+        end do
+
+        allocate(link_output_idx(setting%SWMMinput%N_link + additional_rows), stat=allocation_status,errmsg=emsg)
+        call util_allocate_check(allocation_status, emsg, 'link_output_idx')
+
+        !% allocate sc_link_Idx array
+        allocate(sc_link_Idx(setting%SWMMinput%N_link + additional_rows, setting%SWMMinput%N_link + additional_rows), stat=allocation_status,errmsg=emsg)
+        call util_allocate_check(allocation_status, emsg, 'link_output_idx')
+        sc_link_Idx = nullvalueI
+
+        !% allocate links_per_sc array
+        allocate(links_per_sc(setting%SWMMinput%N_link + additional_rows), stat=allocation_status,errmsg=emsg)
+        call util_allocate_check(allocation_status, emsg, 'links_per_sc')
+        links_per_sc = nullvalueI
+
+    end subroutine util_allocate_link
+!%
+!%==========================================================================
+!%==========================================================================
+!%
+    subroutine util_allocate_node()
         !%------------------------------------------------------------------
         !% Description:
         !%   Allocates the link and node storage used for the coarse representation
@@ -145,9 +215,6 @@ module utility_allocate
             integer       :: ii, obj_name_len
         !%-------------------------------------------------------------------
         !% Preliminaries
-            !if (crashYN) return
-            if (setting%Debug%File%utility_allocate) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
         !%-------------------------------------------------------------------
         !% --- If BIPquick is being used for Partitioning, 
         !%     include additional rows to the link-node arrays
@@ -159,25 +226,13 @@ module utility_allocate
         call util_allocate_check(allocation_status, emsg, 'node%I')
         node%I(:,:) = nullvalueI
 
-        allocate(link%I(setting%SWMMinput%N_link + additional_rows, Ncol_linkI)[*], stat=allocation_status, errmsg=emsg)
-        call util_allocate_check(allocation_status, emsg, 'link%I')
-        link%I(:,:) = nullvalueI
-
         allocate(node%R(N_node + additional_rows, Ncol_nodeR)[*], stat=allocation_status, errmsg=emsg)
         call util_allocate_check(allocation_status, emsg, 'node%R')
         node%R(:,:) = nullvalueR
 
-        allocate(link%R(setting%SWMMinput%N_link + additional_rows, Ncol_linkR)[*], stat=allocation_status, errmsg=emsg)
-        call util_allocate_check(allocation_status, emsg, 'link%R')
-        link%R(:,:) = nullvalueR
-
         allocate(node%YN(N_node + additional_rows, Ncol_nodeYN)[*], stat=allocation_status, errmsg=emsg)
         call util_allocate_check(allocation_status, emsg, 'node%YN')
         node%YN(:,:) = nullvalueL
-
-        allocate(link%YN(setting%SWMMinput%N_link + additional_rows, Ncol_linkYN)[*], stat=allocation_status, errmsg=emsg)
-        call util_allocate_check(allocation_status, emsg, 'link%YN')
-        link%YN(:,:) = nullvalueL
 
         !% --- allocate storage for node names
         !%     Only names of objects present in EPA-SWMM are stored
@@ -193,44 +248,14 @@ module utility_allocate
             call util_allocate_check(allocation_status, emsg, 'character(obj_name_len) :: node%Names(ii)%str')
         end do
 
-        !% --- allocate storage for link names
-        !%     Only names of objects present in EPA-SWMM are stored
-        allocate(link%Names(N_link), stat=allocation_status, errmsg=emsg)
-        call util_allocate_check(allocation_status, emsg, 'link%Names')
-
-        do ii = 1, N_link
-            obj_name_len = interface_get_obj_name_len(ii, API_LINK)
-            !% --- check to see if this is the longest name
-            max_names_string_length = max(max_names_string_length, obj_name_len)
-            allocate(character(obj_name_len) :: link%Names(ii)%str, stat=allocation_status, errmsg=emsg)
-            call util_allocate_check(allocation_status, emsg, 'character(obj_name_len) :: link%Names(ii)%str')
-        end do
-
         !% --- allocate link_node_output_idx
         allocate(node_output_idx(N_node + additional_rows),stat=allocation_status,errmsg=emsg)
         call util_allocate_check(allocation_status, emsg, 'node_output_idx')
 
-        allocate(link_output_idx(setting%SWMMinput%N_link + additional_rows), stat=allocation_status,errmsg=emsg)
-        call util_allocate_check(allocation_status, emsg, 'link_output_idx')
-
-        !% allocate sc_link_Idx array
-        allocate(sc_link_Idx(setting%SWMMinput%N_link + additional_rows, setting%SWMMinput%N_link + additional_rows), stat=allocation_status,errmsg=emsg)
-        call util_allocate_check(allocation_status, emsg, 'link_output_idx')
-        sc_link_Idx = nullvalueI
-
-        !% allocate links_per_sc array
-        allocate(links_per_sc(setting%SWMMinput%N_link + additional_rows), stat=allocation_status,errmsg=emsg)
-        call util_allocate_check(allocation_status, emsg, 'links_per_sc')
-        links_per_sc = nullvalueI
-
-        !%-------------------------------------------------------------------
-        !% Closing
-            if (setting%Debug%File%utility_allocate) &
-            write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-
-    end subroutine util_allocate_linknode
+    end subroutine util_allocate_node
 !%
 !%==========================================================================
+
 !%==========================================================================
 !%    
     subroutine util_allocate_monitor_points()
@@ -845,62 +870,62 @@ module utility_allocate
             profiler_procedure_name(pfc_init_partitioning) = 'init_partitioning'
             profiler_procedure_level(pfc_init_partitioning) = 1
 
-            profiler_procedure_name(pfc_init_network_define_toplevel) = 'init_network_define_toplevel'
-            profiler_procedure_level(pfc_init_network_define_toplevel) = 1
+            profiler_procedure_name(pfc_network_define_toplevel) = 'network_define_toplevel'
+            profiler_procedure_level(pfc_network_define_toplevel) = 1
 
-            profiler_procedure_name(pfc_init_bc) = 'init_bc'
-            profiler_procedure_level(pfc_init_bc) = 3
+            profiler_procedure_name(pfc_IC_bc) = 'IC_bc'
+            profiler_procedure_level(pfc_IC_bc) = 3
 
-            profiler_procedure_name(pfc_init_IC_setup) = 'init_IC_setup'
-            profiler_procedure_level(pfc_init_IC_setup) = 1
+            profiler_procedure_name(pfc_IC_setup) = 'IC_setup'
+            profiler_procedure_level(pfc_IC_setup) = 1
 
-            profiler_procedure_name(pfc_init_IC_from_linkdata) = 'init_IC_from_linkdata'
-            profiler_procedure_level(pfc_init_IC_from_linkdata) = 2
+            profiler_procedure_name(pfc_IC_from_linkdata) = 'IC_from_linkdata'
+            profiler_procedure_level(pfc_IC_from_linkdata) = 2
 
-            profiler_procedure_name(pfc_init_IC_get_depth_from_linkdata) = 'init_IC_get_depth_from_linkdata'
-            profiler_procedure_level(pfc_init_IC_get_depth_from_linkdata) = 3
+            profiler_procedure_name(pfc_IC_get_depth_from_linkdata) = 'IC_get_depth_from_linkdata'
+            profiler_procedure_level(pfc_IC_get_depth_from_linkdata) = 3
 
-            profiler_procedure_name(pfc_init_IC_get_flow_roughness_from_linkdata) = 'init_IC_get_flow_roughness_from_linkdata'
-            profiler_procedure_level(pfc_init_IC_get_flow_roughness_from_linkdata) = 3
+            profiler_procedure_name(pfc_IC_get_flow_roughness_from_linkdata) = 'IC_get_flow_roughness_from_linkdata'
+            profiler_procedure_level(pfc_IC_get_flow_roughness_from_linkdata) = 3
 
-            profiler_procedure_name(pfc_init_IC_get_elemtype_from_linkdata) = 'init_IC_get_elemtype_from_linkdata'
-            profiler_procedure_level(pfc_init_IC_get_elemtype_from_linkdata) = 3
+            profiler_procedure_name(pfc_IC_get_elemtype_from_linkdata) = 'IC_get_elemtype_from_linkdata'
+            profiler_procedure_level(pfc_IC_get_elemtype_from_linkdata) = 3
 
-            profiler_procedure_name(pfc_init_IC_get_geometry_from_linkdata) = 'init_IC_get_geometry_from_linkdata'
-            profiler_procedure_level(pfc_init_IC_get_geometry_from_linkdata) = 2
+            profiler_procedure_name(pfc_IC_get_geometry_from_linkdata) = 'IC_get_geometry_from_linkdata'
+            profiler_procedure_level(pfc_IC_get_geometry_from_linkdata) = 2
 
-            profiler_procedure_name(pfc_init_IC_get_channel_geometry) = 'init_IC_get_channel_geometry'
-            profiler_procedure_level(pfc_init_IC_get_channel_geometry) = 3
+            profiler_procedure_name(pfc_IC_get_channel_geometry) = 'IC_get_channel_geometry'
+            profiler_procedure_level(pfc_IC_get_channel_geometry) = 3
 
-            profiler_procedure_name(pfc_init_IC_get_conduit_geometry) = 'init_IC_get_conduit_geometry'
-            profiler_procedure_level(pfc_init_IC_get_conduit_geometry) = 3
+            profiler_procedure_name(pfc_IC_get_conduit_geometry) = 'IC_get_conduit_geometry'
+            profiler_procedure_level(pfc_IC_get_conduit_geometry) = 3
 
-            profiler_procedure_name(pfc_init_IC_get_weir_geometry) = 'init_IC_get_weir_geometry'
-            profiler_procedure_level(pfc_init_IC_get_weir_geometry) = 3
+            profiler_procedure_name(pfc_IC_get_weir_geometry) = 'IC_get_weir_geometry'
+            profiler_procedure_level(pfc_IC_get_weir_geometry) = 3
 
-            profiler_procedure_name(pfc_init_IC_get_orifice_geometry) = 'init_IC_get_orifice_geometry'
-            profiler_procedure_level(pfc_init_IC_get_orifice_geometry) = 3
+            profiler_procedure_name(pfc_IC_get_orifice_geometry) = 'IC_get_orifice_geometry'
+            profiler_procedure_level(pfc_IC_get_orifice_geometry) = 3
 
             profiler_procedure_name(pfc_geo_assign_JB_from_head) = 'geo_assign_JB_from_head'
             profiler_procedure_level(pfc_geo_assign_JB_from_head) = 3
 
-            profiler_procedure_name(pfc_init_IC_get_channel_conduit_velocity) = 'init_IC_get_channel_conduit_velocity'
-            profiler_procedure_level(pfc_init_IC_get_channel_conduit_velocity) = 3
+            profiler_procedure_name(pfc_IC_get_channel_conduit_velocity) = 'IC_get_channel_conduit_velocity'
+            profiler_procedure_level(pfc_IC_get_channel_conduit_velocity) = 3
 
-            profiler_procedure_name(pfc_init_IC_from_nodedata) = 'init_IC_from_nodedata'
-            profiler_procedure_level(pfc_init_IC_from_nodedata) = 2
+            profiler_procedure_name(pfc_IC_from_nodedata) = 'IC_from_nodedata'
+            profiler_procedure_level(pfc_IC_from_nodedata) = 2
 
-            profiler_procedure_name(pfc_init_IC_get_junction_data) = 'init_IC_get_junction_data'
-            profiler_procedure_level(pfc_init_IC_get_junction_data) = 3
+            profiler_procedure_name(pfc_IC_get_junction_data) = 'IC_get_junction_data'
+            profiler_procedure_level(pfc_IC_get_junction_data) = 3
 
             profiler_procedure_name(pfc_update_auxiliary_variables) = 'update_auxiliary_variables'
             profiler_procedure_level(pfc_update_auxiliary_variables) = 2
 
-            profiler_procedure_name(pfc_init_IC_set_SmallVolumes) = 'init_IC_set_SmallVolumes'
-            profiler_procedure_level(pfc_init_IC_set_SmallVolumes) = 3
+            profiler_procedure_name(pfc_IC_set_SmallVolumes) = 'IC_set_SmallVolumes'
+            profiler_procedure_level(pfc_IC_set_SmallVolumes) = 3
 
-            profiler_procedure_name(pfc_init_IC_diagnostic_interpolation_weights) = 'init_IC_diagnostic_interpolation_weights'
-            profiler_procedure_level(pfc_init_IC_diagnostic_interpolation_weights) = 3
+            profiler_procedure_name(pfc_IC_diagnostic_interpolation_weights) = 'IC_diagnostic_interpolation_weights'
+            profiler_procedure_level(pfc_IC_diagnostic_interpolation_weights) = 3
 
             profiler_procedure_name(pfc_face_interpolation) = 'face_interpolation'
             profiler_procedure_level(pfc_face_interpolation) =  2

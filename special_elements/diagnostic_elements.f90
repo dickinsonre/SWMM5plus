@@ -30,7 +30,7 @@ module diagnostic_elements
 
     public :: diagnostic_by_type 
     public :: diagnostic_flowrate_replaced_by_JB 
-    public :: diagnostic_push_adjacent_elemdata_to_face
+    !public :: diagnostic_push_adjacent_elemdata_to_face
 
     contains
 !%==========================================================================
@@ -94,6 +94,20 @@ module diagnostic_elements
             else 
                 !% continue
             end if
+
+            ! if ((thisP(ii) .eq. 626) .and. (setting%Time%Step > 30686)) then 
+            !     print *, ' '
+            !     print *, 'in diagnostic_flowrate'
+            !     print *, 'flowrate ',elemR(thisP(ii),er_Flowrate)
+            !     print *, 'up/dn ', faceR(fup,fr_Flowrate), faceR(fdn,fr_Flowrate)
+            !     print *, ' '
+            !     print *, 'fdn ',fdn 
+            !     print *, 'edn ',facei(fdn,fi_Melem_dL)
+            !     print *, 'etype ',elemI(facei(fdn,fi_Melem_dL),ei_elementType)
+            !     print *, reverseKey(elemI(facei(fdn,fi_Melem_dL),ei_elementType))
+            !     print *, ' '
+            ! end if
+
         end do
 
     end subroutine diagnostic_flowrate_replaced_by_JB 
@@ -128,10 +142,11 @@ module diagnostic_elements
             thisP    => elemP(1:Npack,thisCol)
         !%-----------------------------------------------------------------------------
 
-        !print *, thisP
+
         !% this cycles through the individual elements, but each
         !% cycle is entirely independent
         do ii=1,Npack
+
             !% replace with do concurrent if every procedure called in this loop can be PURE
             thisType => elemI(thisP(ii),ei_elementType)
 
@@ -174,27 +189,27 @@ module diagnostic_elements
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine diagnostic_push_adjacent_elemdata_to_face (tPcol)
-        !%-----------------------------------------------------------------
-        !% Description:
-        !% Pushes element data (elemR) from element upstream or downstream of a
-        !% diagnostic to the face between element and diagnostic
-        !%-----------------------------------------------------------------
-            integer, intent(in) :: tPcol  !% packed column ep_Diag
-            integer, pointer    :: Npack
-            integer             :: ii
-        !%-----------------------------------------------------------------
-        !% Preliminaries:
-            Npack => npack_elemP(tPCol)
-            if (Npack < 1) return
-        !%-----------------------------------------------------------------
+    ! subroutine diagnostic_push_adjacent_elemdata_to_face (tPcol)
+    !     !%-----------------------------------------------------------------
+    !     !% Description:
+    !     !% Pushes element data (elemR) from element upstream or downstream of a
+    !     !% diagnostic to the face between element and diagnostic
+    !     !%-----------------------------------------------------------------
+    !         integer, intent(in) :: tPcol  !% packed column ep_Diag
+    !         integer, pointer    :: Npack
+    !         integer             :: ii
+    !     !%-----------------------------------------------------------------
+    !     !% Preliminaries:
+    !         Npack => npack_elemP(tPCol)
+    !         if (Npack < 1) return
+    !     !%-----------------------------------------------------------------
 
-        call face_push_elemdata_to_face (tPcol, fr_Topwidth_Adjacent, er_Topwidth, elemR, .true.)
-        call face_push_elemdata_to_face (tPcol, fr_Topwidth_Adjacent, er_Topwidth, elemR, .false.)
-        call face_push_elemdata_to_face (tPcol, fr_Length_Adjacent,   er_Length,   elemR, .true.)
-        call face_push_elemdata_to_face (tPcol, fr_Length_Adjacent,   er_Length,   elemR, .false.)
+    !     call face_push_elemdata_to_face (tPcol, fr_Topwidth_Adjacent_to_JB, er_Topwidth, elemR, .true.)
+    !     call face_push_elemdata_to_face (tPcol, fr_Topwidth_Adjacent_to_JB, er_Topwidth, elemR, .false.)
+    !     call face_push_elemdata_to_face (tPcol, fr_Length_Adjacent_to_JB,   er_Length,   elemR, .true.)
+    !     call face_push_elemdata_to_face (tPcol, fr_Length_Adjacent_to_JB,   er_Length,   elemR, .false.)
 
-    end subroutine diagnostic_push_adjacent_elemdata_to_face
+    ! end subroutine diagnostic_push_adjacent_elemdata_to_face
 !% 
 !%==========================================================================
 !% END OF MODULE

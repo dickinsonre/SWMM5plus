@@ -12,7 +12,7 @@ module interface_
     !%==========================================================================
     use iso_c_binding
     use c_library
-    use utility
+    !use utility
     use utility_datetime
     use define_indexes
     use define_keys

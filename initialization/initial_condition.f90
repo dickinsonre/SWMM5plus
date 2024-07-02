@@ -42,6 +42,9 @@ module initial_condition
     use xsect_tables
     use control_hydraulics, only: control_init_monitoring_and_action_from_EPASWMM
     use interface_, only: interface_get_nodef_attribute
+    use junction_lowlevel, only: lljunction_main_plan_area, &
+        lljunction_main_overflow_conditions, lljunction_main_netFlowrate
+    use utility, only: util_get_adjacent_CC_link !
     use utility_profiler
     use utility_allocate
     use utility_deallocate
@@ -49,11 +52,11 @@ module initial_condition
     use utility_key_default
     use utility_crash, only: util_crashpoint
    
-   ! use utility_unit_testing, only: util_utest_CLprint, util_utest_checkIsNan
+   !use utility_unit_testing, only: util_utest_CLprint, util_utest_checkIsNan
 
     implicit none
 
-    public :: init_IC_toplevel
+    public :: IC_toplevel
     private
 
 contains
@@ -62,7 +65,7 @@ contains
 !% PUBLIC
 !%==========================================================================
 !%
-    subroutine init_IC_toplevel ()
+    subroutine IC_toplevel ()
         !%------------------------------------------------------------------
         !% Description:
         !% set up the initial conditions for all the elements
@@ -72,83 +75,71 @@ contains
         !% Declarations:
             integer          :: ii
             integer, pointer :: Npack, thisP(:)
-            character(64)    :: subroutine_name = 'init_IC_toplevel'
+            character(64)    :: subroutine_name = 'IC_toplevel'
         !%-------------------------------------------------------------------
         !% Preliminaries:
-            if (setting%Debug%File%initial_condition) &
-            write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
         !%-------------------------------------------------------------------
         !% Aliases
-        !%-------------------------------------------------------------------    
-        !% --- default the TimeLastSet to 0.0 (elapsed) for all elements
-        elemR(:,er_TimeLastSet) = zeroR
+        !%-------------------------------------------------------------------
+            
+        !% --- command line warning for long wait times
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) then 
+            if ((N_link > 5000) .or. (N_node > 5000)) then
+                    write(*,"(A)") " ... setting initial conditions --this may take several minutes for big systems ..."
+                    write(*,"(A,i8,A,i8,A)") "      SWMM system has ", setting%SWMMinput%N_link, " links and ", setting%SWMMinput%N_node, " nodes"
+                    write(*,"(A,i8,A)")      "      FV system has   ", sum(N_elem(:)), " elements"
+            else 
+                    !% --- no need to warn for small systems
+            end if
+        else 
+            !% be silent    
+        end if    
 
-        !% --- initialize all the element Setting as 1
-        !%     this is fully open for links, weirs, orifices, outlets, and on for pumps.
-        elemR(1:size(elemR,1)-1,er_TargetSetting) = oneR
-        elemR(1:size(elemR,1)-1,er_Setting)       = oneR
-
-        !% --- initialize all the minor losses and seepage rates to zero
-        elemR(:,er_KJunction_MinorLoss) = zeroR
-        elemR(:,er_Kconduit_MinorLoss)  = zeroR
-        elemR(:,er_SeepRate)            = zeroR
-
-        !% --- initialize overflow
-        elemR(:,er_VolumeOverFlow)      = zeroR
-        elemR(:,er_VolumeOverFlowTotal) = zeroR
-
-        elemR(:,er_VolumeArtificialInflowTotal) = zeroR
-
-        !% --- initialize barrels
-        setting%Output%BarrelsExist = .false. !% will be set to true if barrels > 1 detected
-        elemI(:,ei_barrels) = oneR
-
-        !% --- initialize sediment depths
-        !%     Note: as of 20221006 only FilledCircular is allowed to have nonzero sediment depth
-        !%     this corresponds to the "yBot" of the Filled Circular cross-section in EPA-SWMM
-        elemR(:,er_SedimentDepth) = zeroR
-
+        !% --- set zero or base values for elements
+        call IC_elemArrays ()
+    
         !% --- get data that can be extracted from links
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin init_IC_from_linkdata'
-        call init_IC_from_linkdata ()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin IC_from_linkdata'
+        call IC_from_linkdata ()
 
-        sync all
-        !% --- set up background geometry for weir, orifice, etc.
-        !%     from adjacent elements
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin init_IC_diagnostic_geometry_from_adjacent'
-        call init_IC_diagnostic_geometry_from_adjacent (.true.)
-
-        !% --- sync after all the link data has been extracted
-        !%     the junction branch data is read in from the elemR arrays which
-        !%     may need inter-image communication, thus the sync call is needed
-        sync all
+        !% --- get JM data that can be extracted from nodes
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin IC_JM_from_nodedata'
+        call IC_JM_from_nodedata ()
         
-        !% --- get data that can be extracted from nodes
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin init_IC_for_nJM_from_nodedata'
-        call init_IC_for_nJm_from_nodedata ()
+        !% --- get JB data that can be extracted from nodes
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin IC_JB_from_nodedata'
+        call IC_JB_from_nodedata ()
 
-        !% --- second call for diagnostic that was next to JM/JB
-        sync all
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin init_IC_diagnostic_geometry_from_adjacent'
-        call init_IC_diagnostic_geometry_from_adjacent (.false.)
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin IC_JM_additional_data'
+        call IC_JM_additional_data ()
+
+        !% --- set the equivalent orifices in place of short pipe
+        !%     Note that this is where:
+        !%     link type is set to lOrifice 
+        !%     link subtype is set to lEquivalentOrificeChannel or lEquivalentOrificePipe
+        !%     elem QeqType is set to diagnostict
+        !%     elemetType   is set to orifice
+        !%     and all orifice geometry is set for the equivalentOrifice
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin IC_equivalent_orifices'
+        call IC_equivalent_orifices ()
 
         !% --- identify all faces adjacent to diagnostic elements
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin init_IC_identify_diagnostic_adjacent_faces'
-        call init_IC_identify_diagnostic_adjacent_faces ()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin IC_identify_diagnostic_adjacent_faces'
+        call IC_identify_diagnostic_adjacent_faces ()
 
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin init_IC_identify_diagnostic_adjacent_elements'
-        call init_IC_identify_diagnostic_adjacent_elements ()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin IC_identify_diagnostic_adjacent_elements'
+        call IC_identify_diagnostic_adjacent_elements ()
 
         !% --- identify special case diagnostic elements that have JB on either side
         !%     these have the face flowrates frozen in the junction residual computation
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin init_IC_diagnostic_JB_bounded'
-        call init_IC_diagnostic_JB_bounded ()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin IC_diagnostic_JB_bounded'
+        call IC_diagnostic_JB_bounded ()
 
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin init_IC_identify_CC_adjacent_faces'
-        call init_IC_identify_CC_adjacent_faces ()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin IC_identify_CC_adjacent_faces'
+        call IC_identify_CC_adjacent_faces ()
 
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin init_IC_identify_CC_adjacent_nonCC_elements'
-        call init_IC_identify_CC_adjacent_nonCC_elements () 
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin IC_identify_CC_adjacent_nonCC_elements'
+        call IC_identify_CC_adjacent_nonCC_elements () 
 
         !% --- error checking for nullvalues
         !%     keep for future debugging use.
@@ -172,38 +163,40 @@ contains
         ! end do
 
         !% --- set up the transect arrays
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin init_IC_elem_transect...'
-        call init_IC_elem_transect_arrays ()
-        call init_IC_elem_transect_geometry ()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin IC_elem_transect...'
+        call IC_elem_transect_arrays ()
+        call IC_elem_transect_geometry ()
 
         !% --- compute the horizontal plan area of junctions
-        call init_IC_junction_plan_area ()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin IC_junction_plan_area...'
+        call IC_junction_plan_area ()
 
         !% --- ensure that IC depth and volume are consistent
-        call init_IC_depth_volume_consistency ()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin IC_depth_volume_consistency...'
+        call IC_depth_volume_consistency ()
 
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin init_IC_error_check'
-        call init_IC_error_check ()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin IC_error_check'
+        call IC_error_check ()
        
         !% --- identify the small and zero depths (must be done before pack)
         ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin adjust small/zero depth'
         !% --- if not using small depth algorithm, then cuttoff is the same as zero depth
         !%     HACK small depth algorithm is presently not functional 20230601
         if (.not. setting%SmallDepth%useMomentumCutoffYN) setting%SmallDepth%MomentumDepthCutoff = setting%ZeroValue%Depth
-        call adjust_element_toplevel (CC)
-        call adjust_element_toplevel (JB) 
-        call adjust_element_toplevel (JM) 
+        call adjust_element_toplevel (CC,.false.)
+        call adjust_element_toplevel (JB,.false.) 
+        call adjust_element_toplevel (JM,.false.) 
 
         !% ---zero out the lateral inflow column
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin init_set_zero_lateral_inflow'
-        call init_IC_set_zero_lateral_inflow ()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin init_set_zero_lateral_inflow'
+        call IC_set_zero_lateral_inflow ()
 
         !% --- update time marching type
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin init_IC_solver_select '
-        call init_IC_solver_select ()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin IC_solver_select '
+        call IC_solver_select ()
        
         !% --- set up all the static packs and masks
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin pack_mask arrays_all'
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin pack_mask arrays_all'
         call pack_mask_arrays_all ()
 
         !%----------------------------------------------------------------
@@ -211,126 +204,81 @@ contains
         !%---------------------------------------------------------------
 
         !% --- initialize zerovalues for other than depth (must be done after pack)
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin IC_Zerovalues'
-        call init_IC_ZeroValues_nondepth ()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin IC_Zerovalues_nondepth'
+        call IC_ZeroValues_nondepth ()
 
         !% --- set all the zero and small volumes
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin adjust small/zero depth 2'
-        call adjust_element_toplevel (CC)
-        call adjust_element_toplevel (JB)
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin adjust small/zero depth 2'
+        call adjust_element_toplevel (CC,.false.)
+        call adjust_element_toplevel (JB,.false.)
         !% --- adjustments are done to the Volume array, so reset the volume and volume_N0
         Npack => npack_elemP(ep_CCJM)
         thisP => elemP(1:Npack,ep_CCJM)
-        call adjust_limit_by_zerovalues(er_Volume, setting%ZeroValue%Volume, thisP, .true.)
+        call adjust_limit_by_zerovalues(er_Volume, setting%ZeroValue%Volume, thisP, .true., zeroI)
         elemR(:,er_Volume_N0) = elemR(:,er_Volume)
 
         !% --- get the bottom slope
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin IC bottom slope'
-        call init_IC_bottom_slope ()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin IC bottom slope'
+        call IC_bottom_slope ()
 
         !% --- set small volume values in elements
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin init_IC_set_SmallVolumes'
-        call init_IC_set_SmallVolumes ()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin IC_set_SmallVolumes'
+        call IC_set_SmallVolumes ()
 
         !% --- initialize Preissmann slots
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin init_IC_slot'
-        call init_IC_slot ()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin IC_slot'
+        call IC_slot ()
 
         !% --- get the velocity and any other derived data
         !%     These are data needed before bc and aux variables are updated
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin init_IC_derived_data'
-        call init_IC_derived_data()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin IC_derived_data'
+        call IC_derived_data()
 
         !% --- set the reference head (based on Zbottom values)
         !%     this must be called before bc_update() so that
         !%     the timeseries for head begins correctly
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin init_reference_head'
-        call init_reference_head()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin init_reference_head'
+        call IC_reference_head()
 
         !% --- remove the reference head values from arrays
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin init_subtract_reference_head'
-        call init_subtract_reference_head()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin init_subtract_reference_head'
+        call IC_subtract_reference_head()
 
         !% --- create the packed set of nodes for BC
         !if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin pack_nodes'
         ! call pack_nodes_BC()
         ! call util_allocate_bc()
-        !% --- moved inside init_bc
+        !% --- moved inside IC_bc
 
         !% --- initialize Manning's n for forcemain elements
         if (setting%Solver%ForceMain%AllowForceMainTF) call forcemain_ManningsN ()
 
         !% --- initialize boundary conditions
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin init_bc'
-        call init_bc()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin IC_bc'
+        call IC_bc()
 
         !% --- setup the sectionfactor arrays needed for normal depth computation on outfall BC
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin init_uniformtable_array"
-        call init_uniformtable_array()
+        if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin IC_uniformtable_array"
+        call IC_uniformtable_array()
 
         !% --- update the BC so that face interpolation works in update_aux...
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin bc_update'
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin bc_update'
         call bc_update()
         if (crashI==1) return
 
-        !% --- storing dummy values for branches that are invalid
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin branch dummy values'
-        call init_IC_branch_dummy_values ()
+        !% --- set initial conditions on diagnostic elements
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin IC_diagnostic...'
+        call IC_diagnostic ()
 
-        !% --- initialize branch values that need to be zero
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin branch zero values'
-        call init_IC_branch_zero_values ()
-
-        !% --- set all the auxiliary (dependent) variables
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin update_aux_variables CC'
+        !% --- set initial conditions for all the auxiliary (dependent) variables for CC elements
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin update_aux_variables CC'
         call update_auxiliary_variables_CC (&
             ep_CC, ep_CC_Open_Elements, ep_CC_Closed_Elements, &
             .true., .false., dummyIdx)
 
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin update_aux_variables JM'
-        Npack => npack_elemP(ep_JM)
-
-        !% Saz 02022024: Inside this if condition face interpolation is called, which requires face syncs
-        !% we cann not call any syncs within any coditional because it will cause race condition
-        !% thus commenting out the if conditional for now
-        ! if (Npack > 0) then
-            thisP => elemP(1:Npack,ep_JM)
-            !% --- junction plan area
-            call geo_plan_area_from_volume_JM (elemPGetm, npack_elemPGetm, col_elemPGetm)
-            !% --- junction depth 
-            call geo_depth_from_volume_JM (elemPGetm, npack_elemPGetm, col_elemPGetm)
-            !% --- junction modified hydraulic depth
-            elemR(thisP,er_EllDepth) = elemR(thisP,er_Depth)
-            !% --- junction head
-            elemR(thisP,er_Head) = llgeo_head_from_depth_pure(thisP,elemR(thisP,er_Depth))
-            elemR(thisP,er_EllDepth) = elemR(thisP,er_Depth)
-            !% --- need face interpolation of head before assigning JB head using geo_assign
-            call face_interpolation (fp_noBC_IorS,.false.,.true.,.false.,.false.,.false.)  
-            call geo_assign_JB_from_head (ep_JM)
-        ! end if
-        
-        !% --- Froude number, wavespeed, and interpwights on JB
-        Npack => npack_elemP(ep_JB)
-        if (Npack > 0) then 
-            thisP => elemP(1:Npack, ep_JB)
-            call update_Froude_number_element (thisP) 
-            call update_wavespeed_element(thisP)
-            call update_interpweights_JB (thisP, Npack, .false.)
-        end if
-
-        !% --- wave speed, Froude number on JM
-        Npack => npack_elemP(ep_JM)
-        if (Npack > 0) then
-            thisP => elemP(1:Npack, ep_JM)
-            call update_wavespeed_element(thisP)
-            call update_Froude_number_element (thisP) 
-        end if
-
-        Npack => npack_elemP(ep_Diag)
-        if (Npack > 0) then 
-            thisp => elemP(1:Npack,ep_Diag)
-            call update_interpweights_Diag (thisP, Npack)
-        end if
+        !% --- set initial conditions on JM junctions and their JB branches
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin IC_junctions...'
+        call IC_junctions ()
 
         !% --- initialize old head 
         !%     HACK - make into a subroutine if more variables need initializing
@@ -338,33 +286,22 @@ contains
         ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin setting old head'
         elemR(:,er_Head_N0) = elemR(:,er_Head)
 
-        !% --- update diagnostic interpolation weights
-        !%     (the interpolation weights of diagnostic elements
-        !%     stays the same throughout the simulation. Thus, they
-        !%     are only needed to be set at the top of the simulation)
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,  'begin init_IC_diagnostic_interpolation_weights'
-        call init_IC_diagnostic_interpolation_weights()
-
-        !% --- set small values to diagnostic element interpolation sets
-        !%     Needed so that junk values does not mess up the first interpolation
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin  init_IC_small_values_diagnostic_elements'
-        call init_IC_small_values_diagnostic_elements
-
-        call adjust_element_toplevel(CC)
-        call adjust_element_toplevel(JM)   
-        call adjust_element_toplevel(JB) 
+        call adjust_element_toplevel(CC,.false.)
+        call adjust_element_toplevel(JM,.false.)   
+        call adjust_element_toplevel(JB,.false.) 
 
         !% --- update faces
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin face_interpolation '
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin face_interpolation '
         call face_interpolation (fp_noBC_IorS,.true.,.true.,.true.,.false.,.false.)
        
         !% --- SET THE MONITOR AND ACTION POINTS FROM EPA-SWMM
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin controls init monitoring and action from EPSWMM"
+        if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin controls init monitoring and action from EPSWMM"
         call control_init_monitoring_and_action_from_EPASWMM()
 
-        !% --- update the initial condition in all diagnostic elements
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin diagnostic_toplevel'
-        call diagnostic_push_adjacent_elemdata_to_face (ep_Diag)
+        !% --- update the initial condition in all diagnostic elements for consistency with
+        !%     face data after interpolation
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin diagnostic_by_type'
+        !call diagnostic_push_adjacent_elemdata_to_face (ep_Diag)
         call diagnostic_by_type (ep_Diag, 0)
         !% reset any face values affected
         call face_interpolation (fp_Diag_IorS,.true.,.true.,.true.,.true.,.true.)
@@ -377,31 +314,31 @@ contains
         end if
 
         !% --- ensure that small and zero depth faces are correct
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin adjust small/zero depth 3'
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin adjust small/zero depth 3'
         call adjust_zero_and_small_depth_face (.false.)
 
+        !% --- initialize net flow into a junction 
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin IC_junction_netflow...'
+        call IC_junction_netflow ()
+
         !% --- set the initial air entrapment volumes
-        call init_IC_air_entrapment ()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,'begin IC_air_entrapment...'
+        call IC_air_entrapment ()
 
         !% ---populate er_ones columns with ones
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin init_IC_oneVectors'
-        call init_IC_oneVectors ()
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin IC_oneVectors'
+        call IC_oneVectors ()
     
         !% --- error check for ponding scales 
-        call init_IC_ponding_errorcheck ()
+        call IC_ponding_errorcheck ()
 
-        ! print *, ' '
-        ! print *, elemR(201,er_Zcrown), elemSR(201,esr_Weir_Zcrown) 
+        !% --- allocate other temporary arrays (initialized to null)
+        call util_allocate_temporary_arrays()
 
-        ! stop 6609873
-   
-        ! do ii=1,N_elem(1)
-        !     print *, ii, elemI(ii,ei_elementType),trim(reverseKey(elemI(ii,ei_elementType)))
-        !     print *, 'connect face: ',elemI(ii,ei_Mface_uL), elemI(ii,ei_Mface_dL)
-        !     if (elemI(ii,ei_Mface_uL) .ne. nullvalueI) print *, faceI(elemI(ii,ei_Mface_uL),fi_Melem_uL)
-        !     if (elemI(ii,ei_Mface_dL) .ne. nullvalueI) print *, faceI(elemI(ii,ei_Mface_dL),fi_Melem_dL)
-        ! end do
-        ! stop 6098723
+        !% --- initialize volume conservation storage for debugging
+        elemR(:,er_VolumeConservation) = zeroR   
+        elemR(:,er_VolumeConservationTotal) = zeroR     
+
         !%-------------------------------------------------------------------
         !% Closing
         if (setting%Debug%File%initial_condition) then
@@ -437,16 +374,58 @@ contains
             ! call execute_command_line('')
         end if
 
-        if (setting%Debug%File%initial_condition) &
-            write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-
-    end subroutine init_IC_toplevel
+    end subroutine IC_toplevel
 !%
 !%==========================================================================
 !% PRIVATE
 !%==========================================================================
 !%
-    subroutine init_IC_from_linkdata ()
+    subroutine IC_elemArrays ()
+        !%------------------------------------------------------------------
+        !% Description
+        !% base-level initialization of element arrays
+        !%------------------------------------------------------------------
+        !%------------------------------------------------------------------
+        !%------------------------------------------------------------------
+
+        !% --- default the TimeLastSet to 0.0 (elapsed) for all elements
+        elemR(:,er_TimeLastSet) = zeroR
+
+        !% --- initialize all the element Setting as 1
+        !%     this is fully open for links, weirs, orifices, outlets, and on for pumps.
+        elemR(1:size(elemR,1)-1,er_TargetSetting) = oneR
+        elemR(1:size(elemR,1)-1,er_Setting)       = oneR
+
+        !% --- initialize all the minor losses and seepage rates to zero
+        elemR(:,er_KJunction_MinorLoss) = zeroR
+        elemR(:,er_Kconduit_MinorLoss)  = zeroR
+        elemR(:,er_SeepRate)            = zeroR
+
+        !% --- initialize overflow
+        elemR(:,er_VolumeOverFlow)      = zeroR
+        elemR(:,er_VolumeOverFlowTotal) = zeroR
+
+        elemR(:,er_VolumePonded)      = zeroR
+        elemR(:,er_VolumePondedTotal) = zeroR
+
+        elemR(:,er_VolumeArtificialInflow) = zeroR
+        elemR(:,er_VolumeArtificialInflowTotal) = zeroR
+
+        !% --- initialize barrels
+        setting%Output%BarrelsExist = .false. !% will be set to true if barrels > 1 detected
+        elemI(:,ei_barrels) = oneR
+
+        !% --- initialize sediment depths
+        !%     Note: as of 20221006 only FilledCircular is allowed to have nonzero sediment depth
+        !%     this corresponds to the "yBot" of the Filled Circular cross-section in EPA-SWMM
+        elemR(:,er_SedimentDepth) = zeroR
+
+    end subroutine IC_elemArrays
+!%
+!%==========================================================================
+!%==========================================================================
+!%
+    subroutine IC_from_linkdata ()
         !%------------------------------------------------------------------
         !% Description:
         !% get the initial depth, flowrate, and geometry data from links
@@ -455,11 +434,9 @@ contains
             integer                                     :: ii, pLink
             integer, pointer                            :: thisLink
             integer, dimension(:), allocatable, target  :: packed_link_idx
-            character(64) :: subroutine_name = 'init_IC_from_linkdata'
+            character(64) :: subroutine_name = 'IC_from_linkdata'
         !%------------------------------------------------------------------
         !% Preliminaries
-            if (setting%Debug%File%initial_condition) &
-            write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
         !%------------------------------------------------------------------
         !% pack all the link indexes in an image
         packed_link_idx = pack(link%I(:,li_idx), (link%I(:,li_P_image) == this_image()))
@@ -467,7 +444,7 @@ contains
         !% find the number of links in an image
         pLink = size(packed_link_idx)
 
-        !% --- initialize the diagnostic element counter
+        !% --- initialize the global diagnostic element counter
         N_diag = 0
 
         !% cycle through the links in an image
@@ -476,23 +453,25 @@ contains
             ! % necessary pointers
             thisLink    => packed_link_idx(ii)
 
-            call init_IC_get_barrels_from_linkdata(thisLink)
+            call IC_get_barrels_from_linkdata(thisLink)
 
+            !% --- Use node data for initial head and depth
             !% --- note that this does NOT adjust depth for closed conduit crown height
-            call init_IC_get_head_and_depth (thisLink)
+            call IC_get_head_and_depth (thisLink)
 
-            call init_IC_get_flow_and_roughness_from_linkdata (thisLink)
+            !% --- Note the flow/roughness is overwritten for ForceMain
+            call IC_get_flow_and_roughness_from_linkdata (thisLink)
 
-            call init_IC_get_elemtype_from_linkdata (thisLink)
+            call IC_get_elemtype_from_linkdata (thisLink)
 
             !% --- note this adjusts depth for closed conduit crown height and sets surcharge
-            call init_IC_get_geometry_from_linkdata (thisLink)
+            call IC_get_geometry_from_linkdata (thisLink)
 
-            call init_IC_get_flapgate_from_linkdata (thisLink)
+            call IC_get_flapgate_from_linkdata (thisLink)
 
-            call init_IC_get_ForceMain_from_linkdata (thisLink)     
+            call IC_get_ForceMain_from_linkdata (thisLink)     
 
-            call init_IC_get_culvert_from_linkdata(thisLink)
+            call IC_get_culvert_from_linkdata(thisLink)
 
             if ((setting%Output%Verbose) .and. (this_image() == 1)) then
                 if (mod(ii,1000) == 0) then
@@ -507,14 +486,12 @@ contains
             !% --- deallocate the temporary array
             deallocate(packed_link_idx)
 
-            if (setting%Debug%File%initial_condition) &
-                write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-    end subroutine init_IC_from_linkdata
+    end subroutine IC_from_linkdata
 !%
 !%==========================================================================
 !%==========================================================================
 !%    
-    subroutine init_IC_depth_volume_consistency ()
+    subroutine IC_depth_volume_consistency ()
         !%-----------------------------------------------------------------
         !% Description
         !% Adjusts volume so that depth computed from volume is consistent
@@ -596,12 +573,12 @@ contains
             elemR(:,er_Temp03) = zeroR 
             elemI(:,ei_Temp03) = zeroI
 
-    end subroutine init_IC_depth_volume_consistency
+    end subroutine IC_depth_volume_consistency
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_get_barrels_from_linkdata (thisLink)
+    subroutine IC_get_barrels_from_linkdata (thisLink)
         !%-----------------------------------------------------------------
         !% Description:
         !% Sets the number of barrels (default is one)
@@ -610,7 +587,7 @@ contains
             integer, intent(in)  :: thisLink
             integer, pointer     :: firstE, lastE, fdn(:), fup(:), eBarrels(:)
             integer, pointer     :: fBarrels(:)
-            character(64) :: subroutine_name = 'init_IC_get_barrels_from_linkdata'
+            character(64) :: subroutine_name = 'IC_get_barrels_from_linkdata'
         !%-----------------------------------------------------------------
         !% Preliminaries
         !%-----------------------------------------------------------------
@@ -634,12 +611,12 @@ contains
         !%     only need a single multi-barrel to make this true.
         if (any(eBarrels(firstE:lastE) > 1)) setting%Output%BarrelsExist = .true.
 
-    end subroutine init_IC_get_barrels_from_linkdata
+    end subroutine IC_get_barrels_from_linkdata
 !%
 !%==========================================================================
 !%==========================================================================
 !
-    subroutine init_IC_get_head_and_depth (thisLink)
+    subroutine IC_get_head_and_depth (thisLink)
         !%-----------------------------------------------------------------
         !% Description:
         !% get the initial depth data from links and nodes
@@ -656,11 +633,9 @@ contains
             real(8)              :: headUp, headDn, linkLength, length2Here
             real(8)              :: hDelta
             
-            character(64) :: subroutine_name = 'init_IC_get_depth_from_linkdata'
+            character(64) :: subroutine_name = 'IC_get_depth_from_linkdata'
         !%-----------------------------------------------------------------
         !% Preliminaries
-            if (setting%Debug%File%initial_condition) &
-            write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
         !%-----------------------------------------------------------------
         !% Aliases
             !% --- type of initial depth type
@@ -735,7 +710,6 @@ contains
 
         !% --- pack the elements for this link
         pElem = pack(elemI(:,ei_Lidx), (elemI(:,ei_link_Gidx_BIPquick) == thisLink))
-
 
         !% --- error checking, the upstream should be the first element in the pack
         firstidx = findloc(elemI(pElem,ei_link_Pos),1)
@@ -913,16 +887,17 @@ contains
             eDepth(pElem) = setting%ZeroValue%Depth * 0.99d0 
         endwhere
     
+        deallocate(pElem)
+
         !%-----------------------------------------------------------------
         !% Closing
-            if (setting%Debug%File%initial_condition) &
-            write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-    end subroutine init_IC_get_head_and_depth
+
+    end subroutine IC_get_head_and_depth
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_get_flow_and_roughness_from_linkdata (thisLink)
+    subroutine IC_get_flow_and_roughness_from_linkdata (thisLink)
         !%-----------------------------------------------------------------
         !% Description:
         !% get the initial flowrate and roughness data from links
@@ -930,11 +905,9 @@ contains
         !% Declarations:
             integer, intent(in) :: thisLink
             integer, pointer :: firstelem, lastelem, tNode
-            character(64) :: subroutine_name = 'init_IC_get_flow_and_roughness_from_linkdata'
+            character(64) :: subroutine_name = 'IC_get_flow_and_roughness_from_linkdata'
         !%------------------------------------------------------------------
         !% Preliminaries
-            if (setting%Debug%File%initial_condition) &
-            write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
         !%------------------------------------------------------------------
         !% Aliases
             firstelem => link%I(thisLink,li_first_elem_idx)
@@ -949,8 +922,8 @@ contains
             !% --- distribute minor losses uniformly over all the elements in thi link
             elemR(:,er_Kconduit_MinorLoss)   = link%R(thisLink,lr_Kconduit_MinorLoss) / (real(lastelem - firstelem + oneI,8))
             !% --- distribute volume fraction for lateral inflow across elements
-            ! MOVED TO init_bc elemR(:,er_InflowVolumeFraction) = link%R(thisLink,lr_InflowVolumeFraction) * elemR(:,er_Length) / link%R(thisLink,lr_Length)
-            ! MOVED TO init_bc: elemI(:,ei_lateralInflowNode)    = link%I(thisLink,li_lateralInflowNode)
+            ! MOVED TO IC_bc elemR(:,er_InflowVolumeFraction) = link%R(thisLink,lr_InflowVolumeFraction) * elemR(:,er_Length) / link%R(thisLink,lr_Length)
+            ! MOVED TO IC_bc: elemI(:,ei_lateralInflowNode)    = link%I(thisLink,li_lateralInflowNode)
             elemR(:,er_FlowrateLimit)        = link%R(thisLink,lr_FlowrateLimit)
             elemR(:,er_SeepRate)             = link%R(thisLink,lr_SeepRate)
         endwhere
@@ -988,14 +961,13 @@ contains
 
         !%-----------------------------------------------------------------
         !% Closing
-            if (setting%Debug%File%initial_condition) &
-            write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-    end subroutine init_IC_get_flow_and_roughness_from_linkdata
+
+    end subroutine IC_get_flow_and_roughness_from_linkdata
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_get_elemtype_from_linkdata (thisLink)
+    subroutine IC_get_elemtype_from_linkdata (thisLink)
         !%------------------------------------------------------------------
         !% Description:
         !% get the geometry data from links
@@ -1003,13 +975,9 @@ contains
         !% Declarations:
             integer, intent(in) :: thisLink
             integer, pointer    :: linkType
-
-            character(64) :: subroutine_name = 'init_IC_get_elemtype_from_linkdata'
+            character(64) :: subroutine_name = 'IC_get_elemtype_from_linkdata'
         !%-------------------------------------------------------------------
         !% Preliminaries:
-            if (setting%Debug%File%initial_condition) &
-            write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-
         !%-------------------------------------------------------------------
         !% Aliases:
             linkType      => link%I(thisLink,li_link_type)
@@ -1026,7 +994,7 @@ contains
                 endwhere
 
 
-            case (lpipe)
+            case (lPipe)
                 where (elemI(:,ei_link_Gidx_BIPquick) == thisLink)
                     elemI(:,ei_elementType)     = CC
                     elemI(:,ei_HeqType)         = time_march
@@ -1034,7 +1002,7 @@ contains
                     elemYN(:,eYN_canSurcharge)  =  .true.
                 endwhere
 
-            case (lweir)
+            case (lWeir)
                 where (elemI(:,ei_link_Gidx_BIPquick) == thisLink)
                     elemI(:,ei_elementType)         = weir
                     elemI(:,ei_QeqType)             = diagnostic
@@ -1088,14 +1056,13 @@ contains
 
         !%-----------------------------------------------------------------
         !% Closing
-            if (setting%Debug%File%initial_condition) &
-            write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-    end subroutine init_IC_get_elemtype_from_linkdata
+
+    end subroutine IC_get_elemtype_from_linkdata
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_get_flapgate_from_linkdata (thisLink)
+    subroutine IC_get_flapgate_from_linkdata (thisLink)
         !%-----------------------------------------------------------------
         !% Description:
         !% Sets a flap gate (if it exists) to the last element in a link
@@ -1105,7 +1072,7 @@ contains
             logical, pointer     :: hasFlapGate
             integer, pointer     :: firstE, lastE
             
-            character(64) :: subroutine_name = 'init_IC_get_flapgate_linkdata'
+            character(64) :: subroutine_name = 'IC_get_flapgate_linkdata'
         !%-----------------------------------------------------------------
         !% Preliminaries
         !%-----------------------------------------------------------------
@@ -1122,12 +1089,12 @@ contains
             elemYN(lastE,eYN_hasFlapGate) = .true.
         end if
         
-    end subroutine init_IC_get_flapgate_from_linkdata
+    end subroutine IC_get_flapgate_from_linkdata
 !
 !==========================================================================
 !==========================================================================
 !
-    subroutine init_IC_get_ForceMain_from_linkdata (thisLink)
+    subroutine IC_get_ForceMain_from_linkdata (thisLink)
         !%-----------------------------------------------------------------
         !% Description:
         !% Sets the Force main coefficients
@@ -1136,7 +1103,7 @@ contains
             integer, intent(in)  :: thisLink
             integer, pointer     :: firstE, lastE, linkType, linkGeo
             
-            character(64) :: subroutine_name = 'init_IC_get_ForceMain_from_linkdata'
+            character(64) :: subroutine_name = 'IC_get_ForceMain_from_linkdata'
         !%-----------------------------------------------------------------
         !% Aliases
             firstE      => link%I(thisLink,li_first_elem_idx)
@@ -1154,11 +1121,11 @@ contains
             !% --- if FMallClosedConduits
             if (setting%Solver%ForceMain%FMallClosedConduitsTF) then
                 !% --- forcing all closed conduits to be Force Main
-                call init_IC_set_forcemain_elements (firstE, lastE, thisLink)
+                call IC_set_forcemain_elements (firstE, lastE, thisLink)
             else 
                 !% --- handle links designated as force main in SWMM input file
                 if (linkGeo .eq. lForce_main) then
-                    call init_IC_set_forcemain_elements (firstE, lastE, thisLink)
+                    call IC_set_forcemain_elements (firstE, lastE, thisLink)
                 else
                     !% --- not a force main
                     elemYN(firstE:lastE,eYN_isForceMain)      = .false.
@@ -1174,12 +1141,12 @@ contains
         end if
 
 
-    end subroutine init_IC_get_ForceMain_from_linkdata
+    end subroutine IC_get_ForceMain_from_linkdata
 !    
 !==========================================================================
 !==========================================================================
 !    
-    subroutine init_IC_set_forcemain_elements (firstE, lastE, thisLink)
+    subroutine IC_set_forcemain_elements (firstE, lastE, thisLink)
         !%-----------------------------------------------------------------
         !% Description:
         !% sets the force main conditions between the first element (firstE)
@@ -1257,12 +1224,12 @@ contains
             !% -- no error checking
         end if
 
-    end subroutine init_IC_set_forcemain_elements
+    end subroutine IC_set_forcemain_elements
 !%    
 !%==========================================================================  
 !%==========================================================================
 !%
-    subroutine init_IC_get_culvert_from_linkdata (thisLink)
+    subroutine IC_get_culvert_from_linkdata (thisLink)
         !%-----------------------------------------------------------------
         !% Description:
         !% Sets up the culvert
@@ -1270,7 +1237,7 @@ contains
         !% Declarations:
             integer, intent(in)  :: thisLink
             integer, pointer     :: firstE, lastE, thisC
-            character(64) :: subroutine_name = 'init_IC_get_culvert_from_linkdata'
+            character(64) :: subroutine_name = 'IC_get_culvert_from_linkdata'
         !%-----------------------------------------------------------------
         !% Preliminaries
             !% --- if no culvert, return
@@ -1353,12 +1320,12 @@ contains
             call util_crashpoint(833287)
         end if
         
-    end subroutine init_IC_get_culvert_from_linkdata
+    end subroutine IC_get_culvert_from_linkdata
 !%
 !%==========================================================================    
 !%==========================================================================
 !%
-    subroutine init_IC_get_geometry_from_linkdata (thisLink)
+    subroutine IC_get_geometry_from_linkdata (thisLink)
         !%------------------------------------------------------------------
         !% Description:
         !% get the geometry data from links
@@ -1367,11 +1334,7 @@ contains
             integer, intent(in) :: thisLink
             integer, pointer    :: linkType, eIdx(:)
 
-            character(64) :: subroutine_name = 'init_IC_get_geometry_from_linkdata'
-        !%------------------------------------------------------------------
-        !% Preliminaries
-            if (setting%Debug%File%initial_condition) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
+            character(64) :: subroutine_name = 'IC_get_geometry_from_linkdata'
         !%------------------------------------------------------------------
         !% Aliases
             linkType      => link%I(thisLink,li_link_type)
@@ -1383,30 +1346,30 @@ contains
             case (lChannel)
                 
                 !% get geometry data for channels
-                call init_IC_get_channel_geometry (thisLink)
+                call IC_get_channel_geometry (thisLink,zeroI)
 
             case (lpipe)
                 !% get geometry data for conduits
-                call init_IC_get_conduit_geometry (thisLink)
+                call IC_get_conduit_geometry (thisLink,zeroI)
 
             case (lweir)
                 !% get geometry data for weirs
-                call init_IC_get_weir_geometry (thisLink)
+                call IC_get_weir_geometry (thisLink)
 
             case (lOrifice)
                 !% get geometry data for orifices
-                call init_IC_get_orifice_geometry (thisLink)
+                call IC_get_orifice_geometry (thisLink)
 
             case (lPump)
                 !% get geometry data for pump
-                call init_IC_get_pump_geometry (thisLink)
+                call IC_get_pump_geometry (thisLink)
 
             case (lOutlet)
                 !% get geometry data for link outlets
                 ! print *, 'CODE ERROR  an outlet link in the SWMM input file was found.'
                 ! print *, 'This feature is not yet available in SWMM5+'
                 ! call util_crashpoint(4409872)
-                call init_IC_get_outlet_geometry (thisLink)
+                call IC_get_outlet_geometry (thisLink)
 
             case default
 
@@ -1421,42 +1384,55 @@ contains
     
         !%------------------------------------------------------------------
         !% Closing
-            if (setting%Debug%File%initial_condition) &
-            write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
 
-    end subroutine init_IC_get_geometry_from_linkdata
+    end subroutine IC_get_geometry_from_linkdata
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_get_channel_geometry (thisLink)
+    subroutine IC_get_channel_geometry (thisLink,inElem)
         !%-----------------------------------------------------------------
         !% Description:
         !% get the geometry data for open channel links
         !% and calculate element volumes
+        !% If inElem = 0 then this computes geometry for all elements in 
+        !% this link. Otherwise, the geometry from the link is transferred
+        !% only to inElem location
         !% Note that the "FullDepth" must be defined for open channels.    
         !%-------------------------------------------------------------------
         !% Declarations
-            integer, intent(in) :: thisLink
+            integer, intent(in) :: thisLink, inElem
             integer, pointer    :: geometryType, link_tidx, eIdx(:), thisP(:)
             integer, pointer    :: fUp(:), fDn(:)
 
             integer :: Npack
+
+            integer, target, dimension(1) :: thisElem
 
             real(8), pointer    :: depth(:)
             real(8), pointer    :: fullarea(:), fullperimeter(:)
             real(8), pointer    :: fulltopwidth(:), initialDepth(:)
             real(8), pointer    :: fullhydradius(:), fulldepth(:)
 
-            character(64) :: subroutine_name = 'init_IC_get_channel_geometry'
+            logical             :: isJB, upfaceExists, dnfaceExists
+
+            character(64) :: subroutine_name = 'IC_get_channel_geometry'
         !%--------------------------------------------------------------------
         !% Preliminaries:
-            if (setting%Debug%File%initial_condition) &
-            write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
+            !% --- pack the elements for this link in temporary array
+            ! print *, 'inElem ',inElem
+            if (inElem == 0) then 
+                Npack = count(elemI(:,ei_link_Gidx_BIPquick) == thisLink)
+                if (Npack < 1) return
+            else 
+                Npack = 0 
+            end if
         !%--------------------------------------------------------------------
         !% Aliases:
             !% --- pointer to geometry type
             geometryType => link%I(thisLink,li_geometry)
+
+           ! print *, 'geometry type ',link%I(thisLink,li_geometry)
 
             !% --- pointer to element indexes
             eIdx         => elemI(:,ei_Lidx)
@@ -1465,20 +1441,45 @@ contains
             fUp          => elemI(:,ei_Mface_uL)
             fDn          => elemI(:,ei_Mface_dL)
 
-            !% --- pack the elements for this link in temporary array
-            Npack = count(elemI(:,ei_link_Gidx_BIPquick) == thisLink)
-            if (Npack < 1) return 
-            elemI(1:Npack,ei_Temp01) = pack(eIdx,elemI(:,ei_link_Gidx_BIPquick) == thisLink)
-            thisP => elemI(1:Npack,ei_Temp01)
-
-            initialDepth => elemR(:,er_Temp01)
+            !% --- pointers to geometry arrays
+            initialDepth => elemR(:,er_Temp01)  !% -- temporary storage
             depth        => elemR(:,er_Depth)
             fullarea     => elemR(:,er_FullArea)
             fulldepth    => elemR(:,er_FullDepth)
             fullhydradius=> elemR(:,er_FullHydRadius)
             fullperimeter=> elemR(:,er_FullPerimeter)
             fulltopwidth => elemR(:,er_FullTopwidth)
+
+            !% --- pack the elements for this link in temporary array
+            if (inElem == 0) then
+                !% --- for a set of elements in a link
+                elemI(1:Npack,ei_Temp01) = pack(eIdx,elemI(:,ei_link_Gidx_BIPquick) == thisLink)
+                thisP => elemI(1:Npack,ei_Temp01)
+                isJB = .false. !% --- by definition, a link cannot be a JB element
+                upfaceExists = .true.
+                dnfaceExists = .true.
+            else 
+                !% --- for a single element
+                thisElem = inElem
+                thisP => thisElem 
+                if (elemI(thisP(1),ei_elementType) .eq. JB) then 
+                    isJB = .true.
+                    if (elemSI(thisP(1),esi_JB_IsUpstream) == oneI) then 
+                        upfaceExists = .true.
+                        dnfaceExists = .false.
+                    else
+                        upfaceExists = .false.
+                        dnfaceExists = .true.
+                    end if
+                else
+                    isJB = .false.
+                    upfaceExists = .true.
+                    dnfaceExists = .true.
+                end if
+            end if
         !%--------------------------------------------------------------------
+
+           ! print *, 'Npack ',Npack
 
         !% --- temporarily store initial depth in temp array so that full depth
         !%     can replace it for computing full geometry with standard functions
@@ -1487,286 +1488,286 @@ contains
 
         select case (geometryType)
 
-        case (lIrregular)
+            case (lIrregular)
 
-            !% --- transect index for this link
-            link_tidx => link%I(thisLink,li_transect_idx)
-            
-            !% --- assign non-table transect data
-            elemI(thisP,ei_geometryType)  = irregular
-            elemI(thisP,ei_link_transect_idx)  = link_tidx
-            
-            !% --- independent data
-            elemR(thisP,er_BreadthMax)          = link%transectR(link_tidx,tr_widthMax)
+                !% --- transect index for this link
+                link_tidx => link%I(thisLink,li_transect_idx)
+                
+                !% --- assign non-table transect data
+                elemI(thisP,ei_geometryType)  = irregular
+                elemI(thisP,ei_link_transect_idx)  = link_tidx
+                
+                !% --- independent data
+                elemR(thisP,er_BreadthMax)          = link%transectR(link_tidx,tr_widthMax)
 
-            elemR(thisP,er_AreaBelowBreadthMax) = link%transectR(link_tidx,tr_areaBelowBreadthMax)
+                elemR(thisP,er_AreaBelowBreadthMax) = link%transectR(link_tidx,tr_areaBelowBreadthMax)
 
-            !% --- note, do not apply the full depth limiter function to transects!
-            elemR(thisP,er_FullDepth)           = link%transectR(link_tidx,tr_depthFull)
- 
-            elemR(thisP,er_FullArea)            = link%transectR(link_tidx,tr_areaFull)
+                !% --- note, do not apply the full depth limiter function to transects!
+                elemR(thisP,er_FullDepth)           = link%transectR(link_tidx,tr_depthFull)
+    
+                elemR(thisP,er_FullArea)            = link%transectR(link_tidx,tr_areaFull)
 
-            elemR(thisP,er_FullTopwidth)        = link%transectR(link_tidx,tr_widthFull)
+                elemR(thisP,er_FullTopwidth)        = link%transectR(link_tidx,tr_widthFull)
 
-            elemR(thisP,er_ZbreadthMax)         = link%transectR(link_tidx,tr_depthAtBreadthMax) + elemR(thisP,er_Zbottom)
+                elemR(thisP,er_ZbreadthMax)         = link%transectR(link_tidx,tr_depthAtBreadthMax) + elemR(thisP,er_Zbottom)
 
-            elemR(thisP,er_FullHydRadius)       = link%transectR(link_tidx,tr_hydRadiusFull)
+                elemR(thisP,er_FullHydRadius)       = link%transectR(link_tidx,tr_hydRadiusFull)
 
-            !% --- full conditions
-            elemR(thisP,er_FullPerimeter) = llgeo_perimeter_from_hydradius_and_area_pure &
-                                                (thisP, fullhydradius(thisP), fullarea(thisP))  
+                !% --- full conditions
+                elemR(thisP,er_FullPerimeter) = llgeo_perimeter_from_hydradius_and_area_pure &
+                                                    (thisP, fullhydradius(thisP), fullarea(thisP))  
 
-            !% --- dependent data
-            elemR(thisP,er_Zcrown)        = elemR(thisP,er_Zbottom)  + elemR(thisP,er_FullDepth)
-            elemR(thisP,er_FullVolume)    = elemR(thisP,er_FullArea) * elemR(thisP,er_Length)
-            
-            !% ---NOTE the IC data for area, volume, etc cannot be initialized until the transect tables are setup, which is
-            !%     delayed until after the JB are initialized.
+                !% --- dependent data
+                elemR(thisP,er_Zcrown)        = elemR(thisP,er_Zbottom)  + elemR(thisP,er_FullDepth)
+                elemR(thisP,er_FullVolume)    = elemR(thisP,er_FullArea) * elemR(thisP,er_Length)
+                
+                !% ---NOTE the IC data for area, volume, etc cannot be initialized until the transect tables are setup, which is
+                !%     delayed until after the JB are initialized.
 
-        case (lParabolic)
-            elemI(thisP,ei_geometryType) = parabolic
+            case (lParabolic)
+                elemI(thisP,ei_geometryType) = parabolic
 
-            !% --- independent data
-            elemSGR(thisP,esgr_Parabolic_Breadth)   = link%R(thisLink,lr_BreadthScale)
-            elemSGR(thisP,esgr_Parabolic_Radius)    = elemSGR(thisP,esgr_Parabolic_Breadth) / twoR / sqrt(link%R(thisLink,lr_FullDepth))
-            elemR(thisP,er_FullDepth)               = link%R(thisLink,lr_FullDepth)
-            elemR(thisP,er_BreadthMax)              = link%R(thisLink,lr_BreadthScale)
+                !% --- independent data
+                elemSGR(thisP,esgr_Parabolic_Breadth)   = link%R(thisLink,lr_wMax)
+                elemSGR(thisP,esgr_Parabolic_Radius)    = elemSGR(thisP,esgr_Parabolic_Breadth) / twoR / sqrt(link%R(thisLink,lr_FullDepth))
+                elemR(thisP,er_FullDepth)               = link%R(thisLink,lr_FullDepth)
+                elemR(thisP,er_BreadthMax)              = link%R(thisLink,lr_wMax)
 
-            !% --- error checking
-            if ((link%R(thisLink,lr_FullDepth) .le. zeroR) .or. &
-                (link%R(thisLink,lr_BreadthScale) .le. zeroR)) then 
-                print *, 'USER CONFIGURATION ERROR in parabolic cross-section'
-                print *, 'Parabolic cross section has zero specified for Full Height or Top Width'
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)
-                call util_crashpoint(698704)
-            end if
-  
-            !% --- full conditions
-            elemR(thisP,er_FullArea)      = llgeo_parabolic_area_from_depth_pure &
+                !% --- error checking
+                if ((link%R(thisLink,lr_FullDepth) .le. zeroR) .or. &
+                    (link%R(thisLink,lr_wMax) .le. zeroR)) then 
+                    print *, 'USER CONFIGURATION ERROR in parabolic cross-section'
+                    print *, 'Parabolic cross section has zero specified for Full Height or Top Width'
+                    print *, 'Problem with link # ',thisLink
+                    print *, 'which is named ',trim(link%Names(thisLink)%str)
+                    call util_crashpoint(698704)
+                end if
+    
+                !% --- full conditions
+                elemR(thisP,er_FullArea)      = llgeo_parabolic_area_from_depth_pure &
+                                                    (thisP, fulldepth(thisP))
+
+                elemR(thisP,er_FullPerimeter) = llgeo_parabolic_perimeter_from_depth_pure &
+                                                    (thisP, fulldepth(thisP))
+
+                elemR(thisP,er_FullTopwidth)  = llgeo_parabolic_topwidth_from_depth_pure &
+                                                    (thisP, fulldepth(thisP))
+
+                elemR(thisP,er_FullHydRadius) = llgeo_hydradius_from_area_and_perimeter_pure &
+                                                    (thisP, fullarea(thisP), fullperimeter(thisP))
+                
+                !% --- dependent  
+                elemR(thisP,er_AreaBelowBreadthMax)     = elemR(thisP,er_FullArea) 
+                elemR(thisP,er_ZbreadthMax)             = elemR(thisP,er_FullDepth) + elemR(thisP,er_Zbottom)
+                elemR(thisP,er_Zcrown)                  = elemR(thisP,er_Zbottom)   + elemR(thisP,er_FullDepth)
+                elemR(thisP,er_FullVolume)              = elemR(thisP,er_FullArea)  * elemR(thisP,er_Length)
+                
+                !% --- store IC data
+                elemR(thisP,er_Perimeter)     = llgeo_parabolic_perimeter_from_depth_pure (thisP, depth(thisP))
+                elemR(thisP,er_Topwidth)      = llgeo_parabolic_topwidth_from_depth_pure (thisP, depth(thisP))
+                elemR(thisP,er_Area)          = llgeo_parabolic_area_from_depth_pure(thisP, depth(thisP))
+                elemR(thisP,er_Area_N0)       = elemR(thisP,er_Area)
+                elemR(thisP,er_Area_N1)       = elemR(thisP,er_Area)
+                elemR(thisP,er_Volume)        = elemR(thisP,er_Area) * elemR(thisP,er_Length)
+                elemR(thisP,er_Volume_N0)     = elemR(thisP,er_Volume)
+                elemR(thisP,er_Volume_N1)     = elemR(thisP,er_Volume)
+
+                where (elemR(thisP,er_Perimeter) > zeroR) 
+                    elemR(thisP,er_HydRadius) = elemR(thisP,er_Area) / elemR(thisP,er_Perimeter)
+                elsewhere
+                    elemR(thisP,er_HydRadius) = zeroR
+                endwhere
+
+            case (lPower_function)
+                print *, 'CODE ERROR and USER CONFIGURATION ERROR power function cross-sections not supported in SWMM5+'
+                call util_crashpoint(4589723)
+
+            case (lRectangular)
+                elemI(thisP,ei_geometryType) = rectangular
+
+                !% --- independent data
+                elemSGR(thisP,esgr_Rectangular_Breadth) = link%R(thisLink,lr_wMax)
+                elemR(thisP,er_Breadthmax)              = link%R(thisLink,lr_wMax)
+                elemR(thisP,er_FullDepth)               = IC_limited_fulldepth(link%R(thisLink,lr_FullDepth),thisLink)
+
+                !% --- error checking
+                if ((link%R(thisLink,lr_FullDepth) .le. zeroR) .or. &
+                    (link%R(thisLink,lr_wMax) .le. zeroR)) then 
+                    print *, 'USER CONFIGURATION ERROR in rectangular open cross section'
+                    print *, 'Rectangular open cross section has zero specified for Full Height or Top Width'
+                    print *, 'Problem with link # ',thisLink
+                    print *, 'which is named ',trim(link%Names(thisLink)%str)
+                    call util_crashpoint(6987041)
+                end if
+
+                !% --- custom functions using temporary store
+                elemR(thisP,er_FullArea)      = llgeo_rectangular_area_from_depth_pure  &
                                                 (thisP, fulldepth(thisP))
 
-            elemR(thisP,er_FullPerimeter) = llgeo_parabolic_perimeter_from_depth_pure &
+                elemR(thisP,er_FullPerimeter) = llgeo_rectangular_perimeter_from_depth_pure &
                                                 (thisP, fulldepth(thisP))
 
-            elemR(thisP,er_FullTopwidth)  = llgeo_parabolic_topwidth_from_depth_pure &
+                elemR(thisP,er_FullTopwidth)   = llgeo_rectangular_topwidth_from_depth_pure &
                                                 (thisP, fulldepth(thisP))
 
-            elemR(thisP,er_FullHydRadius) = llgeo_hydradius_from_area_and_perimeter_pure &
-                                                (thisP, fullarea(thisP), fullperimeter(thisP))
-            
-            !% --- dependent  
-            elemR(thisP,er_AreaBelowBreadthMax)     = elemR(thisP,er_FullArea) 
-            elemR(thisP,er_ZbreadthMax)             = elemR(thisP,er_FullDepth) + elemR(thisP,er_Zbottom)
-            elemR(thisP,er_Zcrown)                  = elemR(thisP,er_Zbottom)   + elemR(thisP,er_FullDepth)
-            elemR(thisP,er_FullVolume)              = elemR(thisP,er_FullArea)  * elemR(thisP,er_Length)
-             
-            !% --- store IC data
-            elemR(thisP,er_Perimeter)     = llgeo_parabolic_perimeter_from_depth_pure (thisP, depth(thisP))
-            elemR(thisP,er_Topwidth)      = llgeo_parabolic_topwidth_from_depth_pure (thisP, depth(thisP))
-            elemR(thisP,er_Area)          = llgeo_parabolic_area_from_depth_pure(thisP, depth(thisP))
-            elemR(thisP,er_Area_N0)       = elemR(thisP,er_Area)
-            elemR(thisP,er_Area_N1)       = elemR(thisP,er_Area)
-            elemR(thisP,er_Volume)        = elemR(thisP,er_Area) * elemR(thisP,er_Length)
-            elemR(thisP,er_Volume_N0)     = elemR(thisP,er_Volume)
-            elemR(thisP,er_Volume_N1)     = elemR(thisP,er_Volume)
+                elemR(thisP,er_FullHydRadius) = llgeo_hydradius_from_area_and_perimeter_pure &
+                                                    (thisP, fullarea(thisP), fullperimeter(thisP))
 
-            where (elemR(thisP,er_Perimeter) > zeroR) 
-                elemR(thisP,er_HydRadius) = elemR(thisP,er_Area) / elemR(thisP,er_Perimeter)
-            elsewhere
-                elemR(thisP,er_HydRadius) = zeroR
-            endwhere
+                !% --- dependent data
+                elemR(thisP,er_BreadthMax)              = elemR(thisP,er_FullTopwidth)
+                elemR(thisP,er_AreaBelowBreadthMax)     = elemR(thisP,er_FullArea)
+                elemR(thisP,er_ZbreadthMax)             = elemR(thisP,er_FullDepth) + elemR(thisP,er_Zbottom)
+                elemR(thisP,er_Zcrown)                  = elemR(thisP,er_Zbottom)   + elemR(thisP,er_FullDepth)
+                elemR(thisP,er_FullVolume)              = elemR(thisP,er_FullArea)  * elemR(thisP,er_Length)       
 
-        case (lPower_function)
-            print *, 'CODE ERROR and USER CONFIGURATION ERROR power function cross-sections not supported in SWMM5+'
-            call util_crashpoint(4589723)
+                !% --- store IC data
+                elemR(thisP,er_Perimeter)     = llgeo_rectangular_perimeter_from_depth_pure (thisP, depth(thisP))
+                elemR(thisP,er_Topwidth)      = llgeo_rectangular_topwidth_from_depth_pure (thisP, depth(thisP))
 
-        case (lRectangular)
-            elemI(thisP,ei_geometryType) = rectangular
+                elemR(thisP,er_Area)          = llgeo_rectangular_area_from_depth_pure(thisP,depth(thisP))
+                elemR(thisP,er_Area_N0)       = elemR(thisP,er_Area)
+                elemR(thisP,er_Area_N1)       = elemR(thisP,er_Area)
+                elemR(thisP,er_Volume)        = elemR(thisP,er_Area) * elemR(thisP,er_Length)
+                elemR(thisP,er_Volume_N0)     = elemR(thisP,er_Volume)
+                elemR(thisP,er_Volume_N1)     = elemR(thisP,er_Volume)
 
-            !% --- independent data
-            elemSGR(thisP,esgr_Rectangular_Breadth) = link%R(thisLink,lr_BreadthScale)
-            elemR(thisP,er_Breadthmax)              = link%R(thisLink,lr_BreadthScale)
-            elemR(thisP,er_FullDepth)               = init_IC_limited_fulldepth(link%R(thisLink,lr_FullDepth),thisLink)
+                where (elemR(thisP,er_Perimeter) > zeroR) 
+                    elemR(thisP,er_HydRadius) = elemR(thisP,er_Area) / elemR(thisP,er_Perimeter)
+                elsewhere
+                    elemR(thisP,er_HydRadius) = zeroR
+                endwhere
 
-            !% --- error checking
-            if ((link%R(thisLink,lr_FullDepth) .le. zeroR) .or. &
-                (link%R(thisLink,lr_BreadthScale) .le. zeroR)) then 
-                print *, 'USER CONFIGURATION ERROR in rectangular open cross section'
-                print *, 'Rectangular open cross section has zero specified for Full Height or Top Width'
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)
-                call util_crashpoint(6987041)
-            end if
+            case (lTrapezoidal)
+                elemI(thisP,ei_geometryType) = trapezoidal
 
-            !% --- custom functions using temporary store
-            elemR(thisP,er_FullArea)      = llgeo_rectangular_area_from_depth_pure  &
-                                            (thisP, fulldepth(thisP))
+                !% --- independent data
+                elemSGR(thisP,esgr_Trapezoidal_Breadth)    = link%R(thisLink,lr_wMax)
+                elemSGR(thisP,esgr_Trapezoidal_LeftSlope)  = link%R(thisLink,lr_LeftSlope)
+                elemSGR(thisP,esgr_Trapezoidal_RightSlope) = link%R(thisLink,lr_RightSlope)
+                elemR(thisP,er_FullDepth)                  = IC_limited_fulldepth(link%R(thisLink,lr_FullDepth),thisLink)
 
-            elemR(thisP,er_FullPerimeter) = llgeo_rectangular_perimeter_from_depth_pure &
-                                            (thisP, fulldepth(thisP))
+                !% --- error checking
+                if ((link%R(thisLink,lr_FullDepth)    .le. zeroR) .or. &
+                    (link%R(thisLink,lr_LeftSlope)    .le. zeroR) .or. &
+                    (link%R(thisLink,lr_RightSlope)   .le. zeroR) .or. &
+                    (link%R(thisLink,lr_wMax) .le. zeroR)) then 
+                    print *, 'USER CONFIGURATION ERROR in trapezoidal cross section'
+                    print *, 'Trapezoidal open cross section has zero specified for Full Height,'
+                    print *, 'Base Width, Left Slope, or Right Slope. Note that a base width of '
+                    print *, 'zero should use a triangular cross section. Left/Right slopes of '
+                    print *, 'zero should be rectangular cross section.'
+                    print *, 'Problem with link # ',thisLink
+                    print *, 'which is named ',trim(link%Names(thisLink)%str)
+                    print *, 'FullDepth ',link%R(thisLink,lr_FullDepth) 
+                    print *, 'LeftSlope ',link%R(thisLink,lr_LeftSlope)
+                    print *, 'RightSlope',link%R(thisLink,lr_RightSlope)
+                    print *, 'Breadthscale ',link%R(thisLink,lr_wMax)
+                    call util_crashpoint(6987042)
+                end if
 
-            elemR(thisP,er_FullTopwidth)   = llgeo_rectangular_topwidth_from_depth_pure &
-                                            (thisP, fulldepth(thisP))
+                !% --- full conditions
+                elemR(thisP,er_FullArea)      = llgeo_trapezoidal_area_from_depth_pure &
+                                                    (thisP, fulldepth(thisP))
 
-            elemR(thisP,er_FullHydRadius) = llgeo_hydradius_from_area_and_perimeter_pure &
-                                                (thisP, fullarea(thisP), fullperimeter(thisP))
+                elemR(thisP,er_FullPerimeter) = llgeo_trapezoidal_perimeter_from_depth_pure &
+                                                    (thisP, fulldepth(thisP))
 
-            !% --- dependent data
-            elemR(thisP,er_BreadthMax)              = elemR(thisP,er_FullTopwidth)
-            elemR(thisP,er_AreaBelowBreadthMax)     = elemR(thisP,er_FullArea)
-            elemR(thisP,er_ZbreadthMax)             = elemR(thisP,er_FullDepth) + elemR(thisP,er_Zbottom)
-            elemR(thisP,er_Zcrown)                  = elemR(thisP,er_Zbottom)   + elemR(thisP,er_FullDepth)
-            elemR(thisP,er_FullVolume)              = elemR(thisP,er_FullArea)  * elemR(thisP,er_Length)       
+                elemR(thisP,er_FullTopwidth)  = llgeo_trapezoidal_topwidth_from_depth_pure &
+                                                    (thisP, fulldepth(thisP))
 
-            !% --- store IC data
-            elemR(thisP,er_Perimeter)     = llgeo_rectangular_perimeter_from_depth_pure (thisP, depth(thisP))
-            elemR(thisP,er_Topwidth)      = llgeo_rectangular_topwidth_from_depth_pure (thisP, depth(thisP))
+                elemR(thisP,er_FullHydRadius) = llgeo_hydradius_from_area_and_perimeter_pure &
+                                                    (thisP, fullarea(thisP), fullperimeter(thisP))
+                
+                !% --- dependent data
+                elemR(thisP,er_BreadthMax)              = elemR(thisP,er_FullTopwidth)
+                elemR(thisP,er_AreaBelowBreadthMax)     = elemR(thisP,er_FullArea)
+                elemR(thisP,er_ZbreadthMax)             = elemR(thisP,er_FullDepth) + elemR(thisP,er_Zbottom)
+                elemR(thisP,er_Zcrown)                  = elemR(thisP,er_Zbottom)   + elemR(thisP,er_FullDepth)
+                elemR(thisP,er_FullVolume)              = elemR(thisP,er_FullArea)  * elemR(thisP,er_Length)
+                
+                !% --- store IC data
+                elemR(thisP,er_Perimeter)    = llgeo_trapezoidal_perimeter_from_depth_pure (thisP, depth(thisP))
+                elemR(thisP,er_Topwidth)     = llgeo_trapezoidal_topwidth_from_depth_pure (thisP, depth(thisP))
+                elemR(thisP,er_Area)         = llgeo_trapezoidal_area_from_depth_pure (thisP, depth(thisP))
+                elemR(thisP,er_Area_N0)      = elemR(thisP,er_Area)
+                elemR(thisP,er_Area_N1)      = elemR(thisP,er_Area)
+                elemR(thisP,er_Volume)       = elemR(thisP,er_Area) * elemR(thisP,er_Length)
+                elemR(thisP,er_Volume_N0)    = elemR(thisP,er_Volume)
+                elemR(thisP,er_Volume_N1)    = elemR(thisP,er_Volume)     
+                
+                where (elemR(thisP,er_Perimeter) > zeroR) 
+                    elemR(thisP,er_HydRadius) = elemR(thisP,er_Area) / elemR(thisP,er_Perimeter)
+                elsewhere
+                    elemR(thisP,er_HydRadius) = zeroR
+                endwhere
+                
+            case (lTriangular)
 
-            elemR(thisP,er_Area)          = llgeo_rectangular_area_from_depth_pure(thisP,depth(thisP))
-            elemR(thisP,er_Area_N0)       = elemR(thisP,er_Area)
-            elemR(thisP,er_Area_N1)       = elemR(thisP,er_Area)
-            elemR(thisP,er_Volume)        = elemR(thisP,er_Area) * elemR(thisP,er_Length)
-            elemR(thisP,er_Volume_N0)     = elemR(thisP,er_Volume)
-            elemR(thisP,er_Volume_N1)     = elemR(thisP,er_Volume)
+                print *, 'CODE ERROR AND USER CONFIGURATION ERROR in triangular open cross-section'
+                print *, 'Triangular open-channel cross section to supported in SWMM5+'
+                call util_crashpoint(6697843)
+                return
 
-            where (elemR(thisP,er_Perimeter) > zeroR) 
-                elemR(thisP,er_HydRadius) = elemR(thisP,er_Area) / elemR(thisP,er_Perimeter)
-            elsewhere
-                elemR(thisP,er_HydRadius) = zeroR
-            endwhere
+                elemI(thisP,ei_geometryType) = triangular
 
-        case (lTrapezoidal)
-            elemI(thisP,ei_geometryType) = trapezoidal
+                !% --- independent data
+                elemSGR(thisP,esgr_Triangular_TopBreadth)  = link%R(thisLink,lr_wMax)
+                elemR(thisP,er_FullDepth)                  = IC_limited_fulldepth(link%R(thisLink,lr_FullDepth),thisLink)
+                elemR(thisP,er_BreadthMax)                 = link%R(thisLink,lr_wMax)
+                elemSGR(thisP,esgr_Triangular_Slope)       = elemSGR(thisP,esgr_Triangular_TopBreadth) &
+                                                            / (twoR * elemR(thisP,er_FullDepth))
 
-            !% --- independent data
-            elemSGR(thisP,esgr_Trapezoidal_Breadth)    = link%R(thisLink,lr_BreadthScale)
-            elemSGR(thisP,esgr_Trapezoidal_LeftSlope)  = link%R(thisLink,lr_LeftSlope)
-            elemSGR(thisP,esgr_Trapezoidal_RightSlope) = link%R(thisLink,lr_RightSlope)
-            elemR(thisP,er_FullDepth)                  = init_IC_limited_fulldepth(link%R(thisLink,lr_FullDepth),thisLink)
+                !% --- error checking
+                if ((link%R(thisLink,lr_FullDepth)    .le. zeroR) .or. &
+                    (link%R(thisLink,lr_wMax) .le. zeroR)) then 
+                    print *, 'USER CONFIGURATION ERROR in triangular open cross section'
+                    print *, 'Triangular open cross section has zero specified for Full Height or Top Width,'
+                    print *, 'Problem with link # ',thisLink
+                    print *, 'which is named ',trim(link%Names(thisLink)%str)
+                    call util_crashpoint(6987043)
+                end if
+                                                                                        
 
-            !% --- error checking
-            if ((link%R(thisLink,lr_FullDepth)    .le. zeroR) .or. &
-                (link%R(thisLink,lr_LeftSlope)    .le. zeroR) .or. &
-                (link%R(thisLink,lr_RightSlope)   .le. zeroR) .or. &
-                (link%R(thisLink,lr_BreadthScale) .le. zeroR)) then 
-                print *, 'USER CONFIGURATION ERROR in trapezoidal cross section'
-                print *, 'Trapezoidal open cross section has zero specified for Full Height,'
-                print *, 'Base Width, Left Slope, or Right Slope. Note that a base width of '
-                print *, 'zero should use a triangular cross section. Left/Right slopes of '
-                print *, 'zero should be rectangular cross section.'
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)
-                print *, 'FullDepth ',link%R(thisLink,lr_FullDepth) 
-                print *, 'LeftSlope ',link%R(thisLink,lr_LeftSlope)
-                print *, 'RightSlope',link%R(thisLink,lr_RightSlope)
-                print *, 'Breadthscale ',link%R(thisLink,lr_BreadthScale)
-                call util_crashpoint(6987042)
-            end if
+                !% --- full conditions
+                elemR(thisP,er_FullArea)      = llgeo_triangular_area_from_depth_pure &
+                                                    (thisP, fulldepth(thisP))
 
-            !% --- full conditions
-            elemR(thisP,er_FullArea)      = llgeo_trapezoidal_area_from_depth_pure &
-                                                (thisP, fulldepth(thisP))
+                elemR(thisP,er_FullPerimeter) = llgeo_triangular_perimeter_from_depth_pure &
+                                                    (thisP, fulldepth(thisP))
+                                                    
+                elemR(thisP,er_FullTopwidth)  = llgeo_triangular_topwidth_from_depth_pure &
+                                                    (thisP, fulldepth(thisP))
 
-            elemR(thisP,er_FullPerimeter) = llgeo_trapezoidal_perimeter_from_depth_pure &
-                                                (thisP, fulldepth(thisP))
+                elemR(thisP,er_FullHydRadius) = llgeo_hydradius_from_area_and_perimeter_pure &
+                                                    (thisP, fullarea(thisP), fullperimeter(thisP))
+                                            
+                !% --- dependent data
+                elemR(thisP,er_AreaBelowBreadthMax)     = elemR(thisP,er_FullArea)
+                elemR(thisP,er_ZbreadthMax)             = elemR(thisP,er_FullDepth) + elemR(thisP,er_Zbottom)
+                elemR(thisP,er_Zcrown)                  = elemR(thisP,er_Zbottom)   + elemR(thisP,er_FullDepth)
+                elemR(thisP,er_FullVolume)              = elemR(thisP,er_FullArea)  * elemR(thisP,er_Length)
+                
+                !% store IC data
+                elemR(thisP,er_Perimeter)    = llgeo_triangular_perimeter_from_depth_pure (thisP, depth(thisP))
+                elemR(thisP,er_Topwidth)     = llgeo_triangular_topwidth_from_depth_pure (thisP, depth(thisP))
+                elemR(thisP,er_Area)         = llgeo_triangular_area_from_depth_pure(thisP, depth(thisP)) 
+                elemR(thisP,er_Area_N0)      = elemR(thisP,er_Area)
+                elemR(thisP,er_Area_N1)      = elemR(thisP,er_Area)
+                elemR(thisP,er_Volume)       = elemR(thisP,er_Area) * elemR(thisP,er_Length)
+                elemR(thisP,er_Volume_N0)    = elemR(thisP,er_Volume)
+                elemR(thisP,er_Volume_N1)    = elemR(thisP,er_Volume)
 
-            elemR(thisP,er_FullTopwidth)  = llgeo_trapezoidal_topwidth_from_depth_pure &
-                                                (thisP, fulldepth(thisP))
+                where (elemR(thisP,er_Perimeter) > zeroR) 
+                    elemR(thisP,er_HydRadius) = elemR(thisP,er_Area) / elemR(thisP,er_Perimeter)
+                elsewhere
+                    elemR(thisP,er_HydRadius) = zeroR
+                endwhere
 
-            elemR(thisP,er_FullHydRadius) = llgeo_hydradius_from_area_and_perimeter_pure &
-                                                (thisP, fullarea(thisP), fullperimeter(thisP))
-            
-            !% --- dependent data
-            elemR(thisP,er_BreadthMax)              = elemR(thisP,er_FullTopwidth)
-            elemR(thisP,er_AreaBelowBreadthMax)     = elemR(thisP,er_FullArea)
-            elemR(thisP,er_ZbreadthMax)             = elemR(thisP,er_FullDepth) + elemR(thisP,er_Zbottom)
-            elemR(thisP,er_Zcrown)                  = elemR(thisP,er_Zbottom)   + elemR(thisP,er_FullDepth)
-            elemR(thisP,er_FullVolume)              = elemR(thisP,er_FullArea)  * elemR(thisP,er_Length)
-            
-            !% --- store IC data
-            elemR(thisP,er_Perimeter)    = llgeo_trapezoidal_perimeter_from_depth_pure (thisP, depth(thisP))
-            elemR(thisP,er_Topwidth)     = llgeo_trapezoidal_topwidth_from_depth_pure (thisP, depth(thisP))
-            elemR(thisP,er_Area)         = llgeo_trapezoidal_area_from_depth_pure (thisP, depth(thisP))
-            elemR(thisP,er_Area_N0)      = elemR(thisP,er_Area)
-            elemR(thisP,er_Area_N1)      = elemR(thisP,er_Area)
-            elemR(thisP,er_Volume)       = elemR(thisP,er_Area) * elemR(thisP,er_Length)
-            elemR(thisP,er_Volume_N0)    = elemR(thisP,er_Volume)
-            elemR(thisP,er_Volume_N1)    = elemR(thisP,er_Volume)     
-            
-            where (elemR(thisP,er_Perimeter) > zeroR) 
-                elemR(thisP,er_HydRadius) = elemR(thisP,er_Area) / elemR(thisP,er_Perimeter)
-            elsewhere
-                elemR(thisP,er_HydRadius) = zeroR
-            endwhere
-            
-        case (lTriangular)
-
-            print *, 'CODE ERROR AND USER CONFIGURATION ERROR in triangular open cross-section'
-            print *, 'Triangular open-channel cross section to supported in SWMM5+'
-            call util_crashpoint(6697843)
-            return
-
-            elemI(thisP,ei_geometryType) = triangular
-
-            !% --- independent data
-            elemSGR(thisP,esgr_Triangular_TopBreadth)  = link%R(thisLink,lr_BreadthScale)
-            elemR(thisP,er_FullDepth)                  = init_IC_limited_fulldepth(link%R(thisLink,lr_FullDepth),thisLink)
-            elemR(thisP,er_BreadthMax)                 = link%R(thisLink,lr_BreadthScale)
-            elemSGR(thisP,esgr_Triangular_Slope)       = elemSGR(thisP,esgr_Triangular_TopBreadth) &
-                                                         / (twoR * elemR(thisP,er_FullDepth))
-
-            !% --- error checking
-            if ((link%R(thisLink,lr_FullDepth)    .le. zeroR) .or. &
-                (link%R(thisLink,lr_BreadthScale) .le. zeroR)) then 
-                print *, 'USER CONFIGURATION ERROR in triangular open cross section'
-                print *, 'Triangular open cross section has zero specified for Full Height or Top Width,'
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)
-                call util_crashpoint(6987043)
-            end if
-                                                                                      
-
-            !% --- full conditions
-            elemR(thisP,er_FullArea)      = llgeo_triangular_area_from_depth_pure &
-                                                (thisP, fulldepth(thisP))
-
-            elemR(thisP,er_FullPerimeter) = llgeo_triangular_perimeter_from_depth_pure &
-                                                (thisP, fulldepth(thisP))
-                                                
-            elemR(thisP,er_FullTopwidth)  = llgeo_triangular_topwidth_from_depth_pure &
-                                                (thisP, fulldepth(thisP))
-
-            elemR(thisP,er_FullHydRadius) = llgeo_hydradius_from_area_and_perimeter_pure &
-                                                (thisP, fullarea(thisP), fullperimeter(thisP))
-                                         
-            !% --- dependent data
-            elemR(thisP,er_AreaBelowBreadthMax)     = elemR(thisP,er_FullArea)
-            elemR(thisP,er_ZbreadthMax)             = elemR(thisP,er_FullDepth) + elemR(thisP,er_Zbottom)
-            elemR(thisP,er_Zcrown)                  = elemR(thisP,er_Zbottom)   + elemR(thisP,er_FullDepth)
-            elemR(thisP,er_FullVolume)              = elemR(thisP,er_FullArea)  * elemR(thisP,er_Length)
-            
-            !% store IC data
-            elemR(thisP,er_Perimeter)    = llgeo_triangular_perimeter_from_depth_pure (thisP, depth(thisP))
-            elemR(thisP,er_Topwidth)     = llgeo_triangular_topwidth_from_depth_pure (thisP, depth(thisP))
-            elemR(thisP,er_Area)         = llgeo_triangular_area_from_depth_pure(thisP, depth(thisP)) 
-            elemR(thisP,er_Area_N0)      = elemR(thisP,er_Area)
-            elemR(thisP,er_Area_N1)      = elemR(thisP,er_Area)
-            elemR(thisP,er_Volume)       = elemR(thisP,er_Area) * elemR(thisP,er_Length)
-            elemR(thisP,er_Volume_N0)    = elemR(thisP,er_Volume)
-            elemR(thisP,er_Volume_N1)    = elemR(thisP,er_Volume)
-
-            where (elemR(thisP,er_Perimeter) > zeroR) 
-                elemR(thisP,er_HydRadius) = elemR(thisP,er_Area) / elemR(thisP,er_Perimeter)
-            elsewhere
-                elemR(thisP,er_HydRadius) = zeroR
-            endwhere
-
-        case default
-            print *, 'In, ', subroutine_name
-            print *, 'CODE ERROR -- geometry type unknown for # ',geometryType
-            print *, 'which has key ',trim(reverseKey(geometryType))
-            call util_crashpoint(98734)
+            case default
+                print *, 'In, ', subroutine_name
+                print *, 'CODE ERROR -- geometry type unknown for # ',geometryType
+                print *, 'which has key ',trim(reverseKey(geometryType))
+                call util_crashpoint(98734)
 
         end select
 
@@ -1776,28 +1777,30 @@ contains
         endwhere
 
         !% -- set the face values for the crown (full depth)
-        faceR(fUp(thisP),fr_Zcrown_d) = faceR(fUp(thisP),fr_Zbottom) + elemR(thisP,er_FullDepth)
-        faceR(fDn(thisP),fr_Zcrown_u) = faceR(fDn(thisP),fr_Zbottom) + elemR(thisP,er_FullDepth)
+        if (upfaceExists) then
+            faceR(fUp(thisP),fr_Zcrown_d) = faceR(fUp(thisP),fr_Zbottom) + elemR(thisP,er_FullDepth)
+        end if
+        if (dnfaceExists) then
+            faceR(fDn(thisP),fr_Zcrown_u) = faceR(fDn(thisP),fr_Zbottom) + elemR(thisP,er_FullDepth)
+        end if
 
         !% --- reset the temporary space
         !%     Note, real must be first as int is used for thisP
         elemR(thisP,er_Temp01) = zeroR
         elemI(thisP,ei_Temp01) = nullvalueI
 
-        !%-------------------------------------------------------------------
-        !% Closing
-        if (setting%Debug%File%initial_condition) &
-        write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-
-    end subroutine init_IC_get_channel_geometry
+    end subroutine IC_get_channel_geometry
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_get_conduit_geometry (thisLink)
+    subroutine IC_get_conduit_geometry (thisLink,inElem)
         !%-----------------------------------------------------------------
         !% Description:
-        !% get the geometry data for closed conduits
+        !% get the geometry data for closed conduit of this link and
+        !% apply to elemR(inElem,:)
+        !% If inElem == 0 then this handles all elements in thisLink
+        !% otherwise, only the inElem is affected
         !% NOTE DepthBelowMaxBreadth is taken at the highest depth, or
         !% just slightly below that, where the max breadth occurs; e.g.
         !% for the basket handle the max breadth occurs between 0.2 and
@@ -1809,28 +1812,47 @@ contains
         !% call slot_initialize
         !%-----------------------------------------------------------------
         !% Declarations
-            integer :: ii, mm, Npack
-            integer, intent(in) :: thisLink
+            
+            integer, intent(in) :: thisLink, inElem
             integer, pointer    :: geometryType, eIdx(:), thisP(:)
             integer, pointer    :: fUp(:), fDn(:)
+
+            integer :: ii, mm, Npack
+
+            integer, target, dimension(1) :: thisElem
+
             real(8), pointer    :: fullDepth(:), breadthMax(:), fullArea(:)
             real(8), pointer    :: depth(:), fullHydRadius(:)
             real(8), pointer    :: pi
+
             real(8)             :: bottomHydRadius, dummyA(1)
-            character(64) :: subroutine_name = 'init_IC_get_conduit_geometry'
+
+            logical             :: isJB, upfaceExists, dnfaceExists
+
+            character(64) :: subroutine_name = 'IC_get_conduit_geometry'
         !%-----------------------------------------------------------------
         !% Preliminaries
             !% --- pack the elements for this link in temporary array
-            Npack = count(elemI(:,ei_link_Gidx_BIPquick) == thisLink)
-            if (Npack < 1) return
+            ! print *, 'inElem ',inElem
+            if (inElem == 0) then 
+                Npack = count(elemI(:,ei_link_Gidx_BIPquick) == thisLink)
+                if (Npack < 1) return
+            else 
+                Npack = 0 
+            end if
 
-            if (setting%Debug%File%initial_condition) &
-            write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"   
+            ! print *, 'in ',subroutine_name
+            ! print *, 'Npack ',Npack
         !%------------------------------------------------------------------
         !% Aliases
             !% pointer to geometry type
             geometryType  => link%I(thisLink,li_geometry)
             pi            => setting%Constant%pi
+
+            ! print *, 'geometry type ',link%I(thisLink,li_geometry)
+            ! print *, trim(reverseKey(link%I(thisLink,li_geometry)))
+            ! print *, trim(link%Names(thisLink)%str)
+
 
             !% --- pointer to element indexes
             eIdx          => elemI(:,ei_Lidx)
@@ -1839,504 +1861,542 @@ contains
             fUp           => elemI(:,ei_Mface_uL)
             fDn           => elemI(:,ei_Mface_dL)
 
-            !% --- pointer to full depth
+            !% --- pointers to geometry arrays
             depth         => elemR(:,er_Depth)
             fullDepth     => elemR(:,er_FullDepth)
             breadthMax    => elemR(:,er_BreadthMax)
             fullArea      => elemR(:,er_FullArea)            
             fullHydRadius => elemR(:,er_FullHydRadius)
 
-            elemI(1:Npack,ei_Temp01) = pack(eIdx,elemI(:,ei_link_Gidx_BIPquick) == thisLink)
-            thisP => elemI(1:Npack,ei_Temp01)
+            if (inElem == 0) then
+                !% --- for a set of elements in a link
+                elemI(1:Npack,ei_Temp01) = pack(eIdx,elemI(:,ei_link_Gidx_BIPquick) == thisLink)
+                thisP => elemI(1:Npack,ei_Temp01)
+                isJB = .false. !% --- by definition, a link cannot be a JB element
+                upfaceExists = .true.
+                dnfaceExists = .true.
+            else 
+                !% --- for a single element
+                thisElem = inElem
+                thisP => thisElem 
+                if (elemI(thisP(1),ei_elementType) .eq. JB) then 
+                    isJB = .true.
+                    if (elemSI(thisP(1),esi_JB_IsUpstream) == oneI) then 
+                        upfaceExists = .true.
+                        dnfaceExists = .false.
+                    else
+                        upfaceExists = .false.
+                        dnfaceExists = .true.
+                    end if
+                else
+                    isJB = .false.
+                    upfaceExists = .true.
+                    dnfaceExists = .true.
+                end if
+            end if
+
+            ! print *, 'thisP ',thisP
         !%------------------------------------------------------------------
         !% --- independent common data
         elemR(thisP,er_FullDepth)     = link%R(thisLink,lr_FullDepth)
         elemR(thisP,er_FullArea)      = link%R(thisLink,lr_FullArea)
         elemR(thisP,er_FullHydRadius) = link%R(thisLink,lr_FullHydRadius)
 
+        ! print *, 'fulldepth ',link%R(thisLink,lr_FullDepth)
+        ! print *, 'fullarea  ',link%R(thisLink,lr_FullArea)
+        ! print *, 'fullhydrad',link%R(thisLink,lr_FullHydRadius)
+
+        ! print *,'fup ',fUp(thisP)
+        ! print *,'fdn ',fDn(thisP)
+
         !% -- set the face values for the crown
-        faceR(fUp(thisP),fr_Zcrown_d) = faceR(fUp(thisP),fr_Zbottom) + elemR(thisP,er_FullDepth)
-        faceR(fDn(thisP),fr_Zcrown_u) = faceR(fDn(thisP),fr_Zbottom) + elemR(thisP,er_FullDepth)
+        if (upfaceExists) then 
+            faceR(fUp(thisP),fr_Zcrown_d) = faceR(fUp(thisP),fr_Zbottom) + elemR(thisP,er_FullDepth)
+        end if
+
+        if (dnFaceExists) then
+            faceR(fDn(thisP),fr_Zcrown_u) = faceR(fDn(thisP),fr_Zbottom) + elemR(thisP,er_FullDepth)
+        end if
 
         select case (geometryType)
 
-        case (lArch)  !% TABULAR
-            elemI(thisP,ei_geometryType) = arch
+            case (lArch)  !% TABULAR
+                elemI(thisP,ei_geometryType) = arch
 
-            !% --- independent custom data
-            elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_BreadthScale) 
-            elemR(thisP,er_DepthAtBreadthMax) = 0.28d0 * elemR(thisP,er_FullDepth)
-
-            !% --- error checking
-            if ((link%R(thisLink,lr_FullDepth)    .le. zeroR) .or. &
-                (link%R(thisLink,lr_BreadthScale) .le. zeroR)) then 
-                print *, 'USER CONFIGURATION ERROR in arch cross section'
-                print *, 'Arch cross section has zero specified for Full Height or Top Width,'
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)
-                call util_crashpoint(6987044)
-            end if
-  
-            call geo_common_initialize (thisP, arch, AArch, TArch, RArch, dummyA)
-
-        case (lBasket_handle) !% TABULAR
-            elemI(thisP,ei_geometryType) = basket_handle
-
-            !% --- independent custom data
-            elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_BreadthScale) 
-            elemR(thisP,er_DepthAtBreadthMax)  = 0.27d0 * elemR(thisP,er_FullDepth)
-
-            !% --- error checking
-            if ((link%R(thisLink,lr_BreadthScale) .le. zeroR)) then 
-                print *, 'USER CONFIGURATION ERROR in baskethandle cross section'
-                print *, 'BasketHandle cross section has zero specified for Full Height'
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)
-                call util_crashpoint(6987045)
-            end if
-
-            call geo_common_initialize (thisP, basket_handle, ABasketHandle, TBasketHandle, RBasketHandle, dummyA)
-    
-        case (lCatenary)  !% TABULAR
-            elemI(thisP,ei_geometryType) = catenary
-
-            !% --- independent custom data
-            elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_BreadthScale) 
-            elemR(thisP,er_DepthAtBreadthMax) = 0.29d0 * elemR(thisP,er_FullDepth)
-
-            !% --- error checking
-            if ((link%R(thisLink,lr_FullDepth)    .le. zeroR) ) then 
-                print *, 'USER CONFIGURATION ERROR in catenary cross section'
-                print *, 'Catenary cross section has zero specified for Full Height ,'
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)
-                call util_crashpoint(6987046)
-            end if
-
-            call geo_common_initialize (thisP, catenary, ACatenary, TCatenary, dummyA, SCatenary)
-
-        case (lCircular,lForce_main) !% TABULAR
-            !% --- force mains are required to be circular pipe
-            elemI(thisP,ei_geometryType)    = circular
-
-            !% --- Get data for force main
-            !%     NotethisP all force mains are circular pipes
-            if (setting%Solver%ForceMain%AllowForceMainTF) then
-                if (geometryType == lForce_main) then 
-                    where (elemI(thisP,ei_link_Gidx_BIPquick) == thisLink)
-                        elemYN(thisP,eYN_isForceMain)      = .TRUE.
-                        elemSI(thisP,esi_Conduit_Forcemain_Method) = setting%SWMMinput%ForceMainEquationType
-                        elemSR(thisP,esr_Conduit_ForceMain_Coef)   = link%R(thislink,lr_ForceMain_Coef)
-                    endwhere
-                endif
-            else
-                !% -- if global AllowForceMainTF is false, then
-                !%    make sure FM from the SWMM input are set to
-                !%    non-force-main.
-                if (geometryType == lForce_main) then 
-                    where (elemI(thisP,ei_link_Gidx_BIPquick) == thisLink)
-                        elemSI(thisP,esi_Conduit_Forcemain_Method) = nullvalueI
-                        elemYN(thisP,eYN_isForceMain)      = .FALSE.
-                        elemSR(thisP,esr_Conduit_ForceMain_Coef)   = nullvalueR
-                    endwhere
-                end if
-            end if
-                        
-            !% --- independent custom data
-            elemSGR(thisP,esgr_Circular_Diameter) = link%R(thisLink,lr_BreadthScale)
-            elemSGR(thisP,esgr_Circular_Radius)   = link%R(thisLink,lr_BreadthScale) / twoR
-            elemR(thisP,er_BreadthMax)            = elemSGR(thisP,esgr_Circular_Diameter)
-            elemR(thisP,er_DepthAtBreadthMax)     = 0.5d0 * elemR(thisP,er_FullDepth)
-
-            !% --- error checking
-            if ((link%R(thisLink,lr_BreadthScale)    .le. zeroR)) then 
-                print *, 'USER CONFIGURATION ERROR in circular cross section'
-                print *, 'Circular cross section has zero specified for Diameter ,'
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)
-                call util_crashpoint(6987047)
-            end if
-
-            call geo_common_initialize (thisP, circular, ACirc, TCirc, RCirc, dummyA)   
-         
-        case (lCustom)  !% TABULAR
-            print *, 'CODE ERROR AND USER CONFIGURATION ERROR Custom conduit cross-sections not supported in SWMM5+'
-            call util_crashpoint(77987231)
-
-        case (lEggshaped)  !% TABULAR
-            elemI(thisP,ei_geometryType) = eggshaped
-
-            !% --- independent custom data
-            elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_BreadthScale)
-            elemR(thisP,er_DepthAtBreadthMax) = 0.64d0 * elemR(thisP,er_FullDepth)
-
-            !% --- error checking
-            if ((link%R(thisLink,lr_BreadthScale)    .le. zeroR)) then 
-                print *, 'USER CONFIGURATION ERROR in eggshaped cross section'
-                print *, 'Eggshaped cross section has zero specified for FullHeight ,'
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)
-                call util_crashpoint(6987048)
-            end if
-
-            call geo_common_initialize (thisP, eggshaped, AEgg, TEgg, REgg, dummyA)
-        
-        case (lFilled_circular)  !% ANALYTICAL
-            !% --- note, Zbottom is always the bottom of the filled section (not the top of it)
-            elemI(thisP,ei_geometryType) = filled_circular
-
-            !% HACK -- THIS ASSUMES THAT INPUT VALUES OF FULLDEPTH IS FOR PIPE WITHOUT SEDIMENT
-
-            !% --- independent data
-            !% --- get the sediment depth
-            elemR(thisP,er_SedimentDepth) = link%R(thisLink,lr_BottomDepth)
-
-            !% --- error checking
-            if ((link%R(thisLink,lr_BreadthScale)    .le. zeroR) .or. &
-                (link%R(thisLink,lr_BottomDepth)      <  zeroR)) then 
-                print *, 'USER CONFIGURATION ERROR in filled circular cross section'
-                print *, 'Filled circular cross section has zero specified for FullHeight '
-                print *, 'or less than zero for sediment depth,'
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)
-                call util_crashpoint(6987049)
-            end if
-
-            !% --- reset the depth previously computed from nodes (without sediment)
-            elemR(thisP,er_Depth) = elemR(thisP,er_Depth) - elemR(thisP,er_SedimentDepth)
-
-            elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter)    &
-                 = link%R(thisLink,lr_FullDepth) + elemR(thisP,er_SedimentDepth)    !% HACK -- check what link full depth means
-
-            elemSGR(thisP,esgR_Filled_Circular_TotalPipeArea)        &
-                = (onefourthR * pi) * (elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter)**2)
-
-            elemSGR(thisP,esgR_Filled_Circular_TotalPipePerimeter)   &
-                = pi * elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter)    
-
-            elemSGR(thisP,esgr_Filled_Circular_TotalPipeHydRadius)     &
-                =   elemSGR(thisP,esgR_Filled_Circular_TotalPipeArea)  &
-                  / elemSGR(thisP,esgR_Filled_Circular_TotalPipePerimeter)
-
-            !% FOR INITIAL FILLED AREA CALCULATION, RESET THE FULL DEPTH TO TOTAL DIA OF THE PIPE
-            elemR(thisP,er_BreadthMax) = elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter)
-
-            elemR(thisP,er_FullDepth)  =  elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter) 
-
-            do ii=1,size(thisP)
-                mm = thisP(ii)
-                if (elemR(mm,er_SedimentDepth) >= setting%ZeroValue%Depth) then
-
-                    elemSGR(mm,esgr_Filled_Circular_bottomArea)               &
-                        = llgeo_tabular_from_depth_singular                   &
-                            (mm, elemR(mm,er_SedimentDepth), elemSGR(mm,esgR_Filled_Circular_TotalPipeArea),    &
-                            setting%ZeroValue%Depth, zeroR, ACirc )
-
-                    elemSGR(mm,esgr_Filled_Circular_bottomTopwidth)           &
-                        = llgeo_tabular_from_depth_singular                   &
-                            (mm, elemR(mm,er_SedimentDepth), breadthMax(mm),  &
-                            setting%ZeroValue%Depth, zeroR, TCirc )
-
-                    bottomHydRadius                                             &
-                        = llgeo_tabular_from_depth_singular                     &
-                            (mm, elemR(mm,er_SedimentDepth), fullHydRadius(mm), &
-                            setting%ZeroValue%Depth, zeroR, RCirc )   
-
-                    if (bottomHydRadius <= setting%ZeroValue%Depth) then
-                        !% -- near zero hydraulic radius
-                        elemSGR(mm,esgr_Filled_Circular_bottomPerimeter) = zeroR
-                    else
-                        elemSGR(mm,esgr_Filled_Circular_bottomPerimeter) &
-                            = elemSGR(mm,esgr_Filled_Circular_bottomArea) / bottomHydRadius
-                    end if
-                else 
-                    !% --- near zero sediment depths
-                    !%     the setting%ZeroValues%... are not yet assigned.
-                    elemSGR(mm,esgr_Filled_Circular_bottomArea)      = zeroR
-                    elemSGR(mm,esgr_Filled_Circular_bottomTopwidth)  = zeroR
-                    elemSGR(mm,esgr_Filled_Circular_bottomPerimeter) = zeroR
-                end if
-
-            end do
-
-             !% --- for consistency in other uses, elemR store values for the flow section only
-            elemR(thisP,er_FullDepth)     =  elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter)   &
-                                             - elemR(thisP,er_SedimentDepth)  
-
-            elemR(thisP,er_FullArea)      =  elemSGR(thisP,esgR_Filled_Circular_TotalPipeArea)       &
-                                           - elemSGR(thisP,esgr_Filled_Circular_bottomArea)
-
-            elemR(thisP,er_FullPerimeter) =   elemSGR(thisP,esgr_Filled_Circular_TotalPipePerimeter) &
-                                            - elemSGR(thisP,esgr_Filled_Circular_bottomPerimeter)    &
-                                            + elemSGR(thisP,esgr_Filled_Circular_bottomTopwidth)
-
-            elemR(thisP,er_FullHydRadius) = elemR(thisP,er_FullArea) / elemR(thisP,er_FullPerimeter) 
-
-            !% --- Location of maximum breadth
-            where (elemR(thisP,er_SedimentDepth)  &
-                   > (onehalfR * elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter)) )
-
-                !% --- solid fill level is above the midpoint, then max breadth for flow is at top of solid fill
-                elemR(thisp,er_DepthAtBreadthMax)   = zeroR 
-                elemR(thisP,er_BreadthMax)          = elemSGR(thisP,esgr_Filled_Circular_bottomTopwidth)
-                elemR(thisP,er_AreaBelowBreadthMax) = zeroR
-
-            elsewhere
-                !% --- solid fill level is below the midpoint, then max breadth for flow is at midpoint
-                elemR(thisP,er_DepthAtBreadthMax)   =  onehalfR * elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter) &
-                                                       - elemR(thisP,er_SedimentDepth)
-
-                elemR(thisP,er_BreadthMax)          = elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter)
-
-                elemR(thisP,er_AreaBelowBreadthMax) = onehalfR * elemSGR(thisP,esgR_Filled_Circular_TotalPipeArea)  &
-                                                               - elemSGR(thisP,esgr_Filled_Circular_bottomArea) 
-            endwhere
-
-            call geo_common_initialize (thisP, filled_circular, dummyA, dummyA, dummyA, dummyA)
-        
-        case (lGothic) !% TABULAR
-            elemI(thisP,ei_geometryType) = gothic
-
-            !% --- independent custom data
-            elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_BreadthScale) 
-            elemR(thisP,er_DepthAtBreadthMax) = 0.49d0 * elemR(thisP,er_FullDepth)
-
-            !% --- error checking
-            if ((link%R(thisLink,lr_BreadthScale)    .le. zeroR)) then 
-                print *, 'USER CONFIGURATION ERROR in gothic cross section'
-                print *, 'Gothic cross section has zero specified for FullHeight '
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)
-                call util_crashpoint(698701)
-            end if
-
-            call geo_common_initialize (thisP, gothic, AGothic, TGothic, dummyA, SGothic)
-          
-        case (lHoriz_ellipse) !% TABULAR
-            elemI(thisP,ei_geometryType) = horiz_ellipse
-
-            !% --- independent custom data
-            elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_BreadthScale) 
-            elemR(thisP,er_DepthAtBreadthMax) = 0.5d0 * elemR(thisP,er_FullDepth)
-
-            !% --- error checking
-            if ((link%R(thisLink,lr_BreadthScale)    .le. zeroR) .or. &
-                (link%R(thisLink,lr_FullDepth)       .le. zeroR) ) then 
-                print *, 'USER CONFIGURATION ERROR in horiz ellipse cross section'
-                print *, 'Horiz Ellipse cross section has zero specified for FullHeight or Max width'
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)
-                call util_crashpoint(698702)
-            end if
-
-            call geo_common_initialize (thisP, horiz_ellipse, AHorizEllip, THorizEllip, RHorizEllip, dummyA)
-
-        case (lHorseshoe) !% TABULAR
-            elemI(thisP,ei_geometryType) = horseshoe
-
-            !% --- independent custom data
-            elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_BreadthScale) 
-            elemR(thisP,er_DepthAtBreadthMax) = 0.5d0 * elemR(thisP,er_FullDepth)
-
-            !% --- error checking
-            if ((link%R(thisLink,lr_BreadthScale)    .le. zeroR)) then 
-                print *, 'USER CONFIGURATION ERROR in horseshoe cross section'
-                print *, 'Horseshoe cross section has zero specified for FullHeight '
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)
-                call util_crashpoint(698703)
-            end if
-
-            call geo_common_initialize (thisP, horseshoe, AHorseShoe, THorseShoe, RHorseShoe, dummyA)
-
-        case (lIrregular) !% ERROR
-            print *, 'In ', trim(subroutine_name)
-            print *, 'USER CONFIGURATION ERROR Irregular cross-section geometry not allowed for closed conduits (open-channel only) in SWMM5+'
-            call util_crashpoint(4409874)    
-
-        case (lMod_basket)  !% ANALYTICAL
-            elemI(thisP,ei_geometryType)  = mod_basket
-
-            !% --- independent custom data
-            elemR(  thisP,eR_BreadthMax)             = link%R(thisLink,lr_BreadthScale)
-            elemSGR(thisP,esgr_Mod_Basket_Rtop)      = link%R(thisLink,lr_BottomRadius)
-
-            elemSGR(thisP,esgr_Mod_Basket_ThetaTop)  = twoR * asin( onehalfR * elemR(thisP,er_BreadthMax) &
-                                                                    / elemSGR(thisP,esgr_Mod_Basket_Rtop) )
-
-            elemSGR(thisP,esgr_Mod_Basket_Ytop)      = elemSGR(thisP,esgr_Mod_Basket_Rtop) &
-                                                      * ( oneR - cos( elemSGR(thisP,esgr_Mod_Basket_ThetaTop) / twoR ) )
-                
-            elemSGR(thisP,esgr_Mod_Basket_Atop)      = onehalfR * ( elemSGR(thisP,esgr_Mod_Basket_Rtop)**2 )       &
-                                                                * ( elemSGR(thisP,esgr_Mod_Basket_ThetaTop)        &
-                                                                    - sin(elemSGR(thisP,esgr_Mod_Basket_ThetaTop)) &
-                                                                  ) 
-
-            elemR(thisP,er_DepthAtBreadthMax)        = elemR(thisP,er_FullDepth) - elemSGR(thisP,esgr_Mod_Basket_Ytop)                                                      
-
-            !% --- error checking
-            if ((link%R(thisLink,lr_BreadthScale)    .le. zeroR) .or. &
-                (link%R(thisLink,lr_BottomRadius)    .le. zeroR) .or. &
-                (link%R(thisLink,lr_FullDepth)       .le. zeroR)  ) then 
-                print *, 'USER CONFIGURATION ERROR in mod basket cross section'
-                print *, 'Mod Basket cross section has zero specified for FullHeight, Base width, '
-                print *, 'or Top Radius'
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)
-                call util_crashpoint(698704)
-            end if
-
-            call geo_common_initialize (thisP, mod_basket, dummyA, dummyA, dummyA, dummyA)
-
-        case (lRectangular_closed)  !% ANALYTICAL
-                elemI(thisP,ei_geometryType) = rectangular_closed
-
-                !% --- independent data
-                elemR(thisP,er_BreadthMax)              = link%R(thisLink,lr_BreadthScale)
-                elemR(thisP,er_DepthAtBreadthMax)       = onehalfR * elemR(thisP,er_FullDepth)
-                elemSGR(thisP,esgr_Rectangular_Breadth) = elemR(thisP,er_BreadthMax) 
+                !% --- independent custom data
+                elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_wMax) 
+                elemR(thisP,er_DepthAtBreadthMax) = 0.28d0 * elemR(thisP,er_FullDepth)
 
                 !% --- error checking
-                if ((link%R(thisLink,lr_BreadthScale)    .le. zeroR) .or. &
-                    (link%R(thisLink,lr_FullDepth)       .le. zeroR)  ) then 
-                    print *, 'USER CONFIGURATION ERROR in rectangular closed cross section'
-                    print *, 'Rectangular Closed cross section has zero specified for FullHeight or Top width, '
+                if ((link%R(thisLink,lr_FullDepth)    .le. zeroR) .or. &
+                    (link%R(thisLink,lr_wMax) .le. zeroR)) then 
+                    print *, 'USER CONFIGURATION ERROR in arch cross section'
+                    print *, 'Arch cross section has zero specified for Full Height or Top Width,'
                     print *, 'Problem with link # ',thisLink
                     print *, 'which is named ',trim(link%Names(thisLink)%str)
-                    call util_crashpoint(698705)
-                end if   
-
-                call geo_common_initialize (thisP, rectangular_closed, dummyA, dummyA, dummyA, dummyA)
-                    
-        case (lRect_round)
-            elemI(thisP,ei_geometryType)                       = rect_round
-
-            !% --- independent data
-            elemSGR(thisP,esgr_Rectangular_Round_Ybot)   = link%R(thisLink,lr_BottomDepth)
-            elemSGR(thisP,esgr_Rectangular_Round_Rbot)   = link%R(thisLink,lr_BottomRadius)
-            elemR( thisP,er_BreadthMax)                  = link%R(thisLink,lr_BreadthScale)
-            elemR( thisP,er_DepthAtBreadthMax)           = elemSGR(thisP,esgr_Rectangular_Round_Ybot) &
-                                                         + elemSGR(thisP,esgr_Rectangular_Round_Rbot)
-
-            !% --- error checking
-            if ((link%R(thisLink,lr_BreadthScale)    .le. zeroR) .or. &
-                (link%R(thisLink,lr_BottomRadius)    .le. zeroR) .or. &
-                (link%R(thisLink,lr_FullDepth)       .le. zeroR)  ) then 
-                print *, 'USER CONFIGURATION ERROR in rectangular round cross section'
-                print *, 'Rectangular Round cross section has zero specified for FullHeight or Top width, '
-                print *, 'or bottom radius.'
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)
-                call util_crashpoint(698706)
-            end if  
-
-            elemSGR(thisP,esgr_Rectangular_Round_ThetaBot)                        &
-                    = twoR * asin(                                                &
-                                    onehalfR * elemR(thisP,er_BreadthMax)         & 
-                                    / elemSGR(thisP,esgr_Rectangular_Round_Rbot)  &
-                                    )
-            elemSGR(thisP,esgr_Rectangular_Round_Abot)                                   &
-                    = onehalfR * (elemSGR(thisP,esgr_Rectangular_Round_Rbot)**2)    & 
-                                * (                                                       &
-                                    elemSGR(thisP,esgr_Rectangular_Round_ThetaBot)        &
-                                    - sin(elemSGR(thisP,esgr_Rectangular_Round_ThetaBot)) &
-                                    )
-
-            call geo_common_initialize (thisP, rect_round, dummyA, dummyA, dummyA, dummyA)                
-
-        case (lRect_triang) !% ANALYTICAL
-            elemI(thisP,ei_geometryType) = rect_triang
-
-            !% --- independent data
-            elemSGR(thisP,esgr_Rectangular_Triangular_BottomDepth)  = link%R(thisLink,lr_BottomDepth)
-            elemR(  thisP,er_BreadthMax)                            = link%R(thisLink,lr_BreadthScale)
-            elemR(  thisP,er_DepthAtBreadthMax)                     = elemR(thisP,er_FullDepth)  
-
-            !% --- error checking
-            if ((link%R(thisLink,lr_BreadthScale)    .le. zeroR) .or. &
-                (link%R(thisLink,lr_BottomDepth)    .le. zeroR) .or. &
-                (link%R(thisLink,lr_FullDepth)       .le. zeroR)  ) then 
-                print *, 'USER CONFIGURATION  in rectangular triangular cross section'
-                print *, 'Rectangular triangular cross section has zero specified for FullHeight or Top width, '
-                print *, 'or triangle height.'
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)
-                call util_crashpoint(698706)
-            end if  
-
-            elemSGR(thisP,esgr_Rectangular_Triangular_BottomSlope)  &
-                = elemR(thisP,er_BreadthMax)  / (twoR * elemSGR(thisP,esgr_Rectangular_Triangular_BottomDepth))
-
-            elemSGR(thisP,esgr_Rectangular_Triangular_BottomArea)  &
-                 = onehalfR * elemSGR(thisP,esgr_Rectangular_Triangular_BottomDepth) &
-                            * elemR(thisP,er_BreadthMax)  
-                            
-            call geo_common_initialize (thisP, rect_triang, dummyA, dummyA, dummyA, dummyA)             
-            
-        case (lSemi_circular) !% TABULAR
-            elemI(thisP,ei_geometryType) = semi_circular
-
-            !% --- independent custom data
-            elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_BreadthScale) 
-            elemR(thisP,er_DepthAtBreadthMax) = 0.19d0 * elemR(thisP,er_FullDepth)
-
-            if ((link%R(thisLink,lr_BreadthScale)    .le. zeroR)) then 
-                print *, 'USER CONFIGURATION ERROR in semi circular cross section'
-                print *, 'Semi Circular cross section has zero specified for FullHeight '
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)   
-                call util_crashpoint(698706)
-            end if
-
-            call geo_common_initialize (thisP, semi_circular, ASemiCircular, TSemiCircular, dummyA, SSemiCircular)
-        
-
-        case (lSemi_elliptical) !% TABULAR
-            elemI(thisP,ei_geometryType) = semi_elliptical
-
-            !% --- independent custom data
-            elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_BreadthScale) 
-            elemR(thisP,er_DepthAtBreadthMax) = 0.24d0 * elemR(thisP,er_FullDepth)
-
-            call geo_common_initialize (thisP, semi_elliptical, ASemiEllip, TSemiEllip, dummyA, SSemiEllip)
+                    call util_crashpoint(6987044)
+                end if
     
-            !% --- error checking
-            if ((link%R(thisLink,lr_BreadthScale)    .le. zeroR) .or. &
-                (link%R(thisLink,lr_FullDepth)       .le. zeroR)) then 
-                print *, 'USER CONFIGURATION ERROR in semi elliptical cross section'
-                print *, 'Semi Elliptical cross section has zero specified for FullHeight or Max WIdth '
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)
-                call util_crashpoint(698707)
-            end if
+                call geo_common_initialize (thisP, arch, AArch, TArch, RArch, dummyA)
 
-        case (lVert_ellipse) !% TABULAR
-            elemI(thisP,ei_geometryType) = vert_ellipse
+            case (lBasket_handle) !% TABULAR
+                elemI(thisP,ei_geometryType) = basket_handle
 
-            !% --- independent custom data
-            elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_BreadthScale) 
-            elemR(thisP,er_DepthAtBreadthMax) = 0.50d0 * elemR(thisP,er_FullDepth)
+                !% --- independent custom data
+                elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_wMax) 
+                elemR(thisP,er_DepthAtBreadthMax)  = 0.27d0 * elemR(thisP,er_FullDepth)
 
-            if ((link%R(thisLink,lr_BreadthScale)    .le. zeroR) .or. &
-                (link%R(thisLink,lr_FullDepth)       .le. zeroR)) then 
-                print *, 'USER CONFIGURATION ERROR in vertical elliptical cross section'
-                print *, 'Vertical Elliptical cross section has zero specified for FullHeight or Max Width'
-                print *, 'Problem with link # ',thisLink
-                print *, 'which is named ',trim(link%Names(thisLink)%str)
-                call util_crashpoint(698708)
-            end if
+                !% --- error checking
+                if ((link%R(thisLink,lr_wMax) .le. zeroR)) then 
+                    print *, 'USER CONFIGURATION ERROR in baskethandle cross section'
+                    print *, 'BasketHandle cross section has zero specified for Full Height'
+                    print *, 'Problem with link # ',thisLink
+                    print *, 'which is named ',trim(link%Names(thisLink)%str)
+                    call util_crashpoint(6987045)
+                end if
 
-            call geo_common_initialize (thisP, vert_ellipse, AVertEllip, TVertEllip, RVertEllip, dummyA)
+                call geo_common_initialize (thisP, basket_handle, ABasketHandle, TBasketHandle, RBasketHandle, dummyA)
+        
+            case (lCatenary)  !% TABULAR
+                elemI(thisP,ei_geometryType) = catenary
 
-        case default
-            print *, 'In, ', trim(subroutine_name)
-            print *, 'CODE ERROR geometry type unknown for # ', geometryType
-            if ((geometryType > 0) .and. (geometryType < keys_lastplusone)) then
-                print *, 'which has key ',trim(reverseKey(geometryType))
-            else
-                print *, 'which is not a valid geometry type index'
-            end if
-            call util_crashpoint(887344)
+                !% --- independent custom data
+                elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_wMax) 
+                elemR(thisP,er_DepthAtBreadthMax) = 0.29d0 * elemR(thisP,er_FullDepth)
+
+                !% --- error checking
+                if ((link%R(thisLink,lr_FullDepth)    .le. zeroR) ) then 
+                    print *, 'USER CONFIGURATION ERROR in catenary cross section'
+                    print *, 'Catenary cross section has zero specified for Full Height ,'
+                    print *, 'Problem with link # ',thisLink
+                    print *, 'which is named ',trim(link%Names(thisLink)%str)
+                    call util_crashpoint(6987046)
+                end if
+
+                call geo_common_initialize (thisP, catenary, ACatenary, TCatenary, dummyA, SCatenary)
+
+            case (lCircular,lForce_main) !% TABULAR
+                !% --- force mains are required to be circular pipe
+                elemI(thisP,ei_geometryType)    = circular
+
+                !% --- Get data for force main
+                !%     NotethisP all force mains are circular pipes
+                if (setting%Solver%ForceMain%AllowForceMainTF) then
+                    if (geometryType == lForce_main) then 
+                        where (elemI(thisP,ei_link_Gidx_BIPquick) == thisLink)
+                            elemYN(thisP,eYN_isForceMain)      = .TRUE.
+                            elemSI(thisP,esi_Conduit_Forcemain_Method) = setting%SWMMinput%ForceMainEquationType
+                            elemSR(thisP,esr_Conduit_ForceMain_Coef)   = link%R(thislink,lr_ForceMain_Coef)
+                        endwhere
+                    endif
+                else
+                    !% -- if global AllowForceMainTF is false, then
+                    !%    make sure FM from the SWMM input are set to
+                    !%    non-force-main.
+                    if (geometryType == lForce_main) then 
+                        where (elemI(thisP,ei_link_Gidx_BIPquick) == thisLink)
+                            elemSI(thisP,esi_Conduit_Forcemain_Method) = nullvalueI
+                            elemYN(thisP,eYN_isForceMain)      = .FALSE.
+                            elemSR(thisP,esr_Conduit_ForceMain_Coef)   = nullvalueR
+                        endwhere
+                    end if
+                end if
+                            
+                !% --- independent custom data
+                elemSGR(thisP,esgr_Circular_Diameter) = link%R(thisLink,lr_wMax)
+                elemSGR(thisP,esgr_Circular_Radius)   = link%R(thisLink,lr_wMax) / twoR
+                elemR(thisP,er_BreadthMax)            = elemSGR(thisP,esgr_Circular_Diameter)
+                elemR(thisP,er_DepthAtBreadthMax)     = 0.5d0 * elemR(thisP,er_FullDepth)
+
+                !% --- error checking
+                if ((link%R(thisLink,lr_wMax)    .le. zeroR)) then 
+                    print *, 'USER CONFIGURATION ERROR in circular cross section'
+                    print *, 'Circular cross section has zero specified for Diameter ,'
+                    print *, 'Problem with link # ',thisLink
+                    print *, 'which is named ',trim(link%Names(thisLink)%str)
+                    call util_crashpoint(6987047)
+                end if
+
+                call geo_common_initialize (thisP, circular, ACirc, TCirc, RCirc, dummyA)   
+            
+            case (lCustom)  !% TABULAR
+                print *, 'CODE ERROR AND USER CONFIGURATION ERROR Custom conduit cross-sections not supported in SWMM5+'
+                call util_crashpoint(77987231)
+
+            case (lEggshaped)  !% TABULAR
+                elemI(thisP,ei_geometryType) = eggshaped
+
+                !% --- independent custom data
+                elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_wMax)
+                elemR(thisP,er_DepthAtBreadthMax) = 0.64d0 * elemR(thisP,er_FullDepth)
+
+                !% --- error checking
+                if ((link%R(thisLink,lr_wMax)    .le. zeroR)) then 
+                    print *, 'USER CONFIGURATION ERROR in eggshaped cross section'
+                    print *, 'Eggshaped cross section has zero specified for FullHeight ,'
+                    print *, 'Problem with link # ',thisLink
+                    print *, 'which is named ',trim(link%Names(thisLink)%str)
+                    call util_crashpoint(6987048)
+                end if
+
+                call geo_common_initialize (thisP, eggshaped, AEgg, TEgg, REgg, dummyA)
+            
+            case (lFilled_circular)  !% ANALYTICAL
+                !% --- note, Zbottom is always the bottom of the filled section (not the top of it)
+                elemI(thisP,ei_geometryType) = filled_circular
+
+                !% HACK -- THIS ASSUMES THAT INPUT VALUES OF FULLDEPTH IS FOR PIPE WITHOUT SEDIMENT
+
+                !% --- independent data
+                !% --- get the sediment depth
+                elemR(thisP,er_SedimentDepth) = link%R(thisLink,lr_yBot)
+
+                !% --- error checking
+                if ((link%R(thisLink,lr_wMax)    .le. zeroR) .or. &
+                    (link%R(thisLink,lr_yBot)      <  zeroR)) then 
+                    print *, 'USER CONFIGURATION ERROR in filled circular cross section'
+                    print *, 'Filled circular cross section has zero specified for FullHeight '
+                    print *, 'or less than zero for sediment depth,'
+                    print *, 'Problem with link # ',thisLink
+                    print *, 'which is named ',trim(link%Names(thisLink)%str)
+                    call util_crashpoint(6987049)
+                end if
+
+                !% --- reset the depth previously computed from nodes (without sediment)
+                elemR(thisP,er_Depth) = elemR(thisP,er_Depth) - elemR(thisP,er_SedimentDepth)
+
+                elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter)    &
+                    = link%R(thisLink,lr_FullDepth) + elemR(thisP,er_SedimentDepth)    !% HACK -- check what link full depth means
+
+                elemSGR(thisP,esgR_Filled_Circular_TotalPipeArea)        &
+                    = (onefourthR * pi) * (elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter)**2)
+
+                elemSGR(thisP,esgR_Filled_Circular_TotalPipePerimeter)   &
+                    = pi * elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter)    
+
+                elemSGR(thisP,esgr_Filled_Circular_TotalPipeHydRadius)     &
+                    =   elemSGR(thisP,esgR_Filled_Circular_TotalPipeArea)  &
+                    / elemSGR(thisP,esgR_Filled_Circular_TotalPipePerimeter)
+
+                !% FOR INITIAL FILLED AREA CALCULATION, RESET THE FULL DEPTH TO TOTAL DIA OF THE PIPE
+                elemR(thisP,er_BreadthMax) = elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter)
+
+                elemR(thisP,er_FullDepth)  =  elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter) 
+
+                do ii=1,size(thisP)
+                    mm = thisP(ii)
+                    if (elemR(mm,er_SedimentDepth) >= setting%ZeroValue%Depth) then
+
+                        elemSGR(mm,esgr_Filled_Circular_bottomArea)               &
+                            = llgeo_tabular_from_depth_singular                   &
+                                (mm, elemR(mm,er_SedimentDepth), elemSGR(mm,esgR_Filled_Circular_TotalPipeArea),    &
+                                setting%ZeroValue%Depth, zeroR, ACirc )
+
+                        elemSGR(mm,esgr_Filled_Circular_bottomTopwidth)           &
+                            = llgeo_tabular_from_depth_singular                   &
+                                (mm, elemR(mm,er_SedimentDepth), breadthMax(mm),  &
+                                setting%ZeroValue%Depth, zeroR, TCirc )
+
+                        bottomHydRadius                                             &
+                            = llgeo_tabular_from_depth_singular                     &
+                                (mm, elemR(mm,er_SedimentDepth), fullHydRadius(mm), &
+                                setting%ZeroValue%Depth, zeroR, RCirc )   
+
+                        if (bottomHydRadius <= setting%ZeroValue%Depth) then
+                            !% -- near zero hydraulic radius
+                            elemSGR(mm,esgr_Filled_Circular_bottomPerimeter) = zeroR
+                        else
+                            elemSGR(mm,esgr_Filled_Circular_bottomPerimeter) &
+                                = elemSGR(mm,esgr_Filled_Circular_bottomArea) / bottomHydRadius
+                        end if
+                    else 
+                        !% --- near zero sediment depths
+                        !%     the setting%ZeroValues%... are not yet assigned.
+                        elemSGR(mm,esgr_Filled_Circular_bottomArea)      = zeroR
+                        elemSGR(mm,esgr_Filled_Circular_bottomTopwidth)  = zeroR
+                        elemSGR(mm,esgr_Filled_Circular_bottomPerimeter) = zeroR
+                    end if
+
+                end do
+
+                !% --- for consistency in other uses, elemR store values for the flow section only
+                elemR(thisP,er_FullDepth)     =  elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter)   &
+                                                - elemR(thisP,er_SedimentDepth)  
+
+                elemR(thisP,er_FullArea)      =  elemSGR(thisP,esgR_Filled_Circular_TotalPipeArea)       &
+                                            - elemSGR(thisP,esgr_Filled_Circular_bottomArea)
+
+                elemR(thisP,er_FullPerimeter) =   elemSGR(thisP,esgr_Filled_Circular_TotalPipePerimeter) &
+                                                - elemSGR(thisP,esgr_Filled_Circular_bottomPerimeter)    &
+                                                + elemSGR(thisP,esgr_Filled_Circular_bottomTopwidth)
+
+                elemR(thisP,er_FullHydRadius) = elemR(thisP,er_FullArea) / elemR(thisP,er_FullPerimeter) 
+
+                !% --- Location of maximum breadth
+                where (elemR(thisP,er_SedimentDepth)  &
+                    > (onehalfR * elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter)) )
+
+                    !% --- solid fill level is above the midpoint, then max breadth for flow is at top of solid fill
+                    elemR(thisp,er_DepthAtBreadthMax)   = zeroR 
+                    elemR(thisP,er_BreadthMax)          = elemSGR(thisP,esgr_Filled_Circular_bottomTopwidth)
+                    elemR(thisP,er_AreaBelowBreadthMax) = zeroR
+
+                elsewhere
+                    !% --- solid fill level is below the midpoint, then max breadth for flow is at midpoint
+                    elemR(thisP,er_DepthAtBreadthMax)   =  onehalfR * elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter) &
+                                                        - elemR(thisP,er_SedimentDepth)
+
+                    elemR(thisP,er_BreadthMax)          = elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter)
+
+                    elemR(thisP,er_AreaBelowBreadthMax) = onehalfR * elemSGR(thisP,esgR_Filled_Circular_TotalPipeArea)  &
+                                                                - elemSGR(thisP,esgr_Filled_Circular_bottomArea) 
+                endwhere
+
+                call geo_common_initialize (thisP, filled_circular, dummyA, dummyA, dummyA, dummyA)
+            
+            case (lGothic) !% TABULAR
+                elemI(thisP,ei_geometryType) = gothic
+
+                !% --- independent custom data
+                elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_wMax) 
+                elemR(thisP,er_DepthAtBreadthMax) = 0.49d0 * elemR(thisP,er_FullDepth)
+
+                !% --- error checking
+                if ((link%R(thisLink,lr_wMax)    .le. zeroR)) then 
+                    print *, 'USER CONFIGURATION ERROR in gothic cross section'
+                    print *, 'Gothic cross section has zero specified for FullHeight '
+                    print *, 'Problem with link # ',thisLink
+                    print *, 'which is named ',trim(link%Names(thisLink)%str)
+                    call util_crashpoint(698701)
+                end if
+
+                call geo_common_initialize (thisP, gothic, AGothic, TGothic, dummyA, SGothic)
+            
+            case (lHoriz_ellipse) !% TABULAR
+                elemI(thisP,ei_geometryType) = horiz_ellipse
+
+                !% --- independent custom data
+                elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_wMax) 
+                elemR(thisP,er_DepthAtBreadthMax) = 0.5d0 * elemR(thisP,er_FullDepth)
+
+                !% --- error checking
+                if ((link%R(thisLink,lr_wMax)    .le. zeroR) .or. &
+                    (link%R(thisLink,lr_FullDepth)       .le. zeroR) ) then 
+                    print *, 'USER CONFIGURATION ERROR in horiz ellipse cross section'
+                    print *, 'Horiz Ellipse cross section has zero specified for FullHeight or Max width'
+                    print *, 'Problem with link # ',thisLink
+                    print *, 'which is named ',trim(link%Names(thisLink)%str)
+                    call util_crashpoint(698702)
+                end if
+
+                call geo_common_initialize (thisP, horiz_ellipse, AHorizEllip, THorizEllip, RHorizEllip, dummyA)
+
+            case (lHorseshoe) !% TABULAR
+                elemI(thisP,ei_geometryType) = horseshoe
+
+                !% --- independent custom data
+                elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_wMax) 
+                elemR(thisP,er_DepthAtBreadthMax) = 0.5d0 * elemR(thisP,er_FullDepth)
+
+                !% --- error checking
+                if ((link%R(thisLink,lr_wMax)    .le. zeroR)) then 
+                    print *, 'USER CONFIGURATION ERROR in horseshoe cross section'
+                    print *, 'Horseshoe cross section has zero specified for FullHeight '
+                    print *, 'Problem with link # ',thisLink
+                    print *, 'which is named ',trim(link%Names(thisLink)%str)
+                    call util_crashpoint(698703)
+                end if
+
+                call geo_common_initialize (thisP, horseshoe, AHorseShoe, THorseShoe, RHorseShoe, dummyA)
+
+            case (lIrregular) !% ERROR
+                print *, 'In ', trim(subroutine_name)
+                print *, 'USER CONFIGURATION ERROR Irregular cross-section geometry not allowed for closed conduits (open-channel only) in SWMM5+'
+                call util_crashpoint(4409874)    
+
+            case (lMod_basket)  !% ANALYTICAL
+                elemI(thisP,ei_geometryType)  = mod_basket
+
+                !% --- independent custom data
+                elemR(  thisP,eR_BreadthMax)             = link%R(thisLink,lr_wMax)
+                elemSGR(thisP,esgr_Mod_Basket_Rtop)      = link%R(thisLink,lr_rBot)
+
+                elemSGR(thisP,esgr_Mod_Basket_ThetaTop)  = twoR * asin( onehalfR * elemR(thisP,er_BreadthMax) &
+                                                                        / elemSGR(thisP,esgr_Mod_Basket_Rtop) )
+
+                elemSGR(thisP,esgr_Mod_Basket_Ytop)      = elemSGR(thisP,esgr_Mod_Basket_Rtop) &
+                                                        * ( oneR - cos( elemSGR(thisP,esgr_Mod_Basket_ThetaTop) / twoR ) )
+                    
+                elemSGR(thisP,esgr_Mod_Basket_Atop)      = onehalfR * ( elemSGR(thisP,esgr_Mod_Basket_Rtop)**2 )       &
+                                                                    * ( elemSGR(thisP,esgr_Mod_Basket_ThetaTop)        &
+                                                                        - sin(elemSGR(thisP,esgr_Mod_Basket_ThetaTop)) &
+                                                                    ) 
+
+                elemR(thisP,er_DepthAtBreadthMax)        = elemR(thisP,er_FullDepth) - elemSGR(thisP,esgr_Mod_Basket_Ytop)                                                      
+
+                !% --- error checking
+                if ((link%R(thisLink,lr_wMax)    .le. zeroR) .or. &
+                    (link%R(thisLink,lr_rBot)    .le. zeroR) .or. &
+                    (link%R(thisLink,lr_FullDepth)       .le. zeroR)  ) then 
+                    print *, 'USER CONFIGURATION ERROR in mod basket cross section'
+                    print *, 'Mod Basket cross section has zero specified for FullHeight, Base width, '
+                    print *, 'or Top Radius'
+                    print *, 'Problem with link # ',thisLink
+                    print *, 'which is named ',trim(link%Names(thisLink)%str)
+                    call util_crashpoint(698704)
+                end if
+
+                call geo_common_initialize (thisP, mod_basket, dummyA, dummyA, dummyA, dummyA)
+
+            case (lRectangular_closed)  !% ANALYTICAL
+                    elemI(thisP,ei_geometryType) = rectangular_closed
+
+                    !% --- independent data
+                    elemR(thisP,er_BreadthMax)              = link%R(thisLink,lr_wMax)
+                    elemR(thisP,er_DepthAtBreadthMax)       = onehalfR * elemR(thisP,er_FullDepth)
+                    elemSGR(thisP,esgr_Rectangular_Breadth) = elemR(thisP,er_BreadthMax) 
+
+                    !% --- error checking
+                    if ((link%R(thisLink,lr_wMax)    .le. zeroR) .or. &
+                        (link%R(thisLink,lr_FullDepth)       .le. zeroR)  ) then 
+                        print *, 'USER CONFIGURATION ERROR in rectangular closed cross section'
+                        print *, 'Rectangular Closed cross section has zero specified for FullHeight or Top width, '
+                        print *, 'Problem with link # ',thisLink
+                        print *, 'which is named ',trim(link%Names(thisLink)%str)
+                        call util_crashpoint(698705)
+                    end if   
+
+                    call geo_common_initialize (thisP, rectangular_closed, dummyA, dummyA, dummyA, dummyA)
+                        
+            case (lRect_round)
+                elemI(thisP,ei_geometryType)                       = rect_round
+
+                !% --- independent data
+                elemSGR(thisP,esgr_Rectangular_Round_Ybot)   = link%R(thisLink,lr_yBot)
+                elemSGR(thisP,esgr_Rectangular_Round_Rbot)   = link%R(thisLink,lr_rBot)
+                elemR( thisP,er_BreadthMax)                  = link%R(thisLink,lr_wMax)
+                elemR( thisP,er_DepthAtBreadthMax)           = elemSGR(thisP,esgr_Rectangular_Round_Ybot) &
+                                                            + elemSGR(thisP,esgr_Rectangular_Round_Rbot)
+
+                !% --- error checking
+                if ((link%R(thisLink,lr_wMax)    .le. zeroR) .or. &
+                    (link%R(thisLink,lr_rBot)    .le. zeroR) .or. &
+                    (link%R(thisLink,lr_FullDepth)       .le. zeroR)  ) then 
+                    print *, 'USER CONFIGURATION ERROR in rectangular round cross section'
+                    print *, 'Rectangular Round cross section has zero specified for FullHeight or Top width, '
+                    print *, 'or bottom radius.'
+                    print *, 'Problem with link # ',thisLink
+                    print *, 'which is named ',trim(link%Names(thisLink)%str)
+                    call util_crashpoint(698706)
+                end if  
+
+                elemSGR(thisP,esgr_Rectangular_Round_ThetaBot)                        &
+                        = twoR * asin(                                                &
+                                        onehalfR * elemR(thisP,er_BreadthMax)         & 
+                                        / elemSGR(thisP,esgr_Rectangular_Round_Rbot)  &
+                                        )
+                elemSGR(thisP,esgr_Rectangular_Round_Abot)                                   &
+                        = onehalfR * (elemSGR(thisP,esgr_Rectangular_Round_Rbot)**2)    & 
+                                    * (                                                       &
+                                        elemSGR(thisP,esgr_Rectangular_Round_ThetaBot)        &
+                                        - sin(elemSGR(thisP,esgr_Rectangular_Round_ThetaBot)) &
+                                        )
+
+                call geo_common_initialize (thisP, rect_round, dummyA, dummyA, dummyA, dummyA)                
+
+            case (lRect_triang) !% ANALYTICAL
+                elemI(thisP,ei_geometryType) = rect_triang
+
+                !% --- independent data
+                elemSGR(thisP,esgr_Rectangular_Triangular_BottomDepth)  = link%R(thisLink,lr_yBot)
+                elemR(  thisP,er_BreadthMax)                            = link%R(thisLink,lr_wMax)
+                elemR(  thisP,er_DepthAtBreadthMax)                     = elemR(thisP,er_FullDepth)  
+
+                !% --- error checking
+                if ((link%R(thisLink,lr_wMax)    .le. zeroR) .or. &
+                    (link%R(thisLink,lr_yBot)    .le. zeroR) .or. &
+                    (link%R(thisLink,lr_FullDepth)       .le. zeroR)  ) then 
+                    print *, 'USER CONFIGURATION  in rectangular triangular cross section'
+                    print *, 'Rectangular triangular cross section has zero specified for FullHeight or Top width, '
+                    print *, 'or triangle height.'
+                    print *, 'Problem with link # ',thisLink
+                    print *, 'which is named ',trim(link%Names(thisLink)%str)
+                    call util_crashpoint(698706)
+                end if  
+
+                elemSGR(thisP,esgr_Rectangular_Triangular_BottomSlope)  &
+                    = elemR(thisP,er_BreadthMax)  / (twoR * elemSGR(thisP,esgr_Rectangular_Triangular_BottomDepth))
+
+                elemSGR(thisP,esgr_Rectangular_Triangular_BottomArea)  &
+                    = onehalfR * elemSGR(thisP,esgr_Rectangular_Triangular_BottomDepth) &
+                                * elemR(thisP,er_BreadthMax)  
+                                
+                call geo_common_initialize (thisP, rect_triang, dummyA, dummyA, dummyA, dummyA)             
+                
+            case (lSemi_circular) !% TABULAR
+                elemI(thisP,ei_geometryType) = semi_circular
+
+                !% --- independent custom data
+                elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_wMax) 
+                elemR(thisP,er_DepthAtBreadthMax) = 0.19d0 * elemR(thisP,er_FullDepth)
+
+                if ((link%R(thisLink,lr_wMax)    .le. zeroR)) then 
+                    print *, 'USER CONFIGURATION ERROR in semi circular cross section'
+                    print *, 'Semi Circular cross section has zero specified for FullHeight '
+                    print *, 'Problem with link # ',thisLink
+                    print *, 'which is named ',trim(link%Names(thisLink)%str)   
+                    call util_crashpoint(698706)
+                end if
+
+                call geo_common_initialize (thisP, semi_circular, ASemiCircular, TSemiCircular, dummyA, SSemiCircular)
+            
+
+            case (lSemi_elliptical) !% TABULAR
+                elemI(thisP,ei_geometryType) = semi_elliptical
+
+                !% --- independent custom data
+                elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_wMax) 
+                elemR(thisP,er_DepthAtBreadthMax) = 0.24d0 * elemR(thisP,er_FullDepth)
+
+                call geo_common_initialize (thisP, semi_elliptical, ASemiEllip, TSemiEllip, dummyA, SSemiEllip)
+        
+                !% --- error checking
+                if ((link%R(thisLink,lr_wMax)    .le. zeroR) .or. &
+                    (link%R(thisLink,lr_FullDepth)       .le. zeroR)) then 
+                    print *, 'USER CONFIGURATION ERROR in semi elliptical cross section'
+                    print *, 'Semi Elliptical cross section has zero specified for FullHeight or Max WIdth '
+                    print *, 'Problem with link # ',thisLink
+                    print *, 'which is named ',trim(link%Names(thisLink)%str)
+                    call util_crashpoint(698707)
+                end if
+
+            case (lVert_ellipse) !% TABULAR
+                elemI(thisP,ei_geometryType) = vert_ellipse
+
+                !% --- independent custom data
+                elemR(thisP,er_BreadthMax)        = link%R(thisLink,lr_wMax) 
+                elemR(thisP,er_DepthAtBreadthMax) = 0.50d0 * elemR(thisP,er_FullDepth)
+
+                if ((link%R(thisLink,lr_wMax)    .le. zeroR) .or. &
+                    (link%R(thisLink,lr_FullDepth)       .le. zeroR)) then 
+                    print *, 'USER CONFIGURATION ERROR in vertical elliptical cross section'
+                    print *, 'Vertical Elliptical cross section has zero specified for FullHeight or Max Width'
+                    print *, 'Problem with link # ',thisLink
+                    print *, 'which is named ',trim(link%Names(thisLink)%str)
+                    call util_crashpoint(698708)
+                end if
+
+                call geo_common_initialize (thisP, vert_ellipse, AVertEllip, TVertEllip, RVertEllip, dummyA)
+
+            case default
+                print *, 'In, ', trim(subroutine_name)
+                print *, 'CODE ERROR geometry type unknown for # ', geometryType
+                if ((geometryType > 0) .and. (geometryType < keys_lastplusone)) then
+                    print *, 'which has key ',trim(reverseKey(geometryType))
+                else
+                    print *, 'which is not a valid geometry type index'
+                end if
+                call util_crashpoint(887344)
 
         end select
 
@@ -2345,15 +2405,12 @@ contains
             !% --- reset temporary space
             elemI(:,ei_Temp01) = nullvalueI
 
-            if (setting%Debug%File%initial_condition) &
-            write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-
-    end subroutine init_IC_get_conduit_geometry
+    end subroutine IC_get_conduit_geometry
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_get_weir_geometry (thisLink)
+    subroutine IC_get_weir_geometry (thisLink)
         !%------------------------------------------------------------------
         !% Description
         !% get the geometry and other data data for weir links
@@ -2364,7 +2421,7 @@ contains
             integer, allocatable :: thisElem(:)
             integer :: ii
 
-            character(64) :: subroutine_name = 'init_IC_get_weir_geometry'
+            character(64) :: subroutine_name = 'IC_get_weir_geometry'
         !-------------------------------------------------------------------
         !% Preliminaries
         !-------------------------------------------------------------------
@@ -2394,7 +2451,7 @@ contains
                 elemSR(thisElem,esr_Weir_EffectiveFullDepth)    = link%R(thisLink,lr_FullDepth)
                 elemSR(thisElem,esr_Weir_Rectangular)           = link%R(thisLink,lr_DischargeCoeff1)
                 elemSR(thisElem,esr_Weir_Triangular)            = link%R(thisLink,lr_DischargeCoeff2)
-                elemSR(thisElem,esr_Weir_TrapezoidalBreadth)    = link%R(thisLink,lr_BreadthScale)
+                elemSR(thisElem,esr_Weir_TrapezoidalBreadth)    = link%R(thisLink,lr_wMax)
                 elemSR(thisElem,esr_Weir_TrapezoidalLeftSlope)  = link%R(thisLink,lr_SideSlope)
                 elemSR(thisElem,esr_Weir_TrapezoidalRightSlope) = link%R(thisLink,lr_SideSlope)
                 elemSR(thisElem,esr_Weir_FullArea)              = ( elemSR(thisElem,esr_Weir_TrapezoidalBreadth) &
@@ -2411,17 +2468,17 @@ contains
                     elemSR(thisElem,esr_Weir_Zcrown)                = huge(nullvalueR)
                 end if
 
-                !% --- setup for the call to init_IC_diagnostic_default_geometry
-                !elemI(thisElem,ei_geometryType)            = rectangular
-                elemSGR(thisElem,esgr_Rectangular_Breadth) = (    elemSR(thisElem,esr_Weir_TrapezoidalBreadth)           &
-                                                                + elemSR(thisElem,esr_Weir_EffectiveFullDepth)           &
-                                                                    * (  elemSR(thisElem,esr_Weir_TrapezoidalLeftSlope)   &
-                                                                        + elemSR(thisElem,esr_Weir_TrapezoidalRightSlope)  &
-                                                                    )                                            &
-                                                                )
-                elemR(thisElem,er_BreadthMax)              = elemSGR(thisElem,esgr_Rectangular_Breadth)                                       
-                elemR(thisElem,er_FullDepth)               = elemSR(thisElem,esr_Weir_FullDepth) !twoR * max(elemSR(thisElem,esr_Weir_Zcrown) &
-                                                             !   - elemR(thisElem,er_Zbottom), elemSR(thisElem,esr_Weir_FullDepth))  
+                !% --- setup for the call to IC_diagnostic_default_geometry
+                ! !elemI(thisElem,ei_geometryType)            = rectangular
+                ! elemSGR(thisElem,esgr_Rectangular_Breadth) = (    elemSR(thisElem,esr_Weir_TrapezoidalBreadth)           &
+                !                                                 + elemSR(thisElem,esr_Weir_EffectiveFullDepth)           &
+                !                                                     * (  elemSR(thisElem,esr_Weir_TrapezoidalLeftSlope)   &
+                !                                                         + elemSR(thisElem,esr_Weir_TrapezoidalRightSlope)  &
+                !                                                     )                                            &
+                !                                                 )
+                ! elemR(thisElem,er_BreadthMax)              = elemSGR(thisElem,esgr_Rectangular_Breadth)                                       
+                ! elemR(thisElem,er_FullDepth)               = elemSR(thisElem,esr_Weir_FullDepth) !twoR * max(elemSR(thisElem,esr_Weir_Zcrown) &
+                !                                              !   - elemR(thisElem,er_Zbottom), elemSR(thisElem,esr_Weir_FullDepth))  
 
             case (lSideFlowWeir)
                 elemSI(thisElem,esi_Weir_SpecificType)          = side_flow
@@ -2430,7 +2487,7 @@ contains
                 elemSR(thisElem,esr_Weir_EffectiveFullDepth)    = link%R(thisLink,lr_FullDepth)
                 elemSR(thisElem,esr_Weir_FullDepth)             = link%R(thisLink,lr_FullDepth) 
                 elemSR(thisElem,esr_Weir_Rectangular)           = link%R(thisLink,lr_DischargeCoeff1)
-                elemSR(thisElem,esr_Weir_RectangularBreadth)    = link%R(thisLink,lr_BreadthScale)
+                elemSR(thisElem,esr_Weir_RectangularBreadth)    = link%R(thisLink,lr_wMax)
                 elemSR(thisElem,esr_Weir_FullArea)              = elemSR(thisElem,esr_Weir_RectangularBreadth)  &
                                                                     * elemSR(thisElem,esr_Weir_FullDepth)
                 elemSR(thisElem,esr_Weir_Zcrest)                = elemR(thisElem,er_Zbottom) + link%R(thisLink,lr_InletOffset)
@@ -2441,11 +2498,11 @@ contains
                     elemSR(thisElem,esr_Weir_Zcrown)             = huge(nullvalueR)
                 end if
 
-                !% --- setup for the call to init_IC_diagnostic_default_geometry
-                !elemI(thisElem,ei_geometryType)            = rectangular
-                elemSGR(thisElem,esgr_Rectangular_Breadth) = elemSR(thisElem,esr_Weir_RectangularBreadth) 
-                elemR(thisElem,er_BreadthMax)              = elemSR(thisElem,esr_Weir_RectangularBreadth)                                     
-                elemR(thisElem,er_FullDepth)               = elemSR(thisElem,esr_Weir_FullDepth)
+                ! !% --- setup for the call to IC_diagnostic_default_geometry
+                ! !elemI(thisElem,ei_geometryType)            = rectangular
+                ! elemSGR(thisElem,esgr_Rectangular_Breadth) = elemSR(thisElem,esr_Weir_RectangularBreadth) 
+                ! elemR(thisElem,er_BreadthMax)              = elemSR(thisElem,esr_Weir_RectangularBreadth)                                     
+                ! elemR(thisElem,er_FullDepth)               = elemSR(thisElem,esr_Weir_FullDepth)
 
             case (lRoadWayWeir)
                 elemSI(thisElem,esi_Weir_SpecificType)          = roadway_weir
@@ -2454,7 +2511,7 @@ contains
                 elemSR(thisElem,esr_Weir_EffectiveFullDepth)    = link%R(thisLink,lr_FullDepth)
                 elemSR(thisElem,esr_Weir_FullDepth)             = link%R(thisLink,lr_FullDepth) 
                 elemSR(thisElem,esr_Weir_Rectangular)           = link%R(thisLink,lr_DischargeCoeff1)
-                elemSR(thisElem,esr_Weir_RectangularBreadth)    = link%R(thisLink,lr_BreadthScale)
+                elemSR(thisElem,esr_Weir_RectangularBreadth)    = link%R(thisLink,lr_wMax)
                 elemSR(thisElem,esr_Weir_RoadWidth)             = link%R(thisLink,lr_RoadWidth)
                 elemSR(thisElem,esr_Weir_FullArea)              = elemSR(thisElem,esr_Weir_RectangularBreadth) &
                                                                     * elemSR(thisElem,esr_Weir_FullDepth)
@@ -2466,11 +2523,11 @@ contains
                     elemSR(thisElem,esr_Weir_Zcrown)            = huge(nullvalueR)
                 end if
 
-                !% --- setup for the call to init_IC_diagnostic_default_geometry
-                !elemI(thisElem,ei_geometryType)            = rectangular
-                elemSGR(thisElem,esgr_Rectangular_Breadth) = elemSR(thisElem,esr_Weir_RectangularBreadth) 
-                elemR(thisElem,er_BreadthMax)              = elemSR(thisElem,esr_Weir_RectangularBreadth)                                     
-                elemR(thisElem,er_FullDepth)               = elemSR(thisElem,esr_Weir_FullDepth)
+                ! !% --- setup for the call to IC_diagnostic_default_geometry
+                ! !elemI(thisElem,ei_geometryType)            = rectangular
+                ! elemSGR(thisElem,esgr_Rectangular_Breadth) = elemSR(thisElem,esr_Weir_RectangularBreadth) 
+                ! elemR(thisElem,er_BreadthMax)              = elemSR(thisElem,esr_Weir_RectangularBreadth)                                     
+                ! elemR(thisElem,er_FullDepth)               = elemSR(thisElem,esr_Weir_FullDepth)
 
             case (lVnotchWeir)
                 elemSI(thisElem,esi_Weir_SpecificType)          = vnotch_weir
@@ -2489,12 +2546,12 @@ contains
                     elemSR(thisElem,esr_Weir_Zcrown)            = huge(nullvalueR)
                 end if
 
-                !% --- setup for the call to init_IC_diagnostic_default_geometry
-                !elemI(thisElem,ei_geometryType)            = rectangular
-                elemSGR(thisElem,esgr_Rectangular_Breadth) = twoR * elemSR(thisElem,esr_Weir_EffectiveFullDepth) &
-                                                                  * elemSR(thisElem,esr_Weir_TriangularSideSlope)
-                elemR(thisElem,er_BreadthMax)              = elemSGR(thisElem,esgr_Rectangular_Breadth)                                       
-                elemR(thisElem,er_FullDepth)               = elemSR(thisElem,esr_Weir_FullDepth)
+                ! !% --- setup for the call to IC_diagnostic_default_geometry
+                ! !elemI(thisElem,ei_geometryType)            = rectangular
+                ! elemSGR(thisElem,esgr_Rectangular_Breadth) = twoR * elemSR(thisElem,esr_Weir_EffectiveFullDepth) &
+                !                                                   * elemSR(thisElem,esr_Weir_TriangularSideSlope)
+                ! elemR(thisElem,er_BreadthMax)              = elemSGR(thisElem,esgr_Rectangular_Breadth)                                       
+                ! elemR(thisElem,er_FullDepth)               = elemSR(thisElem,esr_Weir_FullDepth)
 
             case (lTransverseWeir)
                 elemSI(thisElem,esi_Weir_SpecificType)          = transverse_weir
@@ -2503,7 +2560,7 @@ contains
                 elemSR(thisElem,esr_Weir_EffectiveFullDepth)    = link%R(thisLink,lr_FullDepth)
                 elemSR(thisElem,esr_Weir_FullDepth)             = link%R(thisLink,lr_FullDepth)
                 elemSR(thisElem,esr_Weir_Rectangular)           = link%R(thisLink,lr_DischargeCoeff1)
-                elemSR(thisElem,esr_Weir_RectangularBreadth)    = link%R(thisLink,lr_BreadthScale)
+                elemSR(thisElem,esr_Weir_RectangularBreadth)    = link%R(thisLink,lr_wMax)
                 elemSR(thisElem,esr_Weir_FullArea)              = elemSR(thisElem,esr_Weir_RectangularBreadth) &
                                                                  *elemSR(thisElem,esr_Weir_FullDepth)
                 elemSR(thisElem,esr_Weir_Zcrest)                = elemR(thisElem,er_Zbottom)  + link%R(thisLink,lr_InletOffset)
@@ -2514,11 +2571,11 @@ contains
                     elemSR(thisElem,esr_Weir_Zcrown)                = huge(nullvalueR)
                 end if
 
-                !% --- setup for the call to init_IC_diagnostic_default_geometry
-                !elemI(thisElem,ei_geometryType)            = rectangular
-                elemSGR(thisElem,esgr_Rectangular_Breadth) = elemSR(thisElem,esr_Weir_RectangularBreadth) 
-                elemR(thisElem,er_BreadthMax)              = elemSR(thisElem,esr_Weir_RectangularBreadth)                                     
-                elemR(thisElem,er_FullDepth)               = elemSR(thisElem,esr_Weir_FullDepth)
+                ! !% --- setup for the call to IC_diagnostic_default_geometry
+                ! !elemI(thisElem,ei_geometryType)            = rectangular
+                ! elemSGR(thisElem,esgr_Rectangular_Breadth) = elemSR(thisElem,esr_Weir_RectangularBreadth) 
+                ! elemR(thisElem,er_BreadthMax)              = elemSR(thisElem,esr_Weir_RectangularBreadth)                                     
+                ! elemR(thisElem,er_FullDepth)               = elemSR(thisElem,esr_Weir_FullDepth)
 
             case default
                 print *, 'In ', trim(subroutine_name)
@@ -2532,34 +2589,34 @@ contains
         elemSR(thisElem(1),esr_Weir_Zcrest) = &
                 max( elemSR(thisElem(1),esr_Weir_Zcrest), elemR(thisElem(1),er_Zbottom) + setting%ZeroValue%Depth*1.01d0  )   
 
-        !% -- set the face values for the crown
-        faceR(fUp(thisElem),fr_Zcrown_d) = faceR(fUp(thisElem),fr_Zbottom) + elemR(thisElem,er_FullDepth)
-        faceR(fDn(thisElem),fr_Zcrown_u) = faceR(fDn(thisElem),fr_Zbottom) + elemR(thisElem,er_FullDepth)
+        ! !% -- set the face values for the crown WRONG FOR NEW BACKGROUND APPROACH 20240604
+        ! faceR(fUp(thisElem),fr_Zcrown_d) = faceR(fUp(thisElem),fr_Zbottom) + elemR(thisElem,er_FullDepth)
+        ! faceR(fDn(thisElem),fr_Zcrown_u) = faceR(fDn(thisElem),fr_Zbottom) + elemR(thisElem,er_FullDepth)
         
 
         !% --- initialize a default rectangular channel as the background of the weir
-        call init_IC_diagnostic_default_geometry (thisLink,thisElem(1),weir)
+        ! call IC_diagnostic_default_geometry (thisLink,thisElem(1),weir)
 
         deallocate(thisElem)
 
-    end subroutine init_IC_get_weir_geometry
+    end subroutine IC_get_weir_geometry
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_get_orifice_geometry (thisLink)
+    subroutine IC_get_orifice_geometry (thisLink)
         !%------------------------------------------------------------------
         !% Description:
         !% get the geometry and other data data for orifice links
         !%------------------------------------------------------------------
         !% Declarations
             integer, intent(in)  :: thisLink
-            integer, pointer     :: specificOrificeType, OrificeGeometryType
+            integer, pointer     :: specificOrificeType
             integer, allocatable :: thisElem(:)
-            integer :: ii
+            integer :: ii, OrificeGeometryType
             real(8), pointer     :: pi
 
-            character(64) :: subroutine_name = 'init_IC_get_orifice_geometry'
+            character(64) :: subroutine_name = 'IC_get_orifice_geometry'
         !%-------------------------------------------------------------------
         !% Preliminaries
         !%-------------------------------------------------------------------
@@ -2581,15 +2638,17 @@ contains
         !% --- set the element specific orifice type
         select case (specificOrificeType)
             case (lBottomOrifice)
+                OrificeGeometryType = link%I(thisLink,li_geometry)
                 elemSI(thisElem,esi_Orifice_SpecificType)      = bottom_orifice
             case (lSideOrifice)
+                OrificeGeometryType = link%I(thisLink,li_geometry)
                 elemSI(thisElem,esi_Orifice_SpecificType)       = side_orifice
             case (lEquivalentOrificeChannel)
+                OrificeGeometryType = lCircular  !% default for Equiv Orifice
                 elemSI(thisElem,esi_Orifice_SpecificType)       = equivalent_orifice_channel
-                call init_IC_get_channel_geometry (thisLink)
             case (lEquivalentOrificePipe)
+                OrificeGeometryType = lCircular  !% default for Equiv Orifice
                 elemSI(thisElem,esi_Orifice_SpecificType)       = equivalent_orifice_pipe
-                call init_IC_get_conduit_geometry (thisLink) 
             case default
                 print *, 'In ', subroutine_name
                 print *, 'CODE ERROR unknown orifice type, ', specificOrificeType
@@ -2603,16 +2662,12 @@ contains
         ! print *, 'thisElem ', thisElem 
         ! print *, 'Z bottom ', elemR(thisElem,er_Zbottom)
 
-
-        !% pointer to specific orifice geometry
-        OrificeGeometryType => link%I(thisLink,li_geometry)
-
         !% --- set the geometry for the channel/conduit containing the orifice
         if ((specificOrificeType .eq. lEquivalentOrificeChannel) .or. &
             (specificOrificeType .eq. lEquivalentOrificePipe)) then
             !% --- equivalent orifices retain the geometry of their link
-            !%     which has been set by calls to init_IC_get_..._geometry above.
-            elemSI(thisElem,esi_Orifice_GeometryType)       = elemI(thisElem,ei_geometryType)
+            !%     which has been set by calls to IC_get_..._geometry above.
+            elemSI(thisElem,esi_Orifice_GeometryType)       = OrificeGeometryType
             elemSR(thisElem,esr_Orifice_FullDepth)          = elemR(thisElem,er_FullDepth)
             elemSR(thisElem,esr_Orifice_EffectiveFullDepth) = elemR(thisElem,er_FullDepth)
             elemSR(thisElem,esr_Orifice_FullArea)           = elemR(thisElem,er_FullArea)
@@ -2621,6 +2676,10 @@ contains
             elemSR(thisElem,esr_Orifice_Orate)              = zeroR
             elemSR(thisElem,esr_Orifice_Zcrest)             = elemR(thisElem,er_Zbottom)
             elemSR(thisElem,esr_Orifice_Zcrown)             = elemR(thisElem,er_Zcrown)
+
+            elemR(thisElem,er_Length) = setting%Discretization%NominalElemLength
+            elemR(thisElem,er_Head)   = zeroR
+
         else
             !% --- standard orifices have the elemI(:,ei_geometryType) for the background geometry
             !%     as rectangular channel (i.e., the elem shape immediately before the orifice.)
@@ -2635,15 +2694,15 @@ contains
                     elemSR(thisElem,esr_Orifice_Orate)              = link%R(thisLink,lr_DischargeCoeff2)
                     elemSR(thisElem,esr_Orifice_Zcrest)             = elemR(thisElem,er_Zbottom) + link%R(thisLink,lr_InletOffset)
                     elemSR(thisElem,esr_Orifice_Zcrown)             = elemSR(thisElem,eSr_Orifice_Zcrest) + link%R(thisLink,lr_FullDepth)
-                    elemSR(thisElem,esr_Orifice_RectangularBreadth) = link%R(thisLink,lr_BreadthScale)
+                    elemSR(thisElem,esr_Orifice_RectangularBreadth) = link%R(thisLink,lr_wMax)
                     elemSR(thisElem,esr_Orifice_FullArea)           = elemSR(thisElem,esr_Orifice_RectangularBreadth) * elemSR(thisElem,esr_Orifice_FullDepth)
                     elemSR(thisElem,esr_Orifice_EffectiveFullArea)  = elemSR(thisElem,esr_Orifice_RectangularBreadth) * elemSR(thisElem,esr_Orifice_EffectiveFullDepth)    
 
-                    !% --- setup for the call to init_IC_diagnostic_default_geometry
+                    !% --- setup for the call to IC_diagnostic_default_geometry
                     !elemI(thisElem,ei_geometryType)            = rectangular
-                    elemSGR(thisElem,esgr_Rectangular_Breadth) = twoR * elemSR(thisElem,esr_Orifice_RectangularBreadth)
-                    elemR(thisElem,er_BreadthMax)              = elemSGR(thisElem,esgr_Rectangular_Breadth)
-                    elemR(thisElem,er_FullDepth)               = twoR * link%R(thisLink,lr_FullDepth)  
+                    !elemSGR(thisElem,esgr_Rectangular_Breadth) = twoR * elemSR(thisElem,esr_Orifice_RectangularBreadth)
+                    !elemR(thisElem,er_BreadthMax)              = elemSGR(thisElem,esgr_Rectangular_Breadth)
+                    !elemR(thisElem,er_FullDepth)               = twoR * link%R(thisLink,lr_FullDepth)  
 
                 case (lCircular)
                     elemSI(thisElem,esi_Orifice_GeometryType)       = circular
@@ -2656,12 +2715,12 @@ contains
                     elemSR(thisElem,esr_Orifice_Zcrest)             = elemR(thisElem,er_Zbottom) + link%R(thisLink,lr_InletOffset)
                     elemSR(thisElem,esr_Orifice_Zcrown)             = elemSR(thisElem,esr_Orifice_Zcrest) + link%R(thisLink,lr_FullDepth)
 
-                    !% --- setup for the call to init_IC_diagnostic_default_geometry
+                    !% --- setup for the call to IC_diagnostic_default_geometry
                     !elemI(thisElem,ei_geometryType)            = rectangular
-                    elemSGR(thisElem,esgr_Rectangular_Breadth) = twoR * elemSR(thisElem,esr_Orifice_FullDepth)
-                    elemR(thisElem,er_BreadthMax)              = elemSGR(thisElem,esgr_Rectangular_Breadth) 
-                    elemR(thisElem,er_FullDepth)               = twoR * max(elemSR(thisElem,esr_Orifice_Zcrown) &
-                                                                    - elemR(thisElem,er_Zbottom),elemSR(thisElem,esr_Orifice_FullDepth))
+                    !elemSGR(thisElem,esgr_Rectangular_Breadth) = twoR * elemSR(thisElem,esr_Orifice_FullDepth)
+                    !elemR(thisElem,er_BreadthMax)              = elemSGR(thisElem,esgr_Rectangular_Breadth) 
+                    !elemR(thisElem,er_FullDepth)               = twoR * max(elemSR(thisElem,esr_Orifice_Zcrown) &
+                                                                    ! - elemR(thisElem,er_Zbottom),elemSR(thisElem,esr_Orifice_FullDepth))
                 case default
                     print *, 'CODE ERROR: Unexpected case default'
                     call util_crashpoint(72098734)
@@ -2673,19 +2732,19 @@ contains
                 max( elemSR(thisElem(1),esr_Orifice_Zcrest), elemR(thisElem(1),er_Zbottom) + setting%ZeroValue%Depth*1.01d0 )
            
             !% --- initialize a default rectangular channel as the background of the orifice
-            call init_IC_diagnostic_default_geometry (thisLink, thisElem(1), orifice)
+            !call IC_diagnostic_default_geometry (thisLink, thisElem(1), orifice)
             
         end if
 
         !% --- required deallocation of local pack
         deallocate(thisElem)
 
-    end subroutine init_IC_get_orifice_geometry
+    end subroutine IC_get_orifice_geometry
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_get_pump_geometry (thisLink)
+    subroutine IC_get_pump_geometry (thisLink)
         !%-------------------------------------------------------------------
         !% Description:
         !% get the geometry for pumps
@@ -2694,100 +2753,143 @@ contains
             integer             :: ii
             integer, intent(in) :: thisLink
             integer, pointer    :: specificPumpType, curveID, lastRow
+            integer, pointer    :: nodeUp, nodeDn
+            integer             :: LinkUp, LinkDn
 
-            character(64) :: subroutine_name = 'init_IC_get_pump_geometry'
+            real(8), pointer    :: pi
+
+            character(64) :: subroutine_name = 'IC_get_pump_geometry'
         !%-------------------------------------------------------------------
         !% Preliminaries
-            if (setting%Debug%File%initial_condition) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
         !%-------------------------------------------------------------------
         !% Aliases:
             specificPumpType => link%I(thisLink,li_link_sub_type)
             curveID          => link%I(thisLink,li_curve_id)
+            pi               => setting%Constant%pi
         !%-------------------------------------------------------------------
 
-        !% --- cycle through the elements to find this link (HACK -- need to rewrite)
+        !% --- Find the link for this pump element (only 1 allowed)
         do ii = 1,N_elem(this_image())
-            if (elemI(ii,ei_link_Gidx_BIPquick) == thisLink) then  
-                !% real data
-                elemSR(ii,esr_Pump_yOn)     = link%R(thisLink,lr_yOn)
-                elemSR(ii,esr_Pump_yOff)    = link%R(thisLink,lr_yOff)
-                elemR(ii,er_Setting)        = link%R(thisLink,lr_initSetting)
-                elemSI(ii,esi_Pump_IsControlled) = zeroI
+            if (.not. (elemI(ii,ei_link_Gidx_BIPquick) == thisLink)) cycle
+            !% real data
+            elemSR(ii,esr_Pump_yOn)     = link%R(thisLink,lr_yOn)
+            elemSR(ii,esr_Pump_yOff)    = link%R(thisLink,lr_yOff)
+            elemR(ii,er_Setting)        = link%R(thisLink,lr_initSetting)
+            elemSI(ii,esi_Pump_IsControlled) = zeroI
 
-                !% --- ensure pump ON depth is greater than zero.
-                if (elemSR(ii,esr_Pump_yOn) == zeroR) then
-                    elemSR(ii,esr_Pump_yOn) = setting%ZeroValue%Depth
-                end if
-
-                !% --- ensure pump OFF depth is greater than zero.
-                if (elemSR(ii,esr_Pump_yOff) == zeroR) then
-                    elemSR(ii,esr_Pump_yOff) = setting%ZeroValue%Depth
-                end if
-
-                if ((elemSR(ii,esr_Pump_yOff) > elemSR(ii,esr_Pump_yOn)) &
-                    .and. (elemSR(ii,esr_Pump_yOff) > zeroR)) then 
-                    print *, 'USER CONFIGURATION ERROR for pump'
-                    print *, 'depth/head at which pumps shuts off is larger than'
-                    print *, 'the depth/head at which pumps turns on, which provides'
-                    print *, 'illogical behavior.'
-                    print *, 'Pump at link # ',elemI(ii,ei_link_Gidx_BIPquick)
-                    print *, 'pump link name  ',trim(link%Names(elemI(ii,ei_link_Gidx_BIPquick))%str)
-                    call util_crashpoint(6439872)
-                end if
-
-                !% --- set nominal element length
-                elemR(ii,er_Length)         = setting%Discretization%NominalElemLength
-                elemR(ii,er_Volume)         = zeroR
-
-                if (curveID <= zeroI) then
-                    !% integer data
-                    elemSI(ii,esi_Pump_SpecificType) = type_IdealPump 
-                else
-                    !% Aliase for the last row of the pump curve
-                    lastRow          => curve(curveID)%NumRows
-
-                    !% set curve data for pump
-                    elemSI(ii,esi_Pump_CurveID) = curveID
-                    elemSR(ii,esr_Pump_xMin)    = curve(curveID)%ValueArray(1,curve_pump_Xvar)
-                    elemSR(ii,esr_Pump_xMax)    = curve(curveID)%ValueArray(lastRow,curve_pump_Xvar)
-                    Curve(curveID)%ElemIdx      = ii
-                    !% copy pump specific data
-                    if (specificPumpType == lType1Pump) then
-                        !% integer data
-                        elemSI(ii,esi_Pump_SpecificType) = type1_Pump
-
-                    else if (specificPumpType == lType2Pump) then
-                        !% integer data
-                        elemSI(ii,esi_Pump_SpecificType) = type2_Pump
-
-                    else if (specificPumpType == lType3Pump) then
-                        !% integer data
-                        elemSI(ii,esi_Pump_SpecificType) = type3_Pump
-
-                    else if (specificPumpType == lType4Pump) then
-                        !% integer data
-                        elemSI(ii,esi_Pump_SpecificType) = type4_Pump
-                    else
-                        print *, 'In ', subroutine_name
-                        print *, 'CODE ERROR unknown pump type, ', specificPumpType,'  in network'
-                        print *, 'which has key ',trim(reverseKey(specificPumpType))
-                        call util_crashpoint(8863411)
-                    end if
-                end if 
+            !% --- ensure pump ON depth is greater than zero.
+            if (elemSR(ii,esr_Pump_yOn) == zeroR) then
+                elemSR(ii,esr_Pump_yOn) = setting%ZeroValue%Depth
             end if
+
+            !% --- ensure pump OFF depth is greater than zero.
+            if (elemSR(ii,esr_Pump_yOff) == zeroR) then
+                elemSR(ii,esr_Pump_yOff) = setting%ZeroValue%Depth
+            end if
+
+            if ((elemSR(ii,esr_Pump_yOff) > elemSR(ii,esr_Pump_yOn)) &
+                .and. (elemSR(ii,esr_Pump_yOff) > zeroR)) then 
+                print *, 'USER CONFIGURATION ERROR for pump'
+                print *, 'depth/head at which pumps shuts off is larger than'
+                print *, 'the depth/head at which pumps turns on, which provides'
+                print *, 'illogical behavior.'
+                print *, 'Pump at link # ',elemI(ii,ei_link_Gidx_BIPquick)
+                print *, 'pump link name  ',trim(link%Names(elemI(ii,ei_link_Gidx_BIPquick))%str)
+                call util_crashpoint(6439872)
+            end if
+
+            !% --- set nominal element length
+            elemR(ii,er_Length)         = setting%Discretization%NominalElemLength
+            elemR(ii,er_Volume)         = zeroR
+
+            if (curveID <= zeroI) then
+                !% integer data
+                elemSI(ii,esi_Pump_SpecificType) = type_IdealPump 
+            else
+                !% Aliase for the last row of the pump curve
+                lastRow          => curve(curveID)%NumRows
+
+                !% set curve data for pump
+                elemSI(ii,esi_Pump_CurveID) = curveID
+                elemSR(ii,esr_Pump_xMin)    = curve(curveID)%ValueArray(1,curve_pump_Xvar)
+                elemSR(ii,esr_Pump_xMax)    = curve(curveID)%ValueArray(lastRow,curve_pump_Xvar)
+                Curve(curveID)%ElemIdx      = ii
+                !% copy pump specific data
+                if (specificPumpType == lType1Pump) then
+                    !% integer data
+                    elemSI(ii,esi_Pump_SpecificType) = type1_Pump
+
+                else if (specificPumpType == lType2Pump) then
+                    !% integer data
+                    elemSI(ii,esi_Pump_SpecificType) = type2_Pump
+
+                else if (specificPumpType == lType3Pump) then
+                    !% integer data
+                    elemSI(ii,esi_Pump_SpecificType) = type3_Pump
+
+                else if (specificPumpType == lType4Pump) then
+                    !% integer data
+                    elemSI(ii,esi_Pump_SpecificType) = type4_Pump
+                else
+                    print *, 'In ', subroutine_name
+                    print *, 'CODE ERROR unknown pump type, ', specificPumpType,'  in network'
+                    print *, 'which has key ',trim(reverseKey(specificPumpType))
+                    call util_crashpoint(8863411)
+                end if
+
+            end if
+
+            !% --- get the adjacent nodes and links for assigning pipe inlet/outlet diameters
+            !%     These values are needed for setting the JB geometry.
+            nodeUp   => link%I(thisLink,li_Mnode_u)
+            nodeDn   => link%I(thisLink,li_Mnode_d)
+            LinkUp   = util_get_adjacent_CC_link (NodeUp, thisLink, .true. , .false.) 
+            LinkDn   = util_get_adjacent_CC_link (NodeDn, thisLink, .false., .false.) 
+
+            !% --- set pump inlet/outlet diameters
+            !%     based on full area of connected pipe or conduit links (if available)
+            if ((LinkUp > 0) .and. (LinkUp .ne. nullvalueI)) then 
+                elemR(ii,esr_Pump_InletDiameter) = sqrt(fourR * link%R(LinkUp,lr_FullArea) / pi)
+            else 
+                elemR(ii,esr_Pump_InletDiameter) = setting%Pump%PipeDiameterDefault
+            end if
+
+            if ((LinkDn > 0) .and. (LinkDn .ne. nullvalueI)) then 
+                elemR(ii,esr_Pump_OutletDiameter) = sqrt(fourR * link%R(LinkDn,lr_FullArea) / pi)
+            else 
+                elemR(ii,esr_Pump_OutletDiameter) = setting%Pump%PipeDiameterDefault
+            end if
+
+            !% --- if no pipe or conduit link, use setting default value
+            if ((elemR(ii,esr_Pump_OutletDiameter) .eq. setting%Pump%PipeDiameterDefault) &
+                .and.                                                                     &
+                (elemR(ii,esr_Pump_InletDiameter)  .ne. setting%Pump%PipeDiameterDefault) ) then 
+
+                elemR(ii,esr_Pump_OutletDiameter) = elemR(ii,esr_Pump_InletDiameter)
+            end if
+            if ((elemR(ii,esr_Pump_InletDiameter)  .eq. setting%Pump%PipeDiameterDefault) &
+                .and.                                                                     &
+                (elemR(ii,esr_Pump_OutletDiameter) .ne.setting%Pump%PipeDiameterDefault) ) then 
+
+                elemR(ii,esr_Pump_InletDiameter) = elemR(ii,esr_Pump_OutletDiameter)
+            end if
+
+            !% --- ensure that outlet is at least as big as the inlet
+            if (elemR(ii,esr_Pump_OutletDiameter) < elemR(ii,esr_Pump_InletDiameter)) then 
+                elemR(ii,esr_Pump_OutletDiameter) = elemR(ii,esr_Pump_InletDiameter)
+            end if
+
+            !% --- if this point is reached, then single elem is found
+            !%     and assigned, so return without completeing the loop
+            return
         end do
      
-        !%-------------------------------------------------------------------
-        !% Closing
-            if (setting%Debug%File%initial_condition) &
-            write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-    end subroutine init_IC_get_pump_geometry
+    end subroutine IC_get_pump_geometry
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_get_outlet_geometry (thisLink)
+    subroutine IC_get_outlet_geometry (thisLink)
         !%-----------------------------------------------------------------
         !% Description:
         !% get the geometry and other data data for outlet links
@@ -2798,12 +2900,9 @@ contains
             integer, intent(in) :: thisLink
             integer, pointer    :: specificOutletType, curveID
 
-            character(64) :: subroutine_name = 'init_IC_get_outlet_geometry'
+            character(64) :: subroutine_name = 'IC_get_outlet_geometry'
         !%-------------------------------------------------------------------
         !% Preliminaries:
-            if (setting%Debug%File%initial_condition) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-
         !%-------------------------------------------------------------------
         !% Aliases
             specificOutletType => link%I(thisLink,li_link_sub_type)
@@ -2848,42 +2947,53 @@ contains
 
         !%-------------------------------------------------------------------
         !% Closing
-            if (setting%Debug%File%initial_condition) &
-            write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
 
-    end subroutine init_IC_get_outlet_geometry
+    end subroutine IC_get_outlet_geometry
 !%
 !%=========================================================================
 !%=========================================================================
 !%
-    subroutine init_IC_diagnostic_default_geometry (thisLink,thisElem, thisType)
+    subroutine IC_diagnostic_default_geometry (thisLink, thisElem, thisType)
         !%-----------------------------------------------------------------
         !% Description:
-        !% Provides default background channel geometry for diagnostic
-        !% elements. This geometry will be overwritten by that of an
-        !% adjacent cell that has valid channel/conduit geometry
-        !% Assume Depth FullDepth, BreadthMax, and ZBottom  and
-        !% egsr_Rectangular_Breadth already assigned
+        !% Provides default geometry based on diagnostic element that 
+        !% is used for setting a diagnostic-adjacent JB geometry.
+        !% This is only applied when the IC routines cannot find a CC 
+        !% element connected to the junction to use as a geometry surrogate
+        !% The input "thisLink" is the diagnostic element link
+        !% The input "thisElem" is a JB element
+        !% The input "thisType" is the type of diagnostic element
         !%-----------------------------------------------------------------
         !% Declarations:
             integer, intent(in) :: thisLink, thisType, thisElem
             integer             :: geoType
+            real(8), pointer    :: pi, zeroArea, zeroTopwidth, zeroPerimeter
+            real(8), pointer    :: zeroDepth
             logical             :: canSurcharge
+        !%-----------------------------------------------------------------
+        !% Aliases 
+            pi            => setting%Constant%pi
+            zeroArea      => setting%ZeroValue%Area
+            zeroTopWidth  => setting%ZeroValue%Topwidth
+            zeroPerimeter => setting%ZeroValue%Topwidth
+            zeroDepth     => setting%ZeroValue%Depth
         !%-----------------------------------------------------------------
 
         !% --- set the geometry type for the input type
         !%     designed for flexibility, but presently requiring
-        !%     rectangular_closed for any diagnostic default geometry
+        !%     circular for any diagnostic default geometry
         !%     to prevent issues of overflow
         select case (thisType)
             case (weir)
                 if (elemI(thisElem,eYN_canSurcharge)) then
-                    geoType = rectangular_closed
+                    geoType = circular
                 else 
-                    geoType = rectangular
+                    geoType = circular
                 end if
             case (orifice)
-                geoType = rectangular_closed
+                geoType = circular
+            case (pump)
+                geoType = circular
             case default
                 print *, 'CODE ERROR unexpected case default'
                 call util_crashpoint(5582366)
@@ -2891,189 +3001,243 @@ contains
 
         elemI(thisElem,ei_geometryType)            = geoType
         elemR(thisElem,er_Length)                  = setting%Discretization%NominalElemLength
-        elemR(thisElem,er_FullPerimeter)           = elemR(thisElem,er_BreadthMax) + twoR * elemR(thisElem,er_FullDepth)
-        elemR(thisElem,er_ZbreadthMax)             = elemR(thisElem,er_FullDepth) + elemR(thisElem,er_Zbottom)  
-        elemR(thisElem,er_Zcrown)                  = elemR(thisElem,er_Zbottom)   + elemR(thisElem,er_FullDepth)
-        elemR(thisElem,er_FullArea)                = elemR(thisElem,er_FullDepth) * elemR(thisElem,er_BreadthMax)
-        elemR(thisElem,er_FullVolume)              = elemR(thisElem,er_FullArea)  * elemR(thisElem,er_Length)
-        elemR(thisElem,er_AreaBelowBreadthMax)     = elemR(thisElem,er_FullArea)
+
+        !% --- the following assumes that FullDepth, Zbottom and Depth have been assigned for circular
+        !%     for rectangular the BreadthMax, FullDepth, Zbottom must be assigned
+        select case (geotype) 
+            case (circular)
+                !% --- geometry
+                elemR(thisElem,er_FullPerimeter)       = pi * elemR(thisElem,er_FullDepth)
+                elemR(thisElem,er_ZbreadthMax)         = onehalfR * elemR(thisElem,er_FullDepth)
+                elemR(thisElem,er_Zcrown)              = elemR(thisElem,er_Zbottom)   + elemR(thisElem,er_FullDepth)
+                elemR(thisElem,er_FullArea)            = pi * (elemR(thisElem,er_FullDepth)**2) / fourR
+                elemR(thisElem,er_FullVolume)          = elemR(thisElem,er_FullArea)  * elemR(thisElem,er_Length)
+                elemR(thisElem,er_AreaBelowBreadthMax) = onehalfR * elemR(thisElem,er_FullArea)
+
+            case (rectangular, rectangular_closed)
+                !% --- geometry
+                elemR(thisElem,er_FullPerimeter)       = elemR(thisElem,er_BreadthMax) + twoR * elemR(thisElem,er_FullDepth)
+                elemR(thisElem,er_ZbreadthMax)         = elemR(thisElem,er_FullDepth) + elemR(thisElem,er_Zbottom)  
+                elemR(thisElem,er_Zcrown)              = elemR(thisElem,er_Zbottom)   + elemR(thisElem,er_FullDepth)
+                elemR(thisElem,er_FullArea)            = elemR(thisElem,er_FullDepth) * elemR(thisElem,er_BreadthMax)
+                elemR(thisElem,er_FullVolume)          = elemR(thisElem,er_FullArea)  * elemR(thisElem,er_Length)
+                elemR(thisElem,er_AreaBelowBreadthMax) = elemR(thisElem,er_FullArea)
+                
+            case default 
+                print *, 'CODE ERROR: unexpected case default'
+                call util_crashpoint(2098744)
+        end select
+
+        !% --- IC
+        elemR(thisElem,er_Area)      = geo_area_from_depth_singular                 (thisElem, elemR(thisElem,er_Depth),zeroArea) 
+        elemR(thisElem,er_Topwidth)  = geo_topwidth_from_depth_singular             (thisElem, elemR(thisElem,er_Depth),zeroTopWidth) 
+        elemR(thisElem,er_Perimeter) = geo_perimeter_from_depth_singular            (thisElem, elemR(thisElem,er_Depth),zeroPerimeter) 
+          
+        if (elemR(thisElem,er_Perimeter) > ZeroPerimeter) then
+            elemR(thisElem,er_HydRadius) = elemR(thisElem,er_Area) / elemR(thisElem,er_Perimeter)
+        else
+            elemR(thisElem,er_HydRadius) = zeroDepth 
+        end if
         
-        !% store IC data
-        elemR(thisElem,er_Area)          = elemSGR(thisElem,esgr_Rectangular_Breadth) * elemR(thisElem,er_Depth)
+        !% --- common IC data
         elemR(thisElem,er_Area_N0)       = elemR(thisElem,er_Area)
         elemR(thisElem,er_Area_N1)       = elemR(thisElem,er_Area)
+
         elemR(thisElem,er_Volume)        = elemR(thisElem,er_Area) * elemR(thisElem,er_Length)
         elemR(thisElem,er_Volume_N0)     = elemR(thisElem,er_Volume)
         elemR(thisElem,er_Volume_N1)     = elemR(thisElem,er_Volume)
+
         elemR(thisElem,er_EllDepth)      = elemR(thisElem,er_Depth)
-        elemR(thisElem,er_Perimeter)     = twoR * elemR(thisElem,er_Depth) + elemR(thisElem,er_BreadthMax)
-        elemR(thisElem,er_HydRadius)     = elemR(thisElem,er_Area) / elemR(thisElem,er_Perimeter)
-        elemR(thisElem,er_TopWidth)      = elemR(thisElem,er_BreadthMax)
-
      
-    end subroutine init_IC_diagnostic_default_geometry
+    end subroutine IC_diagnostic_default_geometry
 !%
 !%=========================================================================
 !%=========================================================================
 !%
-    subroutine init_IC_diagnostic_geometry_from_adjacent (isFirstCall)
-        !%-----------------------------------------------------------------
-        !% Description:  
-        !% Provides the additional "background" geometry of
-        !% diagnostic (weir, pump, outlet only) elements based on its surroundings. This is the
-        !% geometry of the channel/conduit in which the diagnostic element exists.  
-        !% This ensures that a diagnostic element next to
-        !% a JB branch has a valid geometry that can be used for the JB branch.
-        !% THIS DOES NOT APPLY TO WEIRS OR ORIFICES, which get their background
-        !% geometry from their weir/orifice information.
-        !% PUMP -- if upstream element is CC, the pump takes on the
-        !%   geometry of the upstream CC element. If the upstream element is
-        !%   other than CC, then the pump takes on the geometry of the
-        !%   downstream CC element. If the downstream element is also other than 
-        !%   CC then an error is returned
-        !% Outlet -- requires an upstream CC element
-        !%
-        !% Called initially for CC adjacent only, then for CC and JB when
-        !% after JB have been updated in init_IC_for_nJm_from_nodedata
-        !%-----------------------------------------------------------------
-        !% Declarations
-            logical, intent(in) :: isFirstCall !% true for first time through
-            integer, dimension(:), allocatable, target :: packIdx
-            integer, pointer :: Fidx, Aidx, thisP
-            integer, pointer :: linkIdx
-            integer :: ii, Ci
+    ! subroutine IC_diagnostic_geometry () 
+    !     !%-----------------------------------------------------------------
+    !     !% Description
+    !     !%-----------------------------------------------------------------
+    !     !% Declarations
+    !         integer, dimension(:), allocatable, target :: packIdx
+    !     !%-----------------------------------------------------------------
+    !     !% Preliminaries
+    !     !%-----------------------------------------------------------------
+
+    !     packIdx = pack(elemI(:,ei_Lidx),(elemI(:,ei_elementType) .eq. pump))
+
+    !     print *, ' '
+    !     print *, 'DIAGNOSTIC IC GEOMETRY NOT DONE'
+    !     print *, ' '
+    !     stop 6098734
             
-            character(64) :: subroutine_name = 'init_IC_diagnostic_geometry_from_adjacent'
-        !%-----------------------------------------------------------------
-        !% Preliminaries:
-            !% --- get the set of pumps, and outlets
-            packIdx = pack(elemI(:,ei_Lidx), &
-                    ((elemI(:,ei_elementType) .eq. pump) &
-                    .or. &
-                    (elemI(:,ei_elementType) .eq. outlet) ) )
-        !%-----------------------------------------------------------------
 
-        !% --- cycle through to set geometry of diagnostic element
-        !%     use the upstream geometry if it is CC
-        do ii=1,size(packIdx)
-            !% --- the present point
-            thisP  => packIdx(ii)
+    ! end subroutine IC_diagnostic_geometry
+!%
+!%=========================================================================
+!%=========================================================================
+!%
+    ! subroutine IC_diagnostic_geometry_from_adjacent (isFirstCall)
+        
+    !     !%-----------------------------------------------------------------
+    !     !% Description:  
+    !     !% Provides the additional "background" geometry of
+    !     !% diagnostic (weir, pump, outlet only) elements based on its surroundings. This is the
+    !     !% geometry of the channel/conduit in which the diagnostic element exists.  
+    !     !% This ensures that a diagnostic element next to
+    !     !% a JB branch has a valid geometry that can be used for the JB branch.
+    !     !% THIS DOES NOT APPLY TO WEIRS OR ORIFICES, which get their background
+    !     !% geometry from their weir/orifice information.
+    !     !% PUMP -- if upstream element is CC, the pump takes on the
+    !     !%   geometry of the upstream CC element. If the upstream element is
+    !     !%   other than CC, then the pump takes on the geometry of the
+    !     !%   downstream CC element. If the downstream element is also other than 
+    !     !%   CC then an error is returned
+    !     !% Outlet -- requires an upstream CC element
+    !     !%
+    !     !% Called initially for CC adjacent only, then for CC and JB when
+    !     !% after JB have been updated in IC_for_nJm_from_nodedata
+    !     !%-----------------------------------------------------------------
+    !     !% Declarations
+    !         logical, intent(in) :: isFirstCall !% true for first time through
+    !         integer, dimension(:), allocatable, target :: packIdx
+    !         integer, pointer :: Fidx, Aidx, thisP
+    !         integer, pointer :: linkIdx
+    !         integer :: ii, Ci
+            
+    !         character(64) :: subroutine_name = 'IC_diagnostic_geometry_from_adjacent'
+    !     !%-----------------------------------------------------------------
+    !     !% Preliminaries:
+    !         !% --- get the set of pumps, and outlets
+    !         packIdx = pack(elemI(:,ei_Lidx), &
+    !                 ((elemI(:,ei_elementType) .eq. pump) &
+    !                 .or. &
+    !                 (elemI(:,ei_elementType) .eq. outlet) ) )
+    !     !%-----------------------------------------------------------------
 
-            !% --- cycle if not a nullvalue geometry type
-            if (elemI(thisP,ei_geometryType) .ne. undefinedKey) cycle 
+    !                 print *, 'OBSOLETE'
+    !                 stop 209874
+    !     !% --- cycle through to set geometry of diagnostic element
+    !     !%     use the upstream geometry if it is CC
+    !     do ii=1,size(packIdx)
+    !         !% --- the present point
+    !         thisP  => packIdx(ii)
 
-            !% --- the link
-            linkIdx => elemI(thisP,ei_link_Gidx_SWMM)
+    !         !% --- cycle if not a nullvalue geometry type
+    !         if (elemI(thisP,ei_geometryType) .ne. undefinedKey) cycle 
 
-            !% --- UPSTREAM ELEMENTS ----------------------------------------
-            !% --- the upstream face
-            Fidx => elemI(thisP,ei_Mface_uL)
+    !         !% --- the link
+    !         linkIdx => elemI(thisP,ei_link_Gidx_SWMM)
 
-            !% --- identify the upstream element
-            !%     which may be on a different image
-            if (elemYN(thisP,eYN_isBoundary_up)) then
-                Ci   =  faceI(Fidx,fi_Connected_image)
-                Aidx => faceI(Fidx,fi_GhostElem_uL)
-            else
-                Ci   =  this_image()
-                Aidx => faceI(Fidx,fi_Melem_uL)
-            end if
+    !         !% --- UPSTREAM ELEMENTS ----------------------------------------
+    !         !% --- the upstream face
+    !         Fidx => elemI(thisP,ei_Mface_uL)
 
-            !% --- set geometry for thisP based on upstream elements where possible
-            if (isFirstCall) then
-                !% --- first time through only consider CC adjacent
-                if (elemI(Aidx,ei_elementType)[Ci] == CC) then
-                    call init_IC_set_implied_geometry (thisP, Aidx, Ci)
-                else
-                    !% --- if the upstream element is not CC, use the downstream element CC geometry
-                    !%     for pumps, but fail for outlets
-                    if (elemI(thisP,ei_elementType) == outlet) then
-                        !% --- outlets are required to have upstream CC
-                        print *, 'USER CONFIGURATION ERROR for outlet'
-                        print *, 'An outlet requires exactly one upstream link that is a'
-                        print *, 'conduit or channel. This condition violated for'
-                        print *, 'outlet with name ',trim(link%Names(linkIdx)%str)
-                        call util_crashpoint(92873)
-                    else 
-                        !% --- skip down to the next to handle downstream element
-                    end if
-                end if
-            else 
-                !% --- 2nd time through consider JB adjacent
-                if ((elemI(Aidx,ei_elementType)[Ci] == CC) .or.        &
-                    (elemI(Aidx,ei_elementType)[Ci] == JB)      ) then
-                    call init_IC_set_implied_geometry (thisP, Aidx, Ci) 
-                else
-                    print *, 'CODE ERROR unexpected else'
-                    print *, 'Diagnostic geometry adjacent to element that is not CC OR JB'
-                    print *, 'This situation should not occur'
-                    call util_crashpoint(77200981)
-                end if
-            end if
+    !         !% --- identify the upstream element
+    !         !%     which may be on a different image
+    !         if (elemYN(thisP,eYN_isBoundary_up)) then
+    !             Ci   =  faceI(Fidx,fi_Connected_image)
+    !             Aidx => faceI(Fidx,fi_GhostElem_uL)
+    !         else
+    !             Ci   =  this_image()
+    !             Aidx => faceI(Fidx,fi_Melem_uL)
+    !         end if
 
-            !% --- Look downstream if this element still undefined
-            if (elemI(thisP,ei_geometryType) .ne. undefinedKey) cycle 
+    !         !% --- set geometry for thisP based on upstream elements where possible
+    !         if (isFirstCall) then
+    !             !% --- first time through only consider CC adjacent
+    !             if (elemI(Aidx,ei_elementType)[Ci] == CC) then
+    !                 call IC_set_implied_geometry (thisP, Aidx, Ci)
+    !             else
+    !                 !% --- if the upstream element is not CC, use the downstream element CC geometry
+    !                 !%     for pumps, but fail for outlets
+    !                 if (elemI(thisP,ei_elementType) == outlet) then
+    !                     !% --- outlets are required to have upstream CC
+    !                     print *, 'USER CONFIGURATION ERROR for outlet'
+    !                     print *, 'An outlet requires exactly one upstream link that is a'
+    !                     print *, 'conduit or channel. This condition violated for'
+    !                     print *, 'outlet with name ',trim(link%Names(linkIdx)%str)
+    !                     call util_crashpoint(92873)
+    !                 else 
+    !                     !% --- skip down to the next to handle downstream element
+    !                 end if
+    !             end if
+    !         else 
+    !             !% --- 2nd time through consider JB adjacent
+    !             if ((elemI(Aidx,ei_elementType)[Ci] == CC) .or.        &
+    !                 (elemI(Aidx,ei_elementType)[Ci] == JB)      ) then
+    !                 call IC_set_implied_geometry (thisP, Aidx, Ci) 
+    !             else
+    !                 print *, 'CODE ERROR unexpected else'
+    !                 print *, 'Diagnostic geometry adjacent to element that is not CC OR JB'
+    !                 print *, 'This situation should not occur'
+    !                 call util_crashpoint(77200981)
+    !             end if
+    !         end if
 
-            !% --- the downstream face
-            Fidx => elemI(thisP,ei_Mface_dL)
-                ! print *, 'dn face ',Fidx
+    !         !% --- Look downstream if this element still undefined
+    !         if (elemI(thisP,ei_geometryType) .ne. undefinedKey) cycle 
 
-            !% --- the downstream element
-            !%     which may be on a different image
-            if (elemYN(thisP,eYN_isBoundary_dn)) then
-                Ci   =  faceI(Fidx,fi_Connected_image)
-                Aidx => faceI(Fidx,fi_GhostElem_dL)
-            else
-                Ci   =  this_image()
-                Aidx => faceI(Fidx,fi_Melem_dL)
-            end if
+    !         !% --- the downstream face
+    !         Fidx => elemI(thisP,ei_Mface_dL)
+    !             ! print *, 'dn face ',Fidx
 
-            if (isFirstCall) then    
-                !% --- the element type downstream
-                if (elemI(Aidx,ei_elementType)[Ci] == CC) then
-                    call init_IC_set_implied_geometry (thisP, Aidx, Ci) 
-                else
-                    !% HACK -- need to review implied geometry for pumps
-                    ! if (elemI(Aidx,ei_elementType)[Ci] == JB) then
-                    !     !% --- pump with both upstream and downstream not CC
-                    !     !%     downstream is JB and upstream may be JB
-                    !     !%     must wait to resolve geometry after JB assigned
-                    !     !%     Assign nullvalueI to find this pump later.
-                    !     elemI(thisP,ei_geometryType) = nullvalueI
-                    ! else  
-                    !     print *, ' '
+    !         !% --- the downstream element
+    !         !%     which may be on a different image
+    !         if (elemYN(thisP,eYN_isBoundary_dn)) then
+    !             Ci   =  faceI(Fidx,fi_Connected_image)
+    !             Aidx => faceI(Fidx,fi_GhostElem_dL)
+    !         else
+    !             Ci   =  this_image()
+    !             Aidx => faceI(Fidx,fi_Melem_dL)
+    !         end if
 
-                    !     !% --- pumps do not have default channel geometry, so they must
-                    !     !%     have a CC element upstream or downstream.
-                    !     print *, 'USER SYSTEM CONFIGURATION ERROR for pump'
-                    !     print *, 'A pump requires at least one upstream or downstream link that is a'
-                    !     print *, 'conduit or channel or junction. This condition violated for'
-                    !     print *, 'pump with name ',trim(link%Names(linkIdx)%str)
-                    !     call util_crashpoint(2398789)
-                    ! end if
-                end if
-            else 
-                if ((elemI(Aidx,ei_elementType)[Ci] == CC) .or.        &
-                    (elemI(Aidx,ei_elementType)[Ci] == JB)      ) then
-                    call init_IC_set_implied_geometry (thisP, Aidx, Ci) 
-                end if
-            end if
-        end do
+    !         if (isFirstCall) then    
+    !             !% --- the element type downstream
+    !             if (elemI(Aidx,ei_elementType)[Ci] == CC) then
+    !                 call IC_set_implied_geometry (thisP, Aidx, Ci) 
+    !             else
+    !                 !% HACK -- need to review implied geometry for pumps
+    !                 ! if (elemI(Aidx,ei_elementType)[Ci] == JB) then
+    !                 !     !% --- pump with both upstream and downstream not CC
+    !                 !     !%     downstream is JB and upstream may be JB
+    !                 !     !%     must wait to resolve geometry after JB assigned
+    !                 !     !%     Assign nullvalueI to find this pump later.
+    !                 !     elemI(thisP,ei_geometryType) = nullvalueI
+    !                 ! else  
+    !                 !     print *, ' '
 
-        !%-----------------------------------------------------------------
-        !% Closing:
-            deallocate(packIdx)
+    !                 !     !% --- pumps do not have default channel geometry, so they must
+    !                 !     !%     have a CC element upstream or downstream.
+    !                 !     print *, 'USER SYSTEM CONFIGURATION ERROR for pump'
+    !                 !     print *, 'A pump requires at least one upstream or downstream link that is a'
+    !                 !     print *, 'conduit or channel or junction. This condition violated for'
+    !                 !     print *, 'pump with name ',trim(link%Names(linkIdx)%str)
+    !                 !     call util_crashpoint(2398789)
+    !                 ! end if
+    !             end if
+    !         else 
+    !             if ((elemI(Aidx,ei_elementType)[Ci] == CC) .or.        &
+    !                 (elemI(Aidx,ei_elementType)[Ci] == JB)      ) then
+    !                 call IC_set_implied_geometry (thisP, Aidx, Ci) 
+    !             end if
+    !         end if
+    !     end do
 
-    end subroutine init_IC_diagnostic_geometry_from_adjacent
+    !     !%-----------------------------------------------------------------
+    !     !% Closing:
+    !         deallocate(packIdx)
+
+    ! end subroutine IC_diagnostic_geometry_from_adjacent
 !%
 !%==========================================================================
 !%==========================================================================
 !%     
-    subroutine init_IC_identify_diagnostic_adjacent_faces ()
+    subroutine IC_identify_diagnostic_adjacent_faces ()
         !%-----------------------------------------------------------------
         !% Description
         !% Cycles through all faces to find all diagnostic-adjacent faces
-        !% (including shared faces)
+        !% (including shared faces) for faceYN(:,fYN_isDiag_adjacent_any)
         !%-----------------------------------------------------------------
         !% Declarations
             integer, pointer :: eDn, eUp
@@ -3087,7 +3251,7 @@ contains
         do ff=1,Nfaces
 
             !% --- initialization
-            faceYN(ff,fYN_isDiag_adjacent_all) = .false.
+            faceYN(ff,fYN_isDiag_adjacent_any) = .false.
 
             if (faceYN(ff,fYN_isSharedFace)) then 
                 if (faceYN(ff,fYN_isDnGhost)) then 
@@ -3095,7 +3259,7 @@ contains
                     eUp => faceI(ff,fi_Melem_uL)
                     if  (elemI(eUp,ei_QeqType) .eq. diagnostic) then 
 
-                        faceYN(ff,fYN_isDiag_adjacent_all) = .true.
+                        faceYN(ff,fYN_isDiag_adjacent_any) = .true.
                         cycle
 
                     end if
@@ -3104,7 +3268,7 @@ contains
                     Aidx => faceI(ff,fi_GhostElem_dL)
                     if (elemI(Aidx,ei_QeqType)[Ci] .eq. diagnostic) then 
 
-                        faceYN(ff,fYN_isDiag_adjacent_all) = .true.
+                        faceYN(ff,fYN_isDiag_adjacent_any) = .true.
                         cycle
 
                     end if
@@ -3114,7 +3278,7 @@ contains
                     eDn => faceI(ff,fi_Melem_dL)
                     if (elemI(eDn,ei_QeqType) .eq. diagnostic) then 
 
-                        faceYN(ff,fYN_isDiag_adjacent_all) = .true.
+                        faceYN(ff,fYN_isDiag_adjacent_any) = .true.
                         cycle
 
                     end if
@@ -3123,7 +3287,7 @@ contains
                     Aidx => faceI(ff,fi_GhostElem_uL)
                     if (elemI(Aidx,ei_QeqType)[Ci] .eq. diagnostic) then 
 
-                        faceYN(ff,fYN_isDiag_adjacent_all) = .true.
+                        faceYN(ff,fYN_isDiag_adjacent_any) = .true.
                         cycle
 
                     end if
@@ -3137,7 +3301,7 @@ contains
                 if ((elemI(eDn,ei_QeqType) .eq. diagnostic) .or.       &
                     (elemI(eUp,ei_QeqType) .eq. diagnostic)     ) then 
 
-                    faceYN(ff,fYN_isDiag_adjacent_all) = .true. 
+                    faceYN(ff,fYN_isDiag_adjacent_any) = .true. 
                     cycle  
 
                 else 
@@ -3147,16 +3311,17 @@ contains
 
         end do
 
-    end subroutine init_IC_identify_diagnostic_adjacent_faces
+    end subroutine IC_identify_diagnostic_adjacent_faces
 !%
 !%==========================================================================
 !%==========================================================================
 !%     
-    subroutine init_IC_identify_CC_adjacent_faces ()
+    subroutine IC_identify_CC_adjacent_faces ()
         !%-----------------------------------------------------------------
         !% Description
         !% Cycles through all faces to find all CC-adjacent faces
-        !% (including shared faces)
+        !% (including shared faces) for faceYN(:,fYN_isCC_adjacent_any)
+        !% Note that packed arrays have not been assigned, so they cannot be used
         !%-----------------------------------------------------------------
         !% Declarations
             integer, pointer :: eDn, eUp
@@ -3169,8 +3334,8 @@ contains
 
         do ff=1,Nfaces
 
-            !% --- initialization
-            faceYN(ff,fYN_isCC_adjacent_all) = .false.
+            !% --- initialization if either side is CC adjacent
+            faceYN(ff,fYN_isCC_adjacent_any) = .false.
 
             if (faceYN(ff,fYN_isSharedFace)) then 
                 !% -- check when downstream is ghost
@@ -3179,7 +3344,7 @@ contains
                     eUp => faceI(ff,fi_Melem_uL)
                     if  (elemI(eUp,ei_elementType) .eq. CC) then 
 
-                        faceYN(ff,fYN_isCC_adjacent_all) = .true.
+                        faceYN(ff,fYN_isCC_adjacent_any) = .true.
                         cycle
 
                     else 
@@ -3190,7 +3355,7 @@ contains
                     Aidx => faceI(ff,fi_GhostElem_dL)
                     if (elemI(Aidx,ei_elementType)[Ci] .eq. CC) then 
 
-                        faceYN(ff,fYN_isCC_adjacent_all) = .true.
+                        faceYN(ff,fYN_isCC_adjacent_any) = .true.
                         cycle
 
                     else 
@@ -3203,7 +3368,7 @@ contains
                     eDn => faceI(ff,fi_Melem_dL)
                     if (elemI(eDn,ei_elementType) .eq. CC) then 
 
-                        faceYN(ff,fYN_isCC_adjacent_all) = .true.
+                        faceYN(ff,fYN_isCC_adjacent_any) = .true.
                         cycle
 
                     else 
@@ -3214,7 +3379,7 @@ contains
                     Aidx => faceI(ff,fi_GhostElem_uL)
                     if (elemI(Aidx,ei_elementType)[Ci] .eq. CC) then 
 
-                        faceYN(ff,fYN_isCC_adjacent_all) = .true.
+                        faceYN(ff,fYN_isCC_adjacent_any) = .true.
                         cycle
 
                     else 
@@ -3230,7 +3395,7 @@ contains
                 if ((elemI(eDn,ei_elementType) .eq. CC) .or.       &
                     (elemI(eUp,ei_elementType) .eq. CC)     ) then 
 
-                    faceYN(ff,fYN_isCC_adjacent_all) = .true. 
+                    faceYN(ff,fYN_isCC_adjacent_any) = .true. 
                     cycle  
 
                 else 
@@ -3240,16 +3405,16 @@ contains
 
         end do
 
-    end subroutine init_IC_identify_CC_adjacent_faces
+    end subroutine IC_identify_CC_adjacent_faces
 !%
 !%==========================================================================
 !%==========================================================================
 !%    
-    subroutine init_IC_identify_diagnostic_adjacent_elements ()  
+    subroutine IC_identify_diagnostic_adjacent_elements ()  
         !%-----------------------------------------------------------------
         !% Description:
         !% identifies elemYN(:,eYN_is_DiagAdjacent) elements (JB or CC only)
-        !% MUST be called after init_IC_identify_diagnostic_adjacent_faces
+        !% MUST be called after IC_identify_diagnostic_adjacent_faces
         !%-----------------------------------------------------------------
             integer :: ii
         !%-----------------------------------------------------------------
@@ -3257,13 +3422,16 @@ contains
         elemYN(:,eYN_is_DiagAdjacent) = .false.
 
         do ii=1,N_elem(this_image())
+
+            ! print *, ii, elemI(ii,ei_elementType)
+            ! print *, trim(reverseKey(elemI(ii,ei_elementType)))
  
             select case (elemI(ii,ei_elementType))
                 case (CC)          
                     !% --- CC is diag adjacent if either face is diag adjacent                  
-                    if ((faceYN(elemI(ii,ei_Mface_uL),fYN_isDiag_adjacent_all))  &
-                        .or.                                                    &
-                        (faceYN(elemI(ii,ei_Mface_dL),fYN_isDiag_adjacent_all))  &
+                    if ((faceYN(elemI(ii,ei_Mface_uL),fYN_isDiag_adjacent_any))  &
+                        .or.                                                     &
+                        (faceYN(elemI(ii,ei_Mface_dL),fYN_isDiag_adjacent_any))  &
                     ) then
 
                         elemYN(ii,eYN_is_DiagAdjacent) = .true.
@@ -3274,14 +3442,14 @@ contains
                 case (JB)        
                     !% --- JB is diag adjacent depending on upstream or downstream face
                     if (elemSI(ii,esi_JB_Exists) == oneI) then 
-                        if (elemSI(ii,esi_JB_IsUpstream)) then 
-                            if (faceYN(elemI(ii,ei_Mface_uL),fYN_isDiag_adjacent_all)) then 
+                        if (elemSI(ii,esi_JB_IsUpstream) == oneI) then 
+                            if (faceYN(elemI(ii,ei_Mface_uL),fYN_isDiag_adjacent_any)) then 
                                 elemYN(ii,eYN_is_DiagAdjacent) = .true.
                             else 
                                 cycle !% retain false
                             end if
                         else 
-                            if (faceYN(elemI(ii,ei_Mface_dL),fYN_isDiag_adjacent_all)) then 
+                            if (faceYN(elemI(ii,ei_Mface_dL),fYN_isDiag_adjacent_any)) then 
                                 elemYN(ii,eYN_is_DiagAdjacent) = .true.
                             else 
                                 cycle !% retain false
@@ -3295,16 +3463,16 @@ contains
             end select
         end do
         
-    end subroutine init_IC_identify_diagnostic_adjacent_elements
+    end subroutine IC_identify_diagnostic_adjacent_elements
 !%
 !%==========================================================================
 !%==========================================================================
 !%    
-    subroutine init_IC_identify_CC_adjacent_nonCC_elements ()  
+    subroutine IC_identify_CC_adjacent_nonCC_elements ()  
         !%-----------------------------------------------------------------
         !% Description:
         !% identifies elemYN(:,eYN_is_CCadjacent_JBorDiag) elements
-        !% MUST be called after init_IC_identify_CC_adjacent_faces
+        !% MUST be called after IC_identify_CC_adjacent_faces
         !% CANNOT use packed map here
         !%-----------------------------------------------------------------
             integer :: ii
@@ -3312,22 +3480,27 @@ contains
 
         elemYN(:,eYN_is_CCadjacent_JBorDiag) = .false.
 
+        !print *, 'in IC_identify_CC_adjacent_nonCC_elements', N_elem(this_image())
+
         do ii=1,N_elem(this_image())
+
+            !print *, ii, elemI(ii,ei_elementType), trim(reverseKey(elemI(ii,ei_elementType)))
+            
             select case (elemI(ii,ei_elementType))
                 case (CC)
                     cycle  !% retain false
                 case (JB)
                     if (elemSI(ii,esi_JB_Exists) == oneI) then 
-                        if (elemSI(ii,esi_JB_IsUpstream)) then
+                        if (elemSI(ii,esi_JB_IsUpstream) .eq. oneI) then
                             !% upstream branch
-                            if (faceYN(elemI(ii,ei_Mface_uL),fYN_isCC_adjacent_all)) then 
+                            if (faceYN(elemI(ii,ei_Mface_uL),fYN_isCC_adjacent_any)) then 
                                 elemYN(ii,eYN_is_CCadjacent_JBorDiag) = .true.
                             else 
                                 cycle !% not CC adjacent, retain false
                             end if
                         else 
                             !% downstream branch
-                            if (faceYN(elemI(ii,ei_Mface_dL),fYN_isCC_adjacent_all)) then 
+                            if (faceYN(elemI(ii,ei_Mface_dL),fYN_isCC_adjacent_any)) then 
                                 elemYN(ii,eYN_is_CCadjacent_JBorDiag) = .true.
                             else 
                                 cycle !% not CC adjacent, retain false
@@ -3338,9 +3511,9 @@ contains
                     end if
                 case (weir,orifice,pump)
                     if (                                                       &
-                        (faceYN(elemI(ii,ei_Mface_uL),fYN_isCC_adjacent_all)) &
+                        (faceYN(elemI(ii,ei_Mface_uL),fYN_isCC_adjacent_any)) &
                         .or.                                                   &
-                        (faceYN(elemI(ii,ei_Mface_dL),fYN_isCC_adjacent_all)) &
+                        (faceYN(elemI(ii,ei_Mface_dL),fYN_isCC_adjacent_any)) &
                     )  then 
 
                         elemYN(ii,eYN_is_CCadjacent_JBorDiag) = .true.
@@ -3353,12 +3526,12 @@ contains
             end select
         end do
         
-    end subroutine init_IC_identify_CC_adjacent_nonCC_elements
+    end subroutine IC_identify_CC_adjacent_nonCC_elements
 !%
 !%==========================================================================
 !%==========================================================================
 !% 
-    subroutine init_IC_diagnostic_JB_bounded ()
+    subroutine IC_diagnostic_JB_bounded ()
         !%-----------------------------------------------------------------
         !% Description: 
         !% identifies the special case diagnostic elements that have JB
@@ -3434,147 +3607,147 @@ contains
 
         deallocate(packIdx)
 
-    end subroutine init_IC_diagnostic_JB_bounded
+    end subroutine IC_diagnostic_JB_bounded
 !%
 !%==========================================================================
 !%==========================================================================
 !% 
-    subroutine init_IC_set_implied_geometry (thisP, Aidx, Ci)    
-        !%-----------------------------------------------------------------
-        !% Description
-        !% Copies geometry from adjacent element Aidx in connected image Ci
-        !% to thisP element. Requires Aidx element is type CC
-        !%-----------------------------------------------------------------
-        !% Declarations
-            integer, intent(in) :: thisP, Aidx, Ci
-        !%-----------------------------------------------------------------
+    ! subroutine IC_set_implied_geometry (thisP, Aidx, Ci)    
+    !     !%-----------------------------------------------------------------
+    !     !% Description
+    !     !% Copies geometry from adjacent element Aidx in connected image Ci
+    !     !% to thisP element. Requires Aidx element is type CC
+    !     !%-----------------------------------------------------------------
+    !     !% Declarations
+    !         integer, intent(in) :: thisP, Aidx, Ci
+    !     !%-----------------------------------------------------------------
 
-        !% --- if an adjacent element is a channel/conduit, use this for the background channel
-        !$     geometry of the diagnostic element in which the weir/orifice/pump/outlet is embeded
-        elemI(thisP,ei_geometryType)        = elemI(Aidx,ei_geometryType)[Ci]
+    !     !% --- if an adjacent element is a channel/conduit, use this for the background channel
+    !     !$     geometry of the diagnostic element in which the weir/orifice/pump/outlet is embeded
+    !     elemI(thisP,ei_geometryType)        = elemI(Aidx,ei_geometryType)[Ci]
 
-        elemR(thisP,er_AreaBelowBreadthMax) = elemR(Aidx,er_AreaBelowBreadthMax)[Ci]
-        elemR(thisP,er_BreadthMax)          = elemR(Aidx,er_BreadthMax)[Ci]
-        elemR(thisP,er_FullArea)            = elemR(Aidx,er_FullArea)[Ci]
-        elemR(thisP,er_FullDepth)           = elemR(Aidx,er_FullDepth)[Ci]
-        elemR(thisP,er_FullPerimeter)       = elemR(Aidx,er_FullPerimeter)[Ci]
+    !     elemR(thisP,er_AreaBelowBreadthMax) = elemR(Aidx,er_AreaBelowBreadthMax)[Ci]
+    !     elemR(thisP,er_BreadthMax)          = elemR(Aidx,er_BreadthMax)[Ci]
+    !     elemR(thisP,er_FullArea)            = elemR(Aidx,er_FullArea)[Ci]
+    !     elemR(thisP,er_FullDepth)           = elemR(Aidx,er_FullDepth)[Ci]
+    !     elemR(thisP,er_FullPerimeter)       = elemR(Aidx,er_FullPerimeter)[Ci]
 
-        !% --- initialize other consistent terms based on local length and zbottom
-        elemR(thisP,er_FullVolume)   = elemR(thisP,er_FullArea) * elemR(thisP,er_Length)
-        elemR(thisP,er_ZbreadthMax)  = elemR(thisP,er_Zbottom) &
-                                        + elemR(Aidx,er_ZbreadthMax) - elemR(Aidx,er_Zbottom)
-        elemR(thisP,er_Zcrown)       = elemR(thisP,er_Zbottom) &
-                                             + elemR(Aidx,er_Zcrown) - elemR(Aidx,er_Zbottom)
-        !% --- copy special geometry
-        call init_IC_diagnostic_special_geometry (thisP, Aidx, Ci)
+    !     !% --- initialize other consistent terms based on local length and zbottom
+    !     elemR(thisP,er_FullVolume)   = elemR(thisP,er_FullArea) * elemR(thisP,er_Length)
+    !     elemR(thisP,er_ZbreadthMax)  = elemR(thisP,er_Zbottom) &
+    !                                     + elemR(Aidx,er_ZbreadthMax) - elemR(Aidx,er_Zbottom)
+    !     elemR(thisP,er_Zcrown)       = elemR(thisP,er_Zbottom) &
+    !                                          + elemR(Aidx,er_Zcrown) - elemR(Aidx,er_Zbottom)
+    !     !% --- copy special geometry
+    !     call IC_diagnostic_special_geometry (thisP, Aidx, Ci)
 
-    end subroutine init_IC_set_implied_geometry
+    ! end subroutine IC_set_implied_geometry
 !%
 !%==========================================================================
 !%==========================================================================
 !% 
-    subroutine init_IC_diagnostic_special_geometry (thisP, Aidx, Ci)
-        !%-----------------------------------------------------------------
-        !% Description:
-        !% Copies the special fixed geoemtry (depends on element geometry type)
-        !% from the adjacent cell (Aidx) to this cell (thisP) where
-        !% Aidx is on the connected image (Ci). This is used to get the
-        !% geometry for a JB junction branch
-        !%-----------------------------------------------------------------
-        !% Declarations:
-            integer, intent(in) :: thisP, Aidx, Ci
-            character(64) :: subroutine_name = 'init_IC_diagnostic_special_geometry'
-        !%-----------------------------------------------------------------
-        !%-----------------------------------------------------------------
-        !% --- copy over special geometry data depending on geometry type
-        select case (elemI(thisP,ei_geometryType))
-            case (arch)
-                elemSGR(thisP,esgr_Arch_SoverSfull)    = elemSGR(Aidx,esgr_Arch_SoverSfull)[Ci]
-            case (basket_handle)
-                !% --- no special geometry data to transfer
-            case (catenary)
-                elemSGR(thisP,esgr_Catenary_SoverSfull)    = elemSGR(Aidx,esgr_Catenary_SoverSfull)[Ci]
-            case (circular)
-                elemSGR(thisP,esgr_Circular_Diameter)      = elemSGR(Aidx,esgr_Circular_Diameter)[Ci]
-                elemSGR(thisP,esgr_Circular_Radius)        = elemSGR(Aidx,esgr_Circular_Radius)[Ci]
-            case (eggshaped)
-                !% --- no special geometry data to transfer
-            case (filled_circular)
-                elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter)  = elemSGR(Aidx,esgr_Filled_Circular_TotalPipeDiameter)[Ci]
-                elemSGR(thisP,esgr_Filled_Circular_TotalPipeArea)      = elemSGR(Aidx,esgr_Filled_Circular_TotalPipeArea)[Ci]
-                elemSGR(thisP,esgr_Filled_Circular_TotalPipePerimeter) = elemSGR(Aidx,esgr_Filled_Circular_TotalPipePerimeter)[Ci]
-                elemSGR(thisP,esgr_Filled_Circular_TotalPipeHydRadius) = elemSGR(Aidx,esgr_Filled_Circular_TotalPipeHydRadius)[Ci]
-                elemSGR(thisP,esgr_Filled_Circular_bottomArea)         = elemSGR(Aidx,esgr_Filled_Circular_bottomArea)[Ci]
-                elemSGR(thisP,esgr_Filled_Circular_bottomPerimeter)    = elemSGR(Aidx,esgr_Filled_Circular_bottomPerimeter)[Ci]
-                elemSGR(thisP,esgr_Filled_Circular_bottomTopwidth)     = elemSGR(Aidx,esgr_Filled_Circular_bottomTopwidth)[Ci]
-            case (gothic)
-                elemSGR(thisP,esgr_Gothic_SoverSfull)    = elemSGR(Aidx,esgr_Gothic_SoverSfull)[Ci]
-            case (horiz_ellipse)
-                elemSGR(thisP,esgr_Horiz_Ellipse_SoverSfull)    = elemSGR(Aidx,esgr_Horiz_Ellipse_SoverSfull)[Ci]
-            case (horseshoe)
-                !% --- no special geometry data to transfer
-            case (mod_basket)
-                elemSGR(thisP,esgr_Mod_Basket_Ytop)     = elemSGR(Aidx,esgr_Mod_Basket_Ytop)[Ci]
-                elemSGR(thisP,esgr_Mod_Basket_Rtop)     = elemSGR(Aidx,esgr_Mod_Basket_Rtop)[Ci]
-                elemSGR(thisP,esgr_Mod_Basket_Atop)     = elemSGR(Aidx,esgr_Mod_Basket_Atop)[Ci]
-                elemSGR(thisP,esgr_Mod_Basket_ThetaTop) = elemSGR(Aidx,esgr_Mod_Basket_ThetaTop)[Ci]
-            case (rectangular_closed)
-                elemSGR(thisP,esgr_Rectangular_Breadth)    = elemSGR(Aidx,esgr_Rectangular_Breadth)[Ci]
-            case (rect_round)
-                elemSGR(thisP,esgr_Rectangular_Round_Ybot)     = elemSGR(Aidx,esgr_Rectangular_Round_Ybot)[Ci]
-                elemSGR(thisP,esgr_Rectangular_Round_Rbot)     = elemSGR(Aidx,esgr_Rectangular_Round_Rbot)[Ci]
-                elemSGR(thisP,esgr_Rectangular_Round_Abot)     = elemSGR(Aidx,esgr_Rectangular_Round_Abot)[Ci]
-                elemSGR(thisP,esgr_Rectangular_Round_ThetaBot) = elemSGR(Aidx,esgr_Rectangular_Round_ThetaBot)[Ci]
-            case (rect_triang)
-                elemSGR(thisP,esgr_Rectangular_Triangular_BottomDepth) = elemSGR(Aidx,esgr_Rectangular_Triangular_BottomDepth)[Ci]
-                elemSGR(thisP,esgr_Rectangular_Triangular_BottomArea)  = elemSGR(Aidx,esgr_Rectangular_Triangular_BottomArea)[Ci]
-                elemSGR(thisP,esgr_Rectangular_Triangular_BottomSlope) = elemSGR(Aidx,esgr_Rectangular_Triangular_BottomSlope)[Ci]
-            case (semi_circular)
-                elemSGR(thisP,esgr_Semi_Circular_SoverSfull) = elemSGR(Aidx,esgr_Semi_Circular_SoverSfull)[Ci]
-            case (semi_elliptical)
-                elemSGR(thisP,esgr_Semi_Elliptical_SoverSfull) = elemSGR(Aidx,esgr_Semi_Elliptical_SoverSfull)[Ci]
-            case (vert_ellipse)
-                elemSGR(thisP,esgr_Vert_Ellipse_SoverSfull) = elemSGR(Aidx,esgr_Vert_Ellipse_SoverSfull)[Ci]
-            case (force_main)
-                !% --- no special geometry data to transfer
-            case (parabolic)
-                elemSGR(thisP,esgr_Parabolic_Breadth)    = elemSGR(Aidx,esgr_Parabolic_Breadth)[Ci]
-                elemSGR(thisP,esgr_Parabolic_Radius)     = elemSGR(Aidx,esgr_Parabolic_Radius)[Ci]
-            case (rectangular)
-                elemSGR(thisP,esgr_Rectangular_Breadth)    = elemSGR(Aidx,esgr_Rectangular_Breadth)[Ci]
-            case (trapezoidal)
-                elemSGR(thisP,esgr_Trapezoidal_Breadth)    = elemSGR(Aidx,esgr_Trapezoidal_Breadth)[Ci]
-                elemSGR(thisP,esgr_Trapezoidal_LeftSlope)  = elemSGR(Aidx,esgr_Trapezoidal_LeftSlope)[Ci]
-                elemSGR(thisP,esgr_Trapezoidal_RightSlope) = elemSGR(Aidx,esgr_Trapezoidal_RightSlope)[Ci]
-            case (triangular)
-                elemSGR(thisP,esgr_Triangular_TopBreadth)  = elemSGR(Aidx,esgr_Triangular_TopBreadth)[Ci]
-                elemSGR(thisP,esgr_Triangular_Slope)       = elemSGR(Aidx,esgr_Triangular_Slope)[Ci] 
-            case (irregular)
-                elemI(thisP,ei_link_transect_idx)          = elemI(Aidx,ei_link_transect_idx)[Ci]
-            case default
-                print *, 'CODE ERROR unexpected geometry'
-                print *, 'ei_geometryType index # ',elemI(thisP,ei_geometryType)
-                print *, 'which represents ',reverseKey(elemI(thisP,ei_geometryType))
-                print *, 'is not handled in subroutine ',trim(subroutine_name)
-                call util_crashpoint(99376)
-        end select
+    ! subroutine IC_diagnostic_special_geometry (thisP, Aidx, Ci)
+    !     !%-----------------------------------------------------------------
+    !     !% Description:
+    !     !% Copies the special fixed geometry (depends on element geometry type)
+    !     !% from the adjacent cell (Aidx) to this cell (thisP) where
+    !     !% Aidx is on the connected image (Ci). This is used to get the
+    !     !% geometry for a JB junction branch
+    !     !%-----------------------------------------------------------------
+    !     !% Declarations:
+    !         integer, intent(in) :: thisP, Aidx, Ci
+    !         character(64) :: subroutine_name = 'IC_diagnostic_special_geometry'
+    !     !%-----------------------------------------------------------------
+    !     !%-----------------------------------------------------------------
+    !     !% --- copy over special geometry data depending on geometry type
+    !     select case (elemI(thisP,ei_geometryType))
+    !         case (arch)
+    !             elemSGR(thisP,esgr_Arch_SoverSfull)    = elemSGR(Aidx,esgr_Arch_SoverSfull)[Ci]
+    !         case (basket_handle)
+    !             !% --- no special geometry data to transfer
+    !         case (catenary)
+    !             elemSGR(thisP,esgr_Catenary_SoverSfull)    = elemSGR(Aidx,esgr_Catenary_SoverSfull)[Ci]
+    !         case (circular)
+    !             elemSGR(thisP,esgr_Circular_Diameter)      = elemSGR(Aidx,esgr_Circular_Diameter)[Ci]
+    !             elemSGR(thisP,esgr_Circular_Radius)        = elemSGR(Aidx,esgr_Circular_Radius)[Ci]
+    !         case (eggshaped)
+    !             !% --- no special geometry data to transfer
+    !         case (filled_circular)
+    !             elemSGR(thisP,esgr_Filled_Circular_TotalPipeDiameter)  = elemSGR(Aidx,esgr_Filled_Circular_TotalPipeDiameter)[Ci]
+    !             elemSGR(thisP,esgr_Filled_Circular_TotalPipeArea)      = elemSGR(Aidx,esgr_Filled_Circular_TotalPipeArea)[Ci]
+    !             elemSGR(thisP,esgr_Filled_Circular_TotalPipePerimeter) = elemSGR(Aidx,esgr_Filled_Circular_TotalPipePerimeter)[Ci]
+    !             elemSGR(thisP,esgr_Filled_Circular_TotalPipeHydRadius) = elemSGR(Aidx,esgr_Filled_Circular_TotalPipeHydRadius)[Ci]
+    !             elemSGR(thisP,esgr_Filled_Circular_bottomArea)         = elemSGR(Aidx,esgr_Filled_Circular_bottomArea)[Ci]
+    !             elemSGR(thisP,esgr_Filled_Circular_bottomPerimeter)    = elemSGR(Aidx,esgr_Filled_Circular_bottomPerimeter)[Ci]
+    !             elemSGR(thisP,esgr_Filled_Circular_bottomTopwidth)     = elemSGR(Aidx,esgr_Filled_Circular_bottomTopwidth)[Ci]
+    !         case (gothic)
+    !             elemSGR(thisP,esgr_Gothic_SoverSfull)    = elemSGR(Aidx,esgr_Gothic_SoverSfull)[Ci]
+    !         case (horiz_ellipse)
+    !             elemSGR(thisP,esgr_Horiz_Ellipse_SoverSfull)    = elemSGR(Aidx,esgr_Horiz_Ellipse_SoverSfull)[Ci]
+    !         case (horseshoe)
+    !             !% --- no special geometry data to transfer
+    !         case (mod_basket)
+    !             elemSGR(thisP,esgr_Mod_Basket_Ytop)     = elemSGR(Aidx,esgr_Mod_Basket_Ytop)[Ci]
+    !             elemSGR(thisP,esgr_Mod_Basket_Rtop)     = elemSGR(Aidx,esgr_Mod_Basket_Rtop)[Ci]
+    !             elemSGR(thisP,esgr_Mod_Basket_Atop)     = elemSGR(Aidx,esgr_Mod_Basket_Atop)[Ci]
+    !             elemSGR(thisP,esgr_Mod_Basket_ThetaTop) = elemSGR(Aidx,esgr_Mod_Basket_ThetaTop)[Ci]
+    !         case (rectangular_closed)
+    !             elemSGR(thisP,esgr_Rectangular_Breadth)    = elemSGR(Aidx,esgr_Rectangular_Breadth)[Ci]
+    !         case (rect_round)
+    !             elemSGR(thisP,esgr_Rectangular_Round_Ybot)     = elemSGR(Aidx,esgr_Rectangular_Round_Ybot)[Ci]
+    !             elemSGR(thisP,esgr_Rectangular_Round_Rbot)     = elemSGR(Aidx,esgr_Rectangular_Round_Rbot)[Ci]
+    !             elemSGR(thisP,esgr_Rectangular_Round_Abot)     = elemSGR(Aidx,esgr_Rectangular_Round_Abot)[Ci]
+    !             elemSGR(thisP,esgr_Rectangular_Round_ThetaBot) = elemSGR(Aidx,esgr_Rectangular_Round_ThetaBot)[Ci]
+    !         case (rect_triang)
+    !             elemSGR(thisP,esgr_Rectangular_Triangular_BottomDepth) = elemSGR(Aidx,esgr_Rectangular_Triangular_BottomDepth)[Ci]
+    !             elemSGR(thisP,esgr_Rectangular_Triangular_BottomArea)  = elemSGR(Aidx,esgr_Rectangular_Triangular_BottomArea)[Ci]
+    !             elemSGR(thisP,esgr_Rectangular_Triangular_BottomSlope) = elemSGR(Aidx,esgr_Rectangular_Triangular_BottomSlope)[Ci]
+    !         case (semi_circular)
+    !             elemSGR(thisP,esgr_Semi_Circular_SoverSfull) = elemSGR(Aidx,esgr_Semi_Circular_SoverSfull)[Ci]
+    !         case (semi_elliptical)
+    !             elemSGR(thisP,esgr_Semi_Elliptical_SoverSfull) = elemSGR(Aidx,esgr_Semi_Elliptical_SoverSfull)[Ci]
+    !         case (vert_ellipse)
+    !             elemSGR(thisP,esgr_Vert_Ellipse_SoverSfull) = elemSGR(Aidx,esgr_Vert_Ellipse_SoverSfull)[Ci]
+    !         case (force_main)
+    !             !% --- no special geometry data to transfer
+    !         case (parabolic)
+    !             elemSGR(thisP,esgr_Parabolic_Breadth)    = elemSGR(Aidx,esgr_Parabolic_Breadth)[Ci]
+    !             elemSGR(thisP,esgr_Parabolic_Radius)     = elemSGR(Aidx,esgr_Parabolic_Radius)[Ci]
+    !         case (rectangular)
+    !             elemSGR(thisP,esgr_Rectangular_Breadth)    = elemSGR(Aidx,esgr_Rectangular_Breadth)[Ci]
+    !         case (trapezoidal)
+    !             elemSGR(thisP,esgr_Trapezoidal_Breadth)    = elemSGR(Aidx,esgr_Trapezoidal_Breadth)[Ci]
+    !             elemSGR(thisP,esgr_Trapezoidal_LeftSlope)  = elemSGR(Aidx,esgr_Trapezoidal_LeftSlope)[Ci]
+    !             elemSGR(thisP,esgr_Trapezoidal_RightSlope) = elemSGR(Aidx,esgr_Trapezoidal_RightSlope)[Ci]
+    !         case (triangular)
+    !             elemSGR(thisP,esgr_Triangular_TopBreadth)  = elemSGR(Aidx,esgr_Triangular_TopBreadth)[Ci]
+    !             elemSGR(thisP,esgr_Triangular_Slope)       = elemSGR(Aidx,esgr_Triangular_Slope)[Ci] 
+    !         case (irregular)
+    !             elemI(thisP,ei_link_transect_idx)          = elemI(Aidx,ei_link_transect_idx)[Ci]
+    !         case default
+    !             print *, 'CODE ERROR unexpected geometry'
+    !             print *, 'ei_geometryType index # ',elemI(thisP,ei_geometryType)
+    !             print *, 'which represents ',reverseKey(elemI(thisP,ei_geometryType))
+    !             print *, 'is not handled in subroutine ',trim(subroutine_name)
+    !             call util_crashpoint(99376)
+    !     end select
                 
-    end subroutine init_IC_diagnostic_special_geometry
+    ! end subroutine IC_diagnostic_special_geometry
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_for_nJm_from_nodedata ()
+    subroutine IC_JM_from_nodedata ()
         !%------------------------------------------------------------------
         !% Description:
         !% get the initial depth, and geometry data from nJm nodes
         !%------------------------------------------------------------------
         !% Declarations:
-            integer                       :: ii, image, pJunction
+            integer                       :: ii, image, pJunction, JMidx
             integer, pointer              :: thisJunctionNode
             integer, allocatable, target  :: packed_nJm_idx(:)
 
-            character(64) :: subroutine_name = 'init_IC_for_nJm_from_nodedata'
+            character(64) :: subroutine_name = 'IC_for_nJm_from_nodedata'
         !%-------------------------------------------------------------------
         !% Preliminaries
             if (setting%Debug%File%initial_condition) &
@@ -3593,8 +3766,14 @@ contains
 
         !% --- cycle through the links in an image
         do ii = 1,pJunction
+            !% --- set of indexes for the node
             thisJunctionNode => packed_nJm_idx(ii)
-            call init_IC_get_junction_data (thisJunctionNode)
+            !% --- find the first element ID associated with that nJm
+            !%     masked on the global node number for this node.
+            JMidx = minval(elemI(:,ei_Lidx), elemI(:,ei_node_Gidx_BIPquick) == thisJunctionNode)
+
+            call IC_get_JM_junction_data (JMidx,thisJunctionNode)
+
         end do
 
         !%------------------------------------------------------------------
@@ -3602,14 +3781,108 @@ contains
             !% --- deallocate the temporary array
             deallocate(packed_nJm_idx)
 
-            if (setting%Debug%File%initial_condition) &
-            write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-    end subroutine init_IC_for_nJm_from_nodedata
+    end subroutine IC_JM_from_nodedata
 !%
 !%==========================================================================
-!%==========================================================================
+!%==========================================================================    
 !%
-    subroutine init_IC_test_nJ2_data ()
+    subroutine IC_JB_from_nodedata ()
+        !%------------------------------------------------------------------
+        !% Description:
+        !% get the initial depth, and geometry data from nJm nodes
+        !%------------------------------------------------------------------
+        !% Declarations:
+            integer                       :: ii, pJunction, JMidx
+            integer, pointer              :: thisJunctionNode
+            integer, allocatable, target  :: packed_nJm_idx(:)
+
+            character(64) :: subroutine_name = 'IC_JB_from_nodedata'
+        !%-------------------------------------------------------------------
+        !% Preliminaries
+        !%-------------------------------------------------------------------
+
+        !% --- pack all the node indexes in an image
+        packed_nJm_idx = pack( node%I(:,ni_idx),                        &
+                             ((node%I(:,ni_P_image)   == this_image())  &
+                              .and.                                     &
+                              (node%I(:,ni_node_type) == nJm) ) )
+
+        !% --- find the number of nodes in an image
+        pJunction = size(packed_nJm_idx)
+
+        !% --- cycle through the nodes in an image
+        do ii = 1,pJunction
+            !% --- set of indexes for the node
+            thisJunctionNode => packed_nJm_idx(ii)
+            !% --- find the first element ID associated with that nJm
+            !%     masked on the global node number for this node.
+            JMidx = minval(elemI(:,ei_Lidx), elemI(:,ei_node_Gidx_BIPquick) == thisJunctionNode)
+
+            call IC_get_JB_junction_data (JMidx)
+
+        end do
+
+        !%------------------------------------------------------------------
+        !% Closing
+            !% --- deallocate the temporary array
+            deallocate(packed_nJm_idx)
+
+    end subroutine IC_JB_from_nodedata
+!%    
+!%==========================================================================
+!%==========================================================================    
+!%
+    subroutine IC_JM_additional_data () 
+        !%------------------------------------------------------------------
+        !% Description:
+        !% get JM data that requires some prior JB processing
+        !% To be used before packed arrays are defined
+        !%------------------------------------------------------------------
+        !% Declarations:
+            integer                       :: ii, pJunction, JMidx
+            integer, pointer              :: thisJunctionNode
+            integer, allocatable, target  :: packed_nJm_idx(:)
+
+            character(64) :: subroutine_name = 'IC_JB_from_nodedata'
+        !%-------------------------------------------------------------------
+        !% Preliminaries
+        !%-------------------------------------------------------------------
+
+        !% --- pack all the node indexes in an image
+        packed_nJm_idx = pack( node%I(:,ni_idx),                        &
+                             ((node%I(:,ni_P_image)   == this_image())  &
+                             .and.                                      &
+                              (node%I(:,ni_node_type) == nJm) ) )
+
+        !% --- find the number of nodes in an image
+        pJunction = size(packed_nJm_idx)
+
+        !% --- cycle through the nodes sin an image
+        do ii = 1,pJunction
+            !% --- set of indexes for the node
+            thisJunctionNode => packed_nJm_idx(ii)
+            !% --- find the first element ID associated with that nJm
+            !%     masked on the global node number for this node.
+            JMidx = minval(elemI(:,ei_Lidx), elemI(:,ei_node_Gidx_BIPquick) == thisJunctionNode)
+
+            !% --- set a JM length based on branches
+            call IC_JM_length (JMidx)
+
+            call IC_JM_geometry (JMidx)
+
+        end do
+
+    !%------------------------------------------------------------------
+    !% Closing
+        !% --- deallocate the temporary array
+        deallocate(packed_nJm_idx)
+        
+    end subroutine IC_JM_additional_data
+!%    
+!%==========================================================================
+!%==========================================================================    
+!%
+    subroutine IC_test_nJ2_data ()
         !%------------------------------------------------------------------
         !% Description
         !% Debugging routine used to examine node data
@@ -3636,39 +3909,27 @@ contains
 
         stop 509873
 
-    end subroutine init_IC_test_nJ2_data
+    end subroutine IC_test_nJ2_data
 !%
 !%==========================================================================
 !%==========================================================================
 !
-    subroutine init_IC_get_junction_data (thisJunctionNode)        
+    subroutine IC_get_JM_junction_data (JMidx, thisJunctionNode)        
         !%-----------------------------------------------------------------
         !% Description:
         !% get data for the multi branch junction elements
         !%-----------------------------------------------------------------
         !% Declarations
-            integer, intent(in) :: thisJunctionNode
+            integer, intent(in) :: JMidx, thisJunctionNode
 
-            integer              :: ii, JMidx, JBidx, Aidx, Ci
-            integer, pointer     :: BranchIdx, JBgeometryType, JmType, Fidx, curveID 
-            real(8)              :: LupMax, LdnMax
-            logical              :: isupstream
-            real(8), pointer     :: pi
+            integer             :: ii
 
-            character(64) :: subroutine_name = 'init_IC_get_junction_data'
+            character(64) :: subroutine_name = 'IC_get_JM_junction_data'
         !%--------------------------------------------------------------------
         !% Preliminaries
-            if (setting%Debug%File%initial_condition) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-
-            pi => setting%Constant%pi    
         !%................................................................
         !% Junction main
         !%................................................................
-        !% --- find the first element ID associated with that nJm
-        !%     masked on the global node number for this node.
-
-        JMidx = minval(elemI(:,ei_Lidx), elemI(:,ei_node_Gidx_SWMM) == thisJunctionNode)
 
         !% --- the first element index is a junction main
         elemI(JMidx,ei_elementType)  = JM
@@ -3679,7 +3940,7 @@ contains
         if (node%YN(thisJunctionNode,nYN_has_storage)) then
             if (node%I(thisJunctionNode,ni_curve_ID) .eq. 0) then
                 !% --- functional storage
-                elemSI(JMidx,esi_JM_Type)   = FunctionalStorage
+                elemSI(JMidx,esi_JM_Type)             = FunctionalStorage
                 elemSR(JMidx,esr_Storage_Constant)    = node%R(thisJunctionNode,nr_StorageConstant)
                 elemSR(JMidx,esr_Storage_Coefficient) = node%R(thisJunctionNode,nr_StorageCoeff)
                 elemSR(JMidx,esr_Storage_Exponent)    = node%R(thisJunctionNode,nr_StorageExponent)                    
@@ -3710,6 +3971,9 @@ contains
             elemSR(JMidx,esr_Storage_FractionEvap) = zeroR  !% --- no evap from implied storage junction
 
         end if
+
+        !% --- create storage curves
+        call IC_JM_curve (JMidx)
 
         !% --- junction main depth and head from initial conditions
         elemR(JMidx,er_Depth)     = node%R(thisJunctionNode,nr_InitialDepth)
@@ -3743,7 +4007,7 @@ contains
         elemR(JMidx,er_VolumePonded)      = zeroR
         elemR(JMidx,er_VolumePondedTotal) = zeroR
 
-        !% --- all JM "can" surcharge
+        !% --- default is that all JM "can" surcharge
         !%     At their esr_OverflowHeigthAboveCrown (which may be zero)
         !%     the surcharge causes overflow or ponding
         elemYN(JMidx,eYN_canSurcharge) = .true.
@@ -3854,69 +4118,60 @@ contains
         elemSR(JMidx,esr_JM_Air_HeadAbsolute)       = setting%AirTracking%AtmosphericPressureHead
         elemSR(JMidx,esr_JM_Air_HeadAbsolute_N0)    = setting%AirTracking%AtmosphericPressureHead
 
-        !%................................................................
-        !% Junction Branches
-        !%................................................................
-        !% loopthrough all the branches
-        !% HACK -- replace much of this with a call to the standard geometry after all other IC have
-        !% been done. The branch depth should be based on the upstream or downstream depth of the
-        !% adjacent element.
-        do ii = 1,max_branch_per_node
+    end subroutine IC_get_JM_junction_data
+!%
+!%==========================================================================
+!%==========================================================================
+!%
+    subroutine IC_get_JB_junction_data (JMidx)
+        !%------------------------------------------------------------------
+        !% Description
+        !% Gets Initial conditons for JB branches of JM 
+        !%------------------------------------------------------------------        
+        !% Declarations
+            integer, intent(in) :: JMidx
 
-            !% NOTE: uses adjacent element geometry initialization where possible.
+            integer, pointer      :: AdjLinkIdx, thisnode
+            real(8), pointer      :: pi
+            integer, dimension(1) :: thisP
+            real(8), dimension(1) :: dummyA
+            integer               :: ii, JBidx, geoLinkIdx
+            logical               :: checkUpstream
+
+            real(8) :: Area1, Area2, Area3
+
+            character(64) :: subroutine_name = 'IC_get_JB_junction_data'
+        !%------------------------------------------------------------------
+        !% Aliases
+            pi => setting%Constant%pi
+        !%------------------------------------------------------------------
+
+            !print *, 'in ',subroutine_name
+
+        thisnode => elemI(JMidx,ei_node_Gidx_BIPquick)    
+
+        !% loop through all the branches
+        do ii = 1,max_branch_per_node
 
             !% --- find the element id of junction branches
             JBidx = JMidx + ii
-            
-            !% --- main index associated with branch
-            elemSI(JBidx,esi_JB_Main_Index) = JMidx
 
-            !% --- set the adjacent element id (Aidx) where elemI and elemR data can be extracted
-            !%     note that elemSGR etc are not yet assigned
-            if (mod(ii,2) == zeroI) then
-                Fidx => elemI(JBidx,ei_MFace_dL)
-                !% --- even are downstream branches
-                isupstream = .false.
-                elemSI(JBidx,esi_JB_IsUpstream) = zeroI
-                if (elemYN(JBidx,eYN_isBoundary_dn)) then
-                    Ci   = faceI(Fidx,fi_Connected_image)
-                    Aidx = faceI(Fidx,fi_GhostElem_dL)
-                else
-                    Ci   = this_image()
-                    Aidx = faceI(Fidx,fi_Melem_dL)
-                end if
-            else
-                !% --- odd are upstream branches
-                isupstream = .true.
-                elemSI(JBidx,esi_JB_IsUpstream) = oneI
-                Fidx => elemI(JBidx,ei_MFace_uL)
-                if (elemYN(JBidx,eYN_isBoundary_up)) then
-                    Ci   = faceI(Fidx,fi_Connected_image)
-                    Aidx = faceI(Fidx,fi_GhostElem_uL)
-                else
-                    Ci   = this_image()
-                    Aidx = faceI(Fidx,fi_Melem_uL)
-                end if
-            end if
-
-            !% --- set the junction branch element type
-            elemI(JBidx,ei_elementType) = JB
-
-            !% --- set the geometry for existing branches
-            !%     Note that elemSI(,...Exists) is set in init_network_handle_nJm
-            if (.not. elemSI(JBidx,esi_JB_Exists) == oneI) cycle
-
-            BranchIdx      => elemSI(JBidx,esi_JB_Link_Connection)
-            JBgeometryType => link%I(BranchIdx,li_geometry)
+           ! print *, 'ii, JBidx ', ii, JBidx
 
             elemI(JBidx,ei_HeqType) = notused !% time_march not applied to JB
             elemI(JBidx,ei_QeqType) = notused !% time_march not applied to JB
 
+            !% --- cycle if not a valid branch
+            !%     Note that elemSI(,...Exists) is set in network_handle_nJm
+            if (.not. elemSI(JBidx,esi_JB_Exists) == oneI) cycle
+
+            elemSI(JBidx,esi_JB_Main_Index ) = JMidx
+
             !% ---Junction branch k-factor 
             !%    If the user does not input the K-factor for junction branches entrance/exit loses then
             !%    use default from setting
-            if (node%R(thisJunctionNode,nr_JB_Kfactor) .ne. nullvalueR) then
-                elemSR(JBidx,esr_JB_Kfactor) = node%R(thisJunctionNode,nr_JB_Kfactor)
+            if (node%R(thisNode,nr_JB_Kfactor) .ne. nullvalueR) then
+                elemSR(JBidx,esr_JB_Kfactor) = node%R(thisNode,nr_JB_Kfactor)
             else
                 elemSR(JBidx,esr_JB_Kfactor) = setting%Junction%kFactor
             end if
@@ -3925,7 +4180,7 @@ contains
             elemR(JBidx,er_Head)    = elemR(JMidx,er_Head)
             !% --- set the depth consistent with JB bottom
             elemR(JBidx,er_Depth)   = elemR(JBidx,er_Head) - elemR(JBidx,er_Zbottom)
-            !% --- check for dry
+            !% --- check for dry conditions and adjust
             if (elemR(JBidx,er_Head) < elemR(JBidx,er_Zbottom)) then
                 elemR(JBidx,er_Head) = elemR(JBidx,er_Zbottom)
                 elemR(JBidx,er_Depth) = setting%ZeroValue%Depth  * 0.99d0 
@@ -3936,61 +4191,13 @@ contains
 
             elemR(JBidx,er_VolumeArtificialInflowTotal) = zeroR
 
-            !% --- JB elements initialized for momentum
-            elemR(JBidx,er_Flowrate)     = elemR(Aidx,er_Flowrate)[Ci] !% flowrate of adjacent element
-            elemR(JBidx,er_WaveSpeed)    = sqrt(setting%constant%gravity * elemR(JBidx,er_Depth))
-            elemR(JBidx,er_FroudeNumber) = zeroR
-
-            !% --- Set the geometry from the adjacent elements
-            !%     Must evaluate across connected images
-            !%     JB inherits geometry type from connected branch
-            elemI(JBidx,ei_geometryType)        = elemI(Aidx,ei_geometryType)[Ci]
-
-            !% --- check if the connected element is CC
-            if (elemI(Aidx,ei_elementType)[ci] == CC) then 
-                elemSI(JBidx,esi_JB_CC_adjacent) = oneI
+            !% --- setting upstream and downstream identifier
+            if (mod(ii,2) == 0) then 
+                elemSI(JBidx,esi_JB_isUpstream) = zeroI
+                checkUpstream    = .true. !% downstream JB branch we check upstream side of JM
             else
-                elemSI(JBidx,esi_JB_CC_adjacent) = zeroI
-            end if
-
-            !% --- check if the connected element is Diagnostic weir, pump or orifice
-            if ((elemI(Aidx,ei_elementType)[ci] == weir)    .or. &
-                (elemI(Aidx,ei_elementType)[ci] == orifice) .or. &
-                (elemI(Aidx,ei_elementType)[ci] == pump)    .or. &
-                (elemI(Aidx,ei_elementType)[ci] == outlet)       &
-                ) then 
-                elemSI(JBidx,esi_JB_Diag_adjacent) = oneI
-            else
-                elemSI(JBidx,esi_JB_Diag_adjacent) = zeroI
-            end if
-
-            !% --- handle nullvalue geometry (can occur when adjacent element is diagnostic)
-            !%     Looks for the next link upstream. If it is a channel or
-            !%     conduit then its geometry can be assigned to the JB.
-            !%     NOTE: cannot access diagnostic elements in this procedure
-            !%     after this point.
-            if (elemI(Aidx,ei_geometryType)[Ci] == undefinedKey) then 
-                call init_IC_JB_nullvalue_geometry &
-                    (Aidx, Ci, thisJunctionNode, JBidx, isupstream)
-            end if
-
-            !% --- branch has same number of barrels as the connected element
-            elemI(JBidx,ei_barrels)             = elemI(Aidx,ei_barrels)[Ci]
-
-            !% --- Set the face flowrates and barrels such that it does not blowup
-
-            if (elemI(JBidx, ei_Mface_uL) /= nullvalueI) then
-                !print *, elemI(JBidx, ei_Mface_uL), faceI(elemI(JBidx, ei_Mface_uL),fi_barrels)
-                faceR(elemI(JBidx, ei_Mface_uL),fr_flowrate) = elemR(JBidx,er_Flowrate) 
-                faceI(elemI(JBidx, ei_Mface_uL),fi_barrels)  = elemI(JBidx,ei_barrels) 
-            else if (elemI(JBidx, ei_Mface_dL) /= nullvalueI) then
-                !print *, elemI(JBidx, ei_Mface_dL), faceI(elemI(JBidx, ei_Mface_dL),fi_barrels)
-                faceR(elemI(JBidx, ei_Mface_dL),fr_flowrate) = elemR(JBidx,er_Flowrate)
-                faceI(elemI(JBidx, ei_Mface_dL),fi_barrels)  = elemI(JBidx,ei_barrels)  
-            else 
-                print *, 'CODE ERROR, unexpected else'
-                print *, 'JBidx null face both down and up ',JBidx
-                call util_crashpoint(77220198)
+                elemSI(JBidx,esi_JB_isUpstream) = oneI
+                checkUpstream    = .false. !% for upstream JB branch we check downstream side of JM
             end if
 
             !% --- Ability to surcharge is set by JM
@@ -4007,7 +4214,7 @@ contains
             !%     the head is inherited from the JM. Thus, a JB can have open
             !%     channel flow characteristics but a head based on the associated
             !%     closed JM.
-            if (elemSR(JMidx,esr_JM_OverflowHeightAboveCrown) > zeroR) then 
+            if (elemYN(JMidx,eYN_canSurcharge)) then 
                 !% --- where JM is allowed to surcharge
                 elemYN(JBidx,eYN_canSurcharge) = .true.
             else 
@@ -4015,52 +4222,176 @@ contains
                 elemYN(JBidx,eYN_canSurcharge) = .false.
             end if
 
-            select case  (elemI(JBidx,ei_geometryType))
+           ! print *, 'upstream ',elemSI(JBidx,esi_JB_isUpstream)
 
-                case (rectangular, trapezoidal, parabolic, triangular, rect_triang, rect_round, rectangular_closed, &
-                        filled_circular, arch, semi_circular, circular, semi_elliptical, catenary, basket_handle,   &
-                        horseshoe, gothic, eggshaped, horiz_ellipse, vert_ellipse, mod_basket, irregular)
-                    !% --- Copy all the geometry specific data from the adjacent element cell
-                    !%     Note that because irregular transect tables are not yet initialized, the
-                    !%     Area and Volume here will be junk for an irregular cross-section and will need to be
-                    !%     reset after transect tables are initialized. This occurs because we have
-                    !%     to cycle through all the CC, JM/JB before we can set the element transect
-                    !%     tables.
-                    elemR(JBidx,er_Area)                = elemR(Aidx,er_Area)[Ci]
-                    elemR(JBidx,er_AreaVelocity)        = elemR(Aidx,er_Area)[Ci]
-                    elemR(JBidx,er_AreaBelowBreadthMax) = elemR(Aidx,er_AreaBelowBreadthMax)[Ci]
-                    elemR(JBidx,er_BreadthMax)          = elemR(Aidx,er_BreadthMax)[Ci]
-                    elemR(JBidx,er_FullArea)            = elemR(Aidx,er_FullArea)[Ci]
-                    elemR(JBidx,er_FullDepth)           = elemR(Aidx,er_FullDepth)[Ci]
-                    elemR(JBidx,er_FullHydRadius)       = elemR(Aidx,er_FullHydRadius)[Ci]
-                    elemR(JBidx,er_FullPerimeter)       = elemR(Aidx,er_FullPerimeter)[Ci]
-                    elemR(JBidx,er_FullTopwidth)        = elemR(Aidx,er_FullTopwidth)[Ci]
-                    !% --- reference the Zbreadth max to the local bottom
-                    elemR(JBidx,er_ZbreadthMax)         = (elemR(Aidx,er_ZbreadthMax)[Ci] - elemR(Aidx,er_Zbottom)[Ci]) + elemR(JBidx,er_Zbottom)
-                    !% --- reference the Zcrown to the local bottom
-                    elemR(JBidx,er_Zcrown)              = (elemR(Aidx,er_Zcrown)[Ci] - elemR(Aidx,er_Zbottom)[Ci]) + elemR(JBidx,er_Zbottom)         
-                    elemR(JBidx,er_ManningsN)           = elemR(Aidx,er_ManningsN)[Ci]
-                    elemI(JBidx,ei_link_transect_idx)   = elemI(Aidx,ei_link_transect_idx)[Ci]
-                    !% --- copy the entire row of the elemSGR array
-                    elemSGR(JBidx,:)                    = elemSGR(Aidx,:)[Ci]
+            !% --- adjacent link to JB
+            AdjLinkIdx => elemSI(JBidx,esi_JB_Link_Connection)
 
-                case (undefinedKey)
-                    print *, 'in ',trim(subroutine_name)
-                    print *, 'CODE ERROR undefinedKey for ei_geometryType for junction'
-                    print *, 'at JBidx ',JBidx
-                    print * , ' '
-                    call util_crashpoint (23374)
+            !print *, 'adjLinkidx ',AdjLinkIdx
 
-                case default
-                    print *, 'in ',trim(subroutine_name)
-                    print *, 'CODE ERROR unknown geometry type ',elemI(JBidx,ei_geometryType)
-                    print *, 'which has key ',trim(reverseKey(elemI(JBidx,ei_geometryType)))
-                    call util_crashpoint (4473)
+            !% --- JB elements initialized for momentum
+            elemR(JBidx,er_Flowrate)     = link%R(AdjLinkIdx,lr_FlowrateInitial) !% flowrate of adjacent element
+            elemR(JBidx,er_WaveSpeed)    = sqrt(setting%constant%gravity * elemR(JBidx,er_Depth))
+            elemR(JBidx,er_FroudeNumber) = zeroR
 
+            ! if (JBidx .eq. 616) then
+            !     print *, 'JBidx flowrate', elemR(JBidx,er_Flowrate) 
+            ! end if
+
+
+            !% --- note that the equivalent orifice retains its conduit/channel geometry and
+            !%     is still classified as lPipe or lChannel at this point
+
+            select case (link%I(AdjLinkIdx,li_link_type))
+
+                case (lPipe)
+                    !% --- store pipe geometry for JB
+                   ! print *, 'calling conduit geometry'
+                    call IC_get_conduit_geometry (AdjLinkIdx,JBidx)
+                    ! print *, 'out of conduit geometry'
+
+                    !% --- branch has same number of barrels as the connected element
+                    elemI(JBidx,ei_barrels) = link%I(AdjLinkIdx,li_barrels)
+                        !% --- Set the face flowrates and barrels such that it does not blowup  
+                    if (elemI(JBidx, ei_Mface_uL) /= nullvalueI) then
+                        !print *, elemI(JBidx, ei_Mface_uL), faceI(elemI(JBidx, ei_Mface_uL),fi_barrels)
+                        faceR(elemI(JBidx, ei_Mface_uL),fr_flowrate) = elemR(JBidx,er_Flowrate) 
+                        faceI(elemI(JBidx, ei_Mface_uL),fi_barrels)  = elemI(JBidx,ei_barrels) 
+                    else if (elemI(JBidx, ei_Mface_dL) /= nullvalueI) then
+                        !print *, elemI(JBidx, ei_Mface_dL), faceI(elemI(JBidx, ei_Mface_dL),fi_barrels)
+                        faceR(elemI(JBidx, ei_Mface_dL),fr_flowrate) = elemR(JBidx,er_Flowrate)
+                        faceI(elemI(JBidx, ei_Mface_dL),fi_barrels)  = elemI(JBidx,ei_barrels)  
+                    else 
+                        print *, 'CODE ERROR, unexpected else'
+                        print *, 'JBidx null face both down and up ',JBidx
+                        call util_crashpoint(77220198)
+                    end if
+
+                    if (link%YN(AdjLinkIdx,lYN_isEquivalentOrifice)) then 
+                        elemSI(JBidx,esi_JB_CC_adjacent)   = zeroI
+                        elemSI(JBidx,esi_JB_Diag_adjacent) = oneI
+                    else
+                        elemSI(JBidx,esi_JB_CC_adjacent)   = oneI
+                        elemSI(JBidx,esi_JB_Diag_adjacent) = zeroI
+                    end if
+
+                case (lChannel)
+                    !% --- store channel geometry for JB
+                    ! print *, 'calling channel geometry',AdjLinkIdx,JBidx
+                    call IC_get_channel_geometry (AdjLinkIdx,JBidx)
+                    ! print *, 'out of channel egeometry'
+
+                    !% --- branch has same number of barrels as the connected element
+                    elemI(JBidx,ei_barrels) = link%I(AdjLinkIdx,li_barrels)
+                        !% --- Set the face flowrates and barrels such that it does not blowup  
+                    if (elemI(JBidx, ei_Mface_uL) /= nullvalueI) then
+                        !print *, elemI(JBidx, ei_Mface_uL), faceI(elemI(JBidx, ei_Mface_uL),fi_barrels)
+                        faceR(elemI(JBidx, ei_Mface_uL),fr_flowrate) = elemR(JBidx,er_Flowrate) 
+                        faceI(elemI(JBidx, ei_Mface_uL),fi_barrels)  = elemI(JBidx,ei_barrels) 
+                    else if (elemI(JBidx, ei_Mface_dL) /= nullvalueI) then
+                        !print *, elemI(JBidx, ei_Mface_dL), faceI(elemI(JBidx, ei_Mface_dL),fi_barrels)
+                        faceR(elemI(JBidx, ei_Mface_dL),fr_flowrate) = elemR(JBidx,er_Flowrate)
+                        faceI(elemI(JBidx, ei_Mface_dL),fi_barrels)  = elemI(JBidx,ei_barrels)  
+                    else 
+                        print *, 'CODE ERROR, unexpected else'
+                        print *, 'JBidx null face both down and up ',JBidx
+                        call util_crashpoint(77220198)
+                    end if
+
+                    if (link%YN(AdjLinkIdx,lYN_isEquivalentOrifice)) then 
+                        elemSI(JBidx,esi_JB_CC_adjacent)   = zeroI
+                        elemSI(JBidx,esi_JB_Diag_adjacent) = oneI
+                    else
+                        elemSI(JBidx,esi_JB_CC_adjacent)   = oneI
+                        elemSI(JBidx,esi_JB_Diag_adjacent) = zeroI
+                    end if
+
+                case (lOrifice)
+                    !% --- find a CC link on the opposite side of the JM that will
+                    !%     be used to set the geometry of the JB
+                    elemSI(JBidx,esi_JB_CC_adjacent)   = zeroI
+                    elemSI(JBidx,esi_JB_Diag_adjacent) = oneI
+
+                    geoLinkIdx = util_get_adjacent_CC_link (JMidx,AdjLinkIdx,checkUpstream,.true.)
+                    if (geoLinkIdx > 0) then
+                        select case (link%I(geoLinkIdx,li_link_type))
+                            case (lPipe)
+                                call IC_get_conduit_geometry (geoLinkIdx,JBidx)
+                            case (lChannel)
+                                call IC_get_channel_geometry (geoLinkIdx,JBidx)
+                            case default 
+                                print *, 'CODE ERROR: unexpected case default '
+                                call util_crashpoint(5108733)
+                        end select
+                        !% --- multi-barrel not supported for lOrifice
+                        elemI(JBidx,ei_barrels) = oneI
+                        if (elemI(JBidx, ei_Mface_uL) /= nullvalueI) then
+                            faceR(elemI(JBidx, ei_Mface_uL),fr_flowrate) = elemR(JBidx,er_Flowrate) 
+                            faceI(elemI(JBidx, ei_Mface_uL),fi_barrels)  = oneI
+                        else if (elemI(JBidx, ei_Mface_dL) /= nullvalueI) then
+                            faceR(elemI(JBidx, ei_Mface_dL),fr_flowrate) = elemR(JBidx,er_Flowrate)
+                            faceI(elemI(JBidx, ei_Mface_dL),fi_barrels)  = oneI 
+                        else 
+                            print *, 'CODE ERROR, unexpected else'
+                            print *, 'JBidx null face both down and up ',JBidx
+                            call util_crashpoint(7722229)
+                        end if
+                    else 
+                        !% --- default to circular geometry
+                        call IC_diagnostic_default_geometry (AdjLinkIdx,JBidx,circular)
+                        !% --- multi-barrel not supported for lOrifice
+                        elemI(JBidx,ei_barrels) = oneI
+                        if (elemI(JBidx, ei_Mface_uL) /= nullvalueI) then
+                            faceR(elemI(JBidx, ei_Mface_uL),fr_flowrate) = elemR(JBidx,er_Flowrate) 
+                            faceI(elemI(JBidx, ei_Mface_uL),fi_barrels)  = oneI
+                        else if (elemI(JBidx, ei_Mface_dL) /= nullvalueI) then
+                            faceR(elemI(JBidx, ei_Mface_dL),fr_flowrate) = elemR(JBidx,er_Flowrate)
+                            faceI(elemI(JBidx, ei_Mface_dL),fi_barrels)  = oneI 
+                        else 
+                            print *, 'CODE ERROR, unexpected else'
+                            print *, 'JBidx null face both down and up ',JBidx
+                            call util_crashpoint(2972229)
+                        end if
+                    end if
+
+                case (lPump)
+                    !% --- pumps by default are circular geometry, so their connected JB are circular
+                    elemI (JBidx,ei_geometryType)      = circular
+                    elemSI(JBidx,esi_JB_CC_adjacent)   = zeroI
+                    elemSI(JBidx,esi_JB_Diag_adjacent) = oneI
+
+                    if (elemSI(JBidx,esi_JB_isUpstream) .eq. oneI) then 
+                        !% --- an upstream JB is downstream of the pump, so use the pump outlet diameter for geometry
+                        elemSGR(JBidx,esgr_Circular_Diameter) = elemSR(JBidx,esr_Pump_OutletDiameter)
+                    else 
+                        !% --- a downstream JB is upstream of the pump, so ue the pump inlet diameter for geometry
+                        elemSGR(JBidx,esgr_Circular_Diameter) = elemSR(JBidx,esr_Pump_InletDiameter)
+                    end if
+
+                    elemR  (JBidx,er_FullDepth)           =            elemSGR(JBidx,esgr_Circular_Diameter)
+                    elemSGR(JBidx,esgr_Circular_Radius)   = onehalfR * elemSGR(JBidx,esgr_Circular_Diameter)
+                    elemR  (JBidx,er_BreadthMax)          =            elemSGR(JBidx,esgr_Circular_Diameter)
+                    elemR  (JBidx,er_DepthAtBreadthMax)   = onehalfR * elemSGR(JBidx,esgr_Circular_Diameter)
+
+                    thisP(1) = JBidx
+                    call geo_common_initialize (thisP, circular, ACirc, TCirc, RCirc, dummyA) 
+            
+                case (lWeir)
+                    print *, 'JB adjacent to lWeir not tested for geometry selection'
+                    stop 5098741
+                case (lOutlet)
+                    print *, 'CONFIGURATION ERROR: outlet not allowed from a JM junction'
+                    print *, 'Failure for junction ',JMidx
+                    print *, 'which is node ',elemI(JMidx,ei_node_Gidx_BIPquick)
+                    print *,  trim(node%Names(elemI(JMidx,ei_node_Gidx_BIPquick))%str )
+                    call util_crashpoint(629873)
+                case default 
+                    print *, 'CODE ERROR: unexpected case default '
+                    call util_crashpoint(1003874)
             end select
 
-            !% --- set the velocity
-            if (elemR(JBidx,er_AreaVelocity) .gt. setting%ZeroValue%Area) then ! BRHbugfix 20210813
+            !% --- set the initial velocity
+            if (elemR(JBidx,er_AreaVelocity) .gt. setting%ZeroValue%Area) then 
                 elemR(JBidx,er_Velocity) = elemR(JBidx,er_Flowrate) / elemR(JBidx,er_AreaVelocity)
             else
                 elemR(JBidx,er_Velocity) = zeroR
@@ -4075,45 +4406,192 @@ contains
             elemR(JBidx,er_Volume_N0)    = elemR(JBidx,er_Volume)
             elemR(JBidx,er_Volume_N1)    = elemR(JBidx,er_Volume)
 
-            if (isupstream) then
-                faceR(Fidx,fr_Zcrown_d) = faceR(Fidx,fr_Zbottom)+ elemR(JBidx,er_FullDepth)
-            else
-                faceR(Fidx,fr_Zcrown_u) = faceR(Fidx,fr_Zbottom)+ elemR(JBidx,er_FullDepth)
-            end if
-
+            !% --- note that face(:,fr_Zcrown..) are handled in IC_get_conduit_geometry and
+            !%     IC_get_channel_geometry calls
         end do
 
-        !% --- set a JM length based on longest branches (20220711brh)
+
+
+
+            ! !% --- handle different types of adjacent links  HAS BEEN CONVERTED IN ABOVE
+            ! select case (elemI(Aidx,ei_elementType)[Ci])
+
+            ! case (CC)
+            !     !% --- for CC we simply use the adjacent geometry, already defined
+            !     elemSI(JBidx,esi_JB_CC_adjacent)   = oneI
+            !     elemSI(JBidx,esi_JB_Diag_adjacent) = zeroI
+            !     elemI(JBidx,ei_geometryType)       = elemI(Aidx,ei_geometryType)[Ci]
+            !     !% --- set of real data to copy
+            !     dset = (/ er_AreaBelowBreadthMax, er_AoverAfull, er_BottomSlope, er_BreadthMax, &
+            !               er_DepthAtBreadthMax, er_FullArea, er_FullDepth, er_FullHydRadius, &
+            !               er_FullPerimeter, er_FullTopwidth  /)
+            !     elemR(JBidx,dset) = elemR(Aidx,dset)[Ci]    
+            !     !% --- branch has same number of barrels as the connected element
+            !     elemI(JBidx,ei_barrels)             = elemI(Aidx,ei_barrels)[Ci]   
+            !     !% --- Set the face flowrates and barrels such that it does not blowup  
+            !     if (elemI(JBidx, ei_Mface_uL) /= nullvalueI) then
+            !         !print *, elemI(JBidx, ei_Mface_uL), faceI(elemI(JBidx, ei_Mface_uL),fi_barrels)
+            !         faceR(elemI(JBidx, ei_Mface_uL),fr_flowrate) = elemR(JBidx,er_Flowrate) 
+            !         faceI(elemI(JBidx, ei_Mface_uL),fi_barrels)  = elemI(JBidx,ei_barrels) 
+            !     else if (elemI(JBidx, ei_Mface_dL) /= nullvalueI) then
+            !         !print *, elemI(JBidx, ei_Mface_dL), faceI(elemI(JBidx, ei_Mface_dL),fi_barrels)
+            !         faceR(elemI(JBidx, ei_Mface_dL),fr_flowrate) = elemR(JBidx,er_Flowrate)
+            !         faceI(elemI(JBidx, ei_Mface_dL),fi_barrels)  = elemI(JBidx,ei_barrels)  
+            !     else 
+            !         print *, 'CODE ERROR, unexpected else'
+            !         print *, 'JBidx null face both down and up ',JBidx
+            !         call util_crashpoint(77220198)
+            !     end if
+
+            ! case (orifice,outlet,pump,weir)
+            !     !% --- for special elements we use the background information defined in the link
+            !     !%     storage
+            !     elemSI(JBidx,esi_JB_CC_adjacent)   = zeroI
+            !     elemSI(JBidx,esi_JB_Diag_adjacent) = oneI
+                
+            !     select case (link%I(AdjLinkIdx,li_geometry_background))
+            !         case (lCircular)
+            !             !elemI(JBidx,ei_geometryType) = Circular
+            !             !elemR(JBidx,er_FullArea) = link
+            !             stop 6098734
+            !         case (lRectangular)
+            !             !elemI(JBidx,ei_geometryType) = Rectangular
+            !             stop 29873
+            !         case default 
+            !             print *, 'CODE ERROR: unexpected case default'
+            !             call util_crashpoint(709827)
+            !     end select
+
+            ! case default 
+            !     print *, 'CODE ERROR: unexpected case default'
+            ! end select
+
+
+            ! !% --- handle nullvalue geometry (can occur when adjacent element is diagnostic) DUMMY IN ABOVE 20240629
+            ! !%     Looks for the next link upstream. If it is a channel or
+            ! !%     conduit then its geometry can be assigned to the JB.
+            ! !%     NOTE: cannot access diagnostic elements in this procedure
+            ! !%     after this point.
+            ! if (elemI(Aidx,ei_geometryType)[Ci] == undefinedKey) then 
+            !     call IC_JB_nullvalue_geometry &
+            !         (Aidx, Ci, thisJunctionNode, JBidx, isupstream)
+            ! end if
+
+
+
+        !     select case  (elemI(JBidx,ei_geometryType))
+
+        !         case (rectangular, trapezoidal, parabolic, triangular, rect_triang, rect_round, rectangular_closed, &
+        !                 filled_circular, arch, semi_circular, circular, semi_elliptical, catenary, basket_handle,   &
+        !                 horseshoe, gothic, eggshaped, horiz_ellipse, vert_ellipse, mod_basket, irregular)
+        !             !% --- Copy all the geometry specific data from the adjacent element cell
+        !             !%     Note that because irregular transect tables are not yet initialized, the
+        !             !%     Area and Volume here will be junk for an irregular cross-section and will need to be
+        !             !%     reset after transect tables are initialized. This occurs because we have
+        !             !%     to cycle through all the CC, JM/JB before we can set the element transect
+        !             !%     tables.
+        !             elemR(JBidx,er_Area)                = elemR(Aidx,er_Area)[Ci]
+        !             elemR(JBidx,er_AreaVelocity)        = elemR(Aidx,er_Area)[Ci]
+        !             elemR(JBidx,er_AreaBelowBreadthMax) = elemR(Aidx,er_AreaBelowBreadthMax)[Ci]
+        !             elemR(JBidx,er_BreadthMax)          = elemR(Aidx,er_BreadthMax)[Ci]
+        !             elemR(JBidx,er_FullArea)            = elemR(Aidx,er_FullArea)[Ci]
+        !             elemR(JBidx,er_FullDepth)           = elemR(Aidx,er_FullDepth)[Ci]
+        !             elemR(JBidx,er_FullHydRadius)       = elemR(Aidx,er_FullHydRadius)[Ci]
+        !             elemR(JBidx,er_FullPerimeter)       = elemR(Aidx,er_FullPerimeter)[Ci]
+        !             elemR(JBidx,er_FullTopwidth)        = elemR(Aidx,er_FullTopwidth)[Ci]
+        !             !% --- reference the Zbreadth max to the local bottom
+        !             elemR(JBidx,er_ZbreadthMax)         = (elemR(Aidx,er_ZbreadthMax)[Ci] - elemR(Aidx,er_Zbottom)[Ci]) + elemR(JBidx,er_Zbottom)
+        !             !% --- reference the Zcrown to the local bottom
+        !             elemR(JBidx,er_Zcrown)              = (elemR(Aidx,er_Zcrown)[Ci] - elemR(Aidx,er_Zbottom)[Ci]) + elemR(JBidx,er_Zbottom)         
+        !             elemR(JBidx,er_ManningsN)           = elemR(Aidx,er_ManningsN)[Ci]
+        !             elemI(JBidx,ei_link_transect_idx)   = elemI(Aidx,ei_link_transect_idx)[Ci]
+        !             !% --- copy the entire row of the elemSGR array
+        !             elemSGR(JBidx,:)                    = elemSGR(Aidx,:)[Ci]
+
+        !         case (undefinedKey)
+        !             print *, 'in ',trim(subroutine_name)
+        !             print *, 'CODE ERROR undefinedKey for ei_geometryType for junction'
+        !             print *, 'at JBidx ',JBidx
+        !             print * , ' '
+        !             call util_crashpoint (23374)
+
+        !         case default
+        !             print *, 'in ',trim(subroutine_name)
+        !             print *, 'CODE ERROR unknown geometry type ',elemI(JBidx,ei_geometryType)
+        !             print *, 'which has key ',trim(reverseKey(elemI(JBidx,ei_geometryType)))
+        !             call util_crashpoint (4473)
+
+        !     end select
+
+
+
+        !     if (isupstream) then
+        !         faceR(Fidx,fr_Zcrown_d) = faceR(Fidx,fr_Zbottom)+ elemR(JBidx,er_FullDepth)
+        !     else
+        !         faceR(Fidx,fr_Zcrown_u) = faceR(Fidx,fr_Zbottom)+ elemR(JBidx,er_FullDepth)
+        !     end if
+
+        ! end do
+
+
+
+        ! !%------------------------------------------------------------------
+        ! !% Closing
+        !     if (setting%Debug%File%initial_condition) &
+        !     write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
+
+    end subroutine IC_get_JB_junction_data   
+!%
+!%==========================================================================
+!%==========================================================================
+!%
+    subroutine IC_JM_length (JMidx)
+        !%------------------------------------------------------------------
+        !% Description
+        !% Initial conditions for JM elements that depend on JB initialization
+        !%------------------------------------------------------------------
+        !% Declarations
+            integer, intent(in) :: JMidx
+            integer             :: JBidx, ii
+            real(8)             :: LupMax, LdnMax
+        !%------------------------------------------------------------------
+        !%------------------------------------------------------------------
+
+        !% --- set a JM length based on longest branches
+        !%     first get the longest upstream branch
         LupMax = elemR(JMidx+1,er_Length) * real(elemSI(JMidx+1,esi_JB_Exists),8)                              
         do ii=2,max_up_branch_per_node
-            JBidx = JMidx + 2*ii - 1
+            JBidx = JMidx + 2*ii - oneI !% index of next upstream branch
             LupMax = max(elemR(JBidx,er_Length) * real(elemSI(JBidx,esi_JB_Exists),8), LupMax)
-        end do    
+        end do  
+        !% --- next get the longest downstream branch
         LdnMax = elemR(JMidx+2,er_Length) * real(elemSI(JMidx+2,esi_JB_Exists),8)  
         do ii=2,max_dn_branch_per_node
             JBidx = JMidx + 2*ii
             LdnMax = max(elemR(JBidx,er_Length) * real(elemSI(JBidx,esi_JB_Exists),8), LdnMax)    
         end do
         elemR(JMidx,er_Length) = LupMax + LdnMax   
-        
-        !% --- get junction main geometry based on type
-        JmType => elemSI(JMidx,esi_JM_Type)
 
-        !% --- preliminary curve processing
-        if (JmType .eq. FunctionalStorage) then 
-            !% --- create a storage curve from the function
-            call storage_create_curve_from_function (JMidx)
-        elseif (JmType .eq. TabularStorage) then
-            CurveID => elemSI(JMidx,esi_JM_Curve_ID)
-            !% --- set the element index for the curve
-            Curve(CurveID)%ElemIdx = JMidx
-            !% SWMM5+ needs a volume vs depth relationship thus Trapezoidal rule is used
-            !% to get to integrate the area vs depth curve
-            call storage_create_integrated_volume_curve (CurveID)
-        end if
+    end subroutine IC_JM_length 
+!%
+!%==========================================================================
+!%==========================================================================
+!%
+    subroutine IC_JM_geometry (JMidx) 
+        !%------------------------------------------------------------------
+        !% Description
+        !% Initial conditions for JM junction main geometry
+        !%------------------------------------------------------------------
+        !% Declarations
+            integer, intent(in) :: JMidx
+            integer, pointer    :: CurveID
+        !%------------------------------------------------------------------
 
-        !% --- get junction geometry
-        select case (JmType)
+        !% --- initialize space in temporary array used in curve processing
+        elemR(JMidx,er_Temp01)  = zeroR
+
+        select case (elemSI(JMidx,esi_JM_Type))
+
             case (NoStorage)
                 print *, 'CODE ERROR junction type NoStorage not supported'
                 call util_crashpoint(62098734)
@@ -4123,11 +4601,11 @@ contains
                 !%     uses the default minimum plan area. However, this can cause
                 !%     solver issues when large branches are connected to a small 
                 !%     area. To ameliorate this we use the branch topwidth to
-                !%     set the plan area. This is done in init_IC_junction_plan_area ()
+                !%     set the plan area. This is done in IC_junction_plan_area ()
                 !%     which must be called after irregular cross-sections are 
                 !%     initialized 
 
-            case (FunctionalStorage,TabularStorage)
+            case (FunctionalStorage, TabularStorage)
                 !% --- the CurveID for this element
                 CurveID => elemSI(JMidx,esi_JM_Curve_ID)
                 !% --- set the element index for the curve
@@ -4141,7 +4619,9 @@ contains
                 elemR(JMidx,er_BreadthMax)   = sqrt(maxval(curve(CurveID)%ValueArray(:,curve_storage_area)))
                 elemR(JMidx,er_FullTopwidth) = sqrt(maxval(curve(CurveID)%ValueArray(:,curve_storage_area)))
 
-                elemR(JMidx,er_Length) = sqrt(elemR(JMidx,er_FullArea))
+                !% --- for the length, use the larger of the sqrt(full area) or the length based
+                !%     on JB set in IC_JM_Length
+                elemR(JMidx,er_Length) = max(sqrt(elemR(JMidx,er_FullArea)),elemR(JMidx,er_Length))
 
                 !% -- initial conditions volume -- 
                 elemR(JMidx,er_Volume)     = storage_volume_from_depth_singular (JMidx,elemR(JMidx,er_Depth))  
@@ -4156,22 +4636,140 @@ contains
                 elemR (JMidx,er_Topwidth)           = sqrt(elemSR(JMidx,esr_Storage_Plan_Area))    
                 elemR (JMidx,er_Area)               = elemR(JMidx,er_Depth) * sqrt(elemSR(JMidx,esr_Storage_Plan_Area))
                 elemR (JMidx,er_AreaVelocity)       = elemR(JMidx,er_Area)
-             
-            case default 
+
+            case default
                 print *, 'CODE ERROR Unexpected case default'
-                call util_crashpoint(6098734)
+                call util_crashpoint(6098734) 
+
         end select
 
         !%------------------------------------------------------------------
         !% Closing
-            if (setting%Debug%File%initial_condition) &
-            write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-    end subroutine init_IC_get_junction_data   
+            !% --- reset temporary array space used
+            elemR(JMidx,er_Temp01)  = zeroR
+
+    end subroutine IC_JM_geometry
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_JB_nullvalue_geometry  &
+    subroutine IC_JM_curve (JMidx)
+        !%------------------------------------------------------------------
+        !% Description
+        !% Preliminary curve processing for storage JM
+        !%------------------------------------------------------------------
+        !% Declarations
+            integer, intent(in) :: JMidx
+            integer, pointer    :: CurveID
+        !%------------------------------------------------------------------
+        !%------------------------------------------------------------------
+
+        !% --- preliminary curve processing
+        select case (elemSI(JMidx,esi_JM_Type))
+
+            case (FunctionalStorage) 
+                !% --- create a storage curve from the function
+                call storage_create_curve_from_function (JMidx)
+
+            case (TabularStorage)
+                CurveID => elemSI(JMidx,esi_JM_Curve_ID)
+                !% --- set the element index for the curve
+                Curve(CurveID)%ElemIdx = JMidx
+                !% SWMM5+ needs a volume vs depth relationship thus Trapezoidal rule is used
+                !% to get to integrate the area vs depth curve
+                call storage_create_integrated_volume_curve (CurveID)
+
+            case (NoStorage, ImpliedStorage)
+                !% --- no action required    
+
+            case default 
+                print *, 'CODE ERROR: unexpected case default'
+                print *, elemSI(JMidx,esi_JM_Type)
+                print *, reverseKey(elemSI(JMidx,esi_JM_Type))
+                call util_crashpoint(7220987)
+
+        end select
+
+    end subroutine IC_JM_curve
+!%
+!%==========================================================================
+!%==========================================================================
+!%
+    subroutine IC_equivalent_orifices ()
+        !%------------------------------------------------------------------
+        !% Description
+        !% Replaces short pipe with an equivalent orifice
+        !%------------------------------------------------------------------
+        !% Declarations 
+            integer, dimension(:), allocatable, target :: packIdx 
+            integer, pointer     :: thisLink, thisElem
+            integer              :: ii
+
+        !%------------------------------------------------------------------
+
+        packIdx = pack( link%I(:,li_idx), link%YN(:,lYN_isEquivalentOrifice))
+
+        ! do ii=1,N_link
+        !     if (link%YN(ii,lYN_isEquivalentOrifice)) then 
+        !         print *, 'equiv orifice link ',ii
+        !     end if
+        ! end do
+
+        do ii=1,size(packIdx)
+            thisLink => packIdx(ii)
+            thisElem => link%I(thisLink,li_first_elem_idx)
+
+            write(*,*)
+            write(*,*) 'WARNING: Converting link to equivalent orifice'
+            write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(thisLink)%str)
+            write(*,*) 'Link has length of ', link%R(thisLink,lr_Length) 
+            write(*,*) 'which is smaller than minimum link length of ', setting%Discretization%MinLinkLength
+            write(*,*) ' '
+
+            N_Diag = N_Diag + 1
+            
+            elemI(thisElem,ei_elementType) = orifice 
+            elemI(thisElem,ei_QeqType)     = diagnostic 
+            elemI(thisElem,ei_HeqType)     = notused 
+                
+            !% --- set the sub orifice type as equivalent orifice
+            if (link%I(thisLink,li_link_type) == lChannel) then 
+                link%I(thisLink,li_link_sub_type) = lEquivalentOrificeChannel
+                elemYN(thisElem,eYN_canSurcharge) = .false.
+            elseif  (link%I(thisLink,li_link_type) == lPipe) then 
+                link%I(thisLink,li_link_sub_type) = lEquivalentOrificePipe
+                elemYN(thisElem,eYN_canSurcharge) = .true.
+            else
+                print *, 'CODE ERROR: unexpected else '
+                call util_crashpoint(4309873)
+            end if
+
+            !% --- reset the link type type as Orifice
+            link%I(thisLink,li_link_type) = lOrifice
+
+            !% --- set zero for the element orifice discharge coefficient
+            !%    these are defaults for circular equivalent orifice
+            link%R(thisLink,lr_DischargeCoeff1) = zeroR 
+            !% --- set zero for the orifice Orate
+            link%R(thisLink,lr_DischargeCoeff2) = zeroR
+    
+            !% --- set the equivalent orifice values
+            !%     this is the 2nd call to geometry for this link
+            !%     the first call in IC_get_geometry_from_linkdata
+            !%     set the original channel/pipe geometry. 
+            !%     This provides the additional orifice geometry
+            call IC_get_orifice_geometry (thisLink)
+
+        end do
+
+        deallocate(packIdx)
+
+    end subroutine IC_equivalent_orifices
+!%
+!%==========================================================================
+!%==========================================================================
+!%
+    subroutine IC_JB_nullvalue_geometry  &
          (Aidx, Ci, thisJunctionNode, JBidx, isupstream)
         !%------------------------------------------------------------------
         !% Description: 
@@ -4188,156 +4786,190 @@ contains
             logical, intent(in)    :: isupstream !% if JB is an upstream branch
             integer                :: adjLink, nextNode, farLink
 
-            character(64)  :: subroutine_name = 'init_IC_JB_nullvalue_geometry'
+            character(64)  :: subroutine_name = 'IC_JB_nullvalue_geometry'
         !%------------------------------------------------------------------
         !% --- define the adjacent link
         adjLink = elemI(Aidx,ei_link_Gidx_BIPquick)[Ci]
+
+        print *, 'OBSOLETE 20240629'
+
+        call util_crashpoint(5098723)
+
+        ! print *, ' '
+        ! print *, 'in IC_JB_nullvalue_geometry'
+        ! print *, 'thisJunctionNode ',thisJunctionNode
+        ! print *, 'name             ',trim(node%Names(thisJunctionNode)%str)
+        ! print *, 'JBdix            ',JBidx
+        ! print *, 'is upstream      ',isupstream
     
-        !% --- DOWNSTREAM INFERENCE -----------------------------------
-        if (.not. isupstream) then 
-            !% --- get the next downstream node
-            nextnode = link%I(adjLink,li_Mnode_d)
+        ! !% --- DOWNSTREAM INFERENCE -----------------------------------
+        ! if (.not. isupstream) then 
+        !     !% --- get the next downstream node
+        !     nextnode = link%I(adjLink,li_Mnode_d)
 
-            !% --- check if only one link connected downstream
-            if (node%I(nextnode,ni_N_link_d) == 1) then 
-                farLink = node%I(nextnode,ni_Mlink_d1)
+        !     !% --- check if only one link connected downstream
+        !     if (node%I(nextnode,ni_N_link_d) == 1) then 
+        !         farLink = node%I(nextnode,ni_Mlink_d1)
 
-                !% --- check if link type can be used to infer geometry    
-                if ((link%I(farLink,li_link_type) .eq. lPipe) .or. &
-                    (link%I(farLink,li_link_type) .eq. lChannel)) then 
-                    !% --- set the connected image and adjacent element to
-                    !%     the far link to use for JB geometry
-                    Ci   = link%I(farLink,li_P_image)
-                    Aidx = link%I(farLink,li_last_elem_idx)
-                    elemI(JBidx,ei_geometryType) = elemI(Aidx,ei_geometryType)[Ci]   
-                else
-                    !% --- far link cannot be used because wrong type
-                    !%     set to null
-                    Ci   = nullvalueI
-                    Aidx = nullvalueI
-                end if
-            else 
-                !% --- far link cannot be used because more than 1 connection
-                !%     set to null
-                Ci   = nullvalueI
-                Aidx = nullvalueI
-            end if 
+        !         !% --- check if link type can be used to infer geometry    
+        !         if ((link%I(farLink,li_link_type) .eq. lPipe) .or. &
+        !             (link%I(farLink,li_link_type) .eq. lChannel)) then 
+        !             !% --- set the connected image and adjacent element to
+        !             !%     the far link to use for JB geometry
+        !             Ci   = link%I(farLink,li_P_image)
+        !             Aidx = link%I(farLink,li_last_elem_idx)
+        !             elemI(JBidx,ei_geometryType) = elemI(Aidx,ei_geometryType)[Ci]   
+        !         else
+        !             !% --- far link cannot be used because wrong type
+        !             !%     set to null
+        !             Ci   = nullvalueI
+        !             Aidx = nullvalueI
+        !         end if
+        !     else 
+        !         !% --- far link cannot be used because more than 1 connection
+        !         !%     set to null
+        !         Ci   = nullvalueI
+        !         Aidx = nullvalueI
+        !     end if 
 
-            !% --- in case a pipe/channel not found downstream of adjacent link
-            if ((Ci == nullvalueI) .or. (Aidx == nullvalueI)) then
-                !% -- check for a single link upstream that could be used
-                !%    to assign geometry. Only applicable if there is
-                !%    only 1 upstream link, otherwise we cannot infer a
-                !%    geometry.
-                if (node%I(thisJunctionNode,ni_N_link_u) == 1) then
-                    !% --- get the upstream link
-                    farLink = node%I(thisJunctionNode,ni_Mlink_u1)
+        !     !% --- in case a pipe/channel not found downstream of adjacent link
+        !     if ((Ci == nullvalueI) .or. (Aidx == nullvalueI)) then
+        !         !% -- check for a single link upstream that could be used
+        !         !%    to assign geometry. Only applicable if there is
+        !         !%    only 1 upstream link, otherwise we cannot infer a
+        !         !%    geometry.
+        !         if (node%I(thisJunctionNode,ni_N_link_u) == 1) then
+        !             !% --- get the upstream link
+        !             farLink = node%I(thisJunctionNode,ni_Mlink_u1)
 
-                    !% --- check if link type can be used to infer geometry  
-                    if ((link%I(farLink,li_link_type) .eq. lPipe) .or. &
-                        (link%I(farLink,li_link_type) .eq. lChannel)) then 
-                        !% --- set the connected image and adjacent element to
-                        !%     the far link to use for JB geometry
-                        Ci   = link%I(farLink,li_P_image)
-                        Aidx = link%I(farLink,li_last_elem_idx)
-                        elemI(JBidx,ei_geometryType) = elemI(Aidx,ei_geometryType)[Ci]  
-                    else 
-                        !% no change, Ci=nullvalueI
-                    end if
-                else 
-                    !% no change, Ci=nullvalueI
-                end if
-            else 
-                !% no change, Ci and Aidx have been found    
-            end if
+        !             !% --- check if link type can be used to infer geometry  
+        !             if ((link%I(farLink,li_link_type) .eq. lPipe) .or. &
+        !                 (link%I(farLink,li_link_type) .eq. lChannel)) then 
+        !                 !% --- set the connected image and adjacent element to
+        !                 !%     the far link to use for JB geometry
+        !                 Ci   = link%I(farLink,li_P_image)
+        !                 Aidx = link%I(farLink,li_last_elem_idx)
+        !                 elemI(JBidx,ei_geometryType) = elemI(Aidx,ei_geometryType)[Ci]  
+        !             else 
+        !                 !% no change, Ci=nullvalueI
+        !             end if
+        !         else 
+        !             !% no change, Ci=nullvalueI
+        !         end if
+        !     else 
+        !         !% no change, Ci and Aidx have been found    
+        !     end if
 
-        !% --- UPSTREAM INFERENCE ---------------------------------------
-        else
-            !% --- get the next upstream node
-            nextnode = link%I(adjLink,li_Mnode_u)
+        ! !% --- UPSTREAM INFERENCE ---------------------------------------
+        ! else
+        !     !% --- get the next upstream node
+        !     nextnode = link%I(adjLink,li_Mnode_u)
 
-            !% --- check if only one link connected upstream
-            if (node%I(nextnode,ni_N_link_u) == 1) then 
-                farLink = node%I(nextnode,ni_Mlink_u1)
+        !     print *, 'next node up ',nextnode
+        !     print *, 'N_link_u     ',node%I(nextnode,ni_N_link_u)
 
-                !% --- check if link type can be used to infer geometry  
-                if ((link%I(farLink,li_link_type) .eq. lPipe) .or. &
-                    (link%I(farLink,li_link_type) .eq. lChannel)) then 
-                    !% --- set the connected image and adjacent element to
-                    !%     the far link to use for JB geometry
-                    Ci   = link%I(farLink,li_P_image)
-                    Aidx = link%I(farLink,li_last_elem_idx)
-                    elemI(JBidx,ei_geometryType) = elemI(Aidx,ei_geometryType)[Ci]   
-                else
-                    !% --- far link cannot be used because wrong type
-                    !%     set to null
-                    Ci   = nullvalueI
-                    Aidx = nullvalueI
-                end if
-            else 
-                !% --- far link cannot be used becuase there are multiple links
-                !%     set to null
-                Ci   = nullvalueI
-                Aidx = nullvalueI
-            end if
+        !     !% --- check if only one link connected upstream
+        !     if (node%I(nextnode,ni_N_link_u) == 1) then 
+        !         farLink = node%I(nextnode,ni_Mlink_u1)
 
-            !% --- in case a pipe/channel not found upstream of adjacent link
-            if ((Ci == nullvalueI) .or. (Aidx == nullvalueI)) then
-                !% -- check for a single link downstream that could be used
-                !%    to assign geometry. Only applicable if there is
-                !%    only 1 downstream link, otherwise we cannot infer a
-                !%    geometry.
-                if (node%I(thisJunctionNode,ni_N_link_d) == 1) then
-                    farLink = node%I(thisJunctionNode,ni_Mlink_d1)
+        !         print *, 'farlink ',farLink,' ', trim(reverseKey(link%I(farLink,li_link_type)))
 
-                    !% --- check if link type can be used to infer geometry  
-                    if ((link%I(farLink,li_link_type) .eq. lPipe) .or. &
-                        (link%I(farLink,li_link_type) .eq. lChannel)) then 
-                        !% --- set the connected image and adjacent element to
-                        !%     the far link to use for JB geometry
-                        Ci   = link%I(farLink,li_P_image)
-                        Aidx = link%I(farLink,li_last_elem_idx)
-                        elemI(JBidx,ei_geometryType) = elemI(Aidx,ei_geometryType)[Ci]  
-                    else 
-                        !% no change, Ci=nullvalueI  
-                    end if
-                else 
-                    !% no change, Ci=nullvalueI  
-                end if
-            else 
-                !% no change, Ci and Aidx have been found
-            end if
-        end if
+        !         print *, 'subtype ', trim(reverseKey(link%I(farLink,li_link_sub_type)))
 
+        !         !% --- check if link type can be used to infer geometry  
+        !         select case (link%I(farLink,li_link_type))
+        !             case (lPipe, lChannel)
+        !                 !% --- set the connected image and adjacent element to
+        !                 !%     the far link to use for JB geometry
+        !                 Ci   = link%I(farLink,li_P_image)
+        !                 Aidx = link%I(farLink,li_last_elem_idx)
+        !                 elemI(JBidx,ei_geometryType) = elemI(Aidx,ei_geometryType)[Ci]   
+        !             case (lOrifice)
+        !                 !% --- check for equivalent orifice
+        !                 select case (link%I(farLink,li_link_sub_type))
+        !                     case (lEquivalentOrificeChannel, lEquivalentOrificePipe)
+        !                         Ci   = link%I(farLink,li_P_image)
+        !                         Aidx = link%I(farLink,li_last_elem_idx)
+        !                         elemI(JBidx,ei_geometryType) = elemI(Aidx,ei_geometryType)[Ci]   
+        !                     case default
+        !                         !% --- far link cannot be used because wrong type
+        !                         !%     set to null
+        !                         Ci   = nullvalueI
+        !                         Aidx = nullvalueI
+        !                 end select
+        !             case default 
+        !                 !% --- far link cannot be used because wrong type
+        !                 !%     set to null
+        !                 Ci   = nullvalueI
+        !                 Aidx = nullvalueI  
+        !         end select
+        !     else 
+        !         !% --- far link cannot be used becuase there are multiple links
+        !         !%     set to null
+        !         Ci   = nullvalueI
+        !         Aidx = nullvalueI
+        !     end if
 
-        !% --- check for error remaining:
-        if ((Ci == nullvalueI) .or. (Aidx == nullvalueI)) then
-            print *, 'USER CONFIGURATION ERROR for junction'
-            print *, 'located at node index ',thisJunctionNode,' named: ',trim(node%Names(thisJunctionNode)%str)
-            if (isupstream) then 
-                print *, 'with the upstream link index   ',adjLink,' named: ',trim(link%Names(adjLink)%str)
-            else 
-                print *, 'with the downstream link index ',adjLink,' named: ',trim(link%Names(adjLink)%str)
-            end if
-            print *, 'PROBLEM: Cannot define geometry of the junction branch.'
-            if ((node%I(thisJunctionNode,ni_N_link_d) + node%I(thisJunctionNode,ni_N_link_u)) == 2) then
-                print *, 'SWMM5+ requires either a channel/conduit link connected upstream/downstream '
-                print *, 'of this link or a channel/conduit link on the opposite side of the node'
-                print *, '(e.g., the downstream side if this is an upstream link on the node).'
+        !     !% --- in case a pipe/channel not found upstream of adjacent link
+        !     if ((Ci == nullvalueI) .or. (Aidx == nullvalueI)) then
+        !         !% -- check for a single link downstream that could be used
+        !         !%    to assign geometry. Only applicable if there is
+        !         !%    only 1 downstream link, otherwise we cannot infer a
+        !         !%    geometry.
+        !         if (node%I(thisJunctionNode,ni_N_link_d) == 1) then
+        !             farLink = node%I(thisJunctionNode,ni_Mlink_d1)
 
-            else
-                print *, 'SWMM5+ requires a channel/conduit link connected upstream/downstream to this link.'
-            end if
-            print *, 'This configuration is required to set implied geometry of junction branches'
-            call util_crashpoint(6798723)
-        end if
+        !             !% --- check if link type can be used to infer geometry  
+        !             if ((link%I(farLink,li_link_type) .eq. lPipe) .or. &
+        !                 (link%I(farLink,li_link_type) .eq. lChannel)) then 
+        !                 !% --- set the connected image and adjacent element to
+        !                 !%     the far link to use for JB geometry
+        !                 Ci   = link%I(farLink,li_P_image)
+        !                 Aidx = link%I(farLink,li_last_elem_idx)
+        !                 elemI(JBidx,ei_geometryType) = elemI(Aidx,ei_geometryType)[Ci]  
+        !             else 
+        !                 !% no change, Ci=nullvalueI  
+        !             end if
+        !         else 
+        !             !% no change, Ci=nullvalueI  
+        !         end if
+        !     else 
+        !         !% no change, Ci and Aidx have been found
+        !     end if
+        ! end if
 
-    end subroutine init_IC_JB_nullvalue_geometry
+        ! print *, 'geo type ',trim(reverseKey(elemI(JBidx,ei_geometryType)))
+
+        ! !% --- check for error remaining:
+        ! if ((Ci == nullvalueI) .or. (Aidx == nullvalueI)) then
+        !     print *, 'USER CONFIGURATION ERROR for junction'
+        !     print *, 'located at node index ',thisJunctionNode,' named: ',trim(node%Names(thisJunctionNode)%str)
+        !     if (isupstream) then 
+        !         print *, 'with the upstream link index   ',adjLink,' named: ',trim(link%Names(adjLink)%str)
+        !     else 
+        !         print *, 'with the downstream link index ',adjLink,' named: ',trim(link%Names(adjLink)%str)
+        !     end if
+        !     print *, 'PROBLEM: Cannot define geometry of the junction branch.'
+        !     if ((node%I(thisJunctionNode,ni_N_link_d) + node%I(thisJunctionNode,ni_N_link_u)) == 2) then
+        !         print *, 'SWMM5+ requires either a channel/conduit link connected upstream/downstream '
+        !         print *, 'of this link or a channel/conduit link on the opposite side of the node'
+        !         print *, '(e.g., the downstream side if this is an upstream link on the node).'
+
+        !     else
+        !         print *, 'SWMM5+ requires a channel/conduit link connected upstream/downstream to this link.'
+        !     end if
+        !     print *, 'This configuration is required to set implied geometry of junction branches'
+        !     call util_crashpoint(6798723)
+        ! end if
+
+        ! stop 6609874
+
+    end subroutine IC_JB_nullvalue_geometry
 !%
 !%==========================================================================
 !%==========================================================================
 !%    
-    real(8) function init_IC_get_branch_fullarea (JBidx) result(outvalue)  
+    real(8) function IC_get_branch_fullarea (JBidx) result(outvalue)  
         !%------------------------------------------------------------------
         !% Description
         !% gets the full area for a branch if it exists
@@ -4348,12 +4980,12 @@ contains
         outvalue = (real(elemSI( JBidx,esi_JB_Exists),8) &
                        * elemR(  JBidx,er_FullArea)) 
 
-    end function init_IC_get_branch_fullarea
+    end function IC_get_branch_fullarea
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_elem_transect_arrays ()
+    subroutine IC_elem_transect_arrays ()
         !%------------------------------------------------------------------
         !% Description:
         !% initializes the transect tables for elements (as opposed to the
@@ -4369,7 +5001,7 @@ contains
             integer, pointer :: elemTransectIdx(:), linkTransectIdx(:)
             integer          :: ii, thisTransectIdx
 
-            character(64) :: subroutine_name = 'init_IC_elem_transect_arrays'
+            character(64) :: subroutine_name = 'IC_elem_transect_arrays'
         !%------------------------------------------------------------------
         !% Aliases:
             geometryType    => elemI(:,ei_geometryType)
@@ -4411,12 +5043,12 @@ contains
         !%     applied across a nj2 node (face) that joins exactly 2 links without storage.
 
         !%------------------------------------------------------------------
-    end subroutine init_IC_elem_transect_arrays
+    end subroutine IC_elem_transect_arrays
 !%
 !%==========================================================================
 !%==========================================================================
 !%    
-    subroutine init_IC_elem_transect_geometry ()
+    subroutine IC_elem_transect_geometry ()
         !%------------------------------------------------------------------
         !% Description:
         !% initializes the time=0 area, volume etc. that depend on the 
@@ -4516,12 +5148,12 @@ contains
         !% Closing:
             deallocate(tpack)
 
-    end subroutine init_IC_elem_transect_geometry
+    end subroutine IC_elem_transect_geometry
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_derived_data ()
+    subroutine IC_derived_data ()
         !%------------------------------------------------------------------
         !% Description:
         !% Initial conditions for data derived from data already read from
@@ -4565,22 +5197,20 @@ contains
 
         !%------------------------------------------------------------------
         !% Closing
-    end subroutine init_IC_derived_data
+    end subroutine IC_derived_data
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_solver_select ()
+    subroutine IC_solver_select ()
         !%------------------------------------------------------------------
         !% Desscription
         !% select the solver based on depth for all the elements
         !%------------------------------------------------------------------
         !% Declarations
-            character(64)       :: subroutine_name = 'init_IC_solver_select'
+            character(64)       :: subroutine_name = 'IC_solver_select'
         !%------------------------------------------------------------------
         !% Preliminaries:
-            if (setting%Debug%File%initial_condition) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
         !%------------------------------------------------------------------
 
         where ( (elemI(:,ei_HeqType) == time_march) .or. &
@@ -4590,25 +5220,46 @@ contains
         
         !%------------------------------------------------------------------
         !% Closing
-            if (setting%Debug%File%initial_condition) &
-                write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-    end subroutine init_IC_solver_select
-!
-!==========================================================================
-!==========================================================================
-!
-    subroutine init_IC_small_values_diagnostic_elements ()
+
+    end subroutine IC_solver_select
+!%
+!%==========================================================================
+!%==========================================================================
+!%
+    subroutine IC_diagnostic () 
+        !%------------------------------------------------------------------
+        !% Description:
+        !% initial conditions for diagnostic elements
+        !%------------------------------------------------------------------
+        !%------------------------------------------------------------------
+
+        !% --- set the diagnostic interpolation weights
+        !%     (the interpolation weights of diagnostic elements
+        !%     stays the same throughout the simulation. Thus, they
+        !%     are only needed to be set at the top of the simulation)
+        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,  'begin IC_diagnostic_interpolation_weights'
+        call IC_diagnostic_interpolation_weights()
+
+        !% --- set small values to diagnostic element interpolation sets
+        !%     Needed so that junk values does not mess up the first interpolation
+        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin  IC_small_values_diagnostic_elements'
+        call IC_small_values_diagnostic_elements
+
+    end subroutine IC_diagnostic
+!%
+!%==========================================================================
+!=%=========================================================================
+!%
+    subroutine IC_small_values_diagnostic_elements ()
         !%------------------------------------------------------------------
         !% set the volume, area, head, other geometry, and flow to zero values
         !% for the diagnostic elements so no error is induced in the primary
         !% face update
         !%------------------------------------------------------------------
         !% Declarations:
-            character(64)       :: subroutine_name = 'init_IC_small_values_diagnostic_elements'
+            character(64)       :: subroutine_name = 'IC_small_values_diagnostic_elements'
         !%------------------------------------------------------------------
         !% Preliminaries
-            if (setting%Debug%File%initial_condition) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
         !%------------------------------------------------------------------
 
         where ( (elemI(:,ei_QeqType) == diagnostic) .or. (elemI(:,ei_HeqType) == diagnostic))
@@ -4621,20 +5272,19 @@ contains
 
         !%------------------------------------------------------------------
         !% Closing
-            if (setting%Debug%File%initial_condition) &
-            write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-    end subroutine init_IC_small_values_diagnostic_elements
+
+    end subroutine IC_small_values_diagnostic_elements
 !
 !==========================================================================
 !==========================================================================
 !
-    subroutine init_IC_diagnostic_interpolation_weights ()
+    subroutine IC_diagnostic_interpolation_weights ()
         !%-----------------------------------------------------------------
         !% Description
         !% set the interpolation weights for diagnostic elements
         !%-----------------------------------------------------------------
         !% Declarations:
-            character(64)       :: subroutine_name = 'init_IC_diagnostic_interpolation_weights'
+            character(64)       :: subroutine_name = 'IC_diagnostic_interpolation_weights'
         !%------------------------------------------------------------------
         !% Preliminaries
             if (setting%Debug%File%initial_condition) &
@@ -4676,13 +5326,13 @@ contains
         !% Closing
             if (setting%Debug%File%initial_condition) &
             write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-    end subroutine init_IC_diagnostic_interpolation_weights
+    end subroutine IC_diagnostic_interpolation_weights
 
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_branch_dummy_values ()    
+    subroutine IC_branch_dummy_values ()    
         !%------------------------------------------------------------------
         !% Description:
         !% assigns dummy values that non-zero and not excessivley large 
@@ -4712,12 +5362,12 @@ contains
             end where
         end do
 
-    end subroutine init_IC_branch_dummy_values
+    end subroutine IC_branch_dummy_values
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_branch_zero_values ()
+    subroutine IC_branch_zero_values ()
         !%------------------------------------------------------------------
         !% Description:
         !% assigns zero to _JB values as IC.
@@ -4734,12 +5384,185 @@ contains
         !% HACK 
         !% Presently unused
 
-    end subroutine init_IC_branch_zero_values
+            print *, 'Are branch zero value IC needed?'
+            stop 7098743
+
+    end subroutine IC_branch_zero_values
+
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_set_SmallVolumes ()
+    subroutine IC_branch_head ()
+        !%------------------------------------------------------------------
+        !% Description:
+        !% sets default JB head to the same as JM (or Zbottom if JB 
+        !% head is below Zbottom of JB)
+        !%------------------------------------------------------------------
+        !% Declarations:
+            integer, pointer :: Npack, thisP(:), tM
+            integer          :: ii, kk, tB
+        !%------------------------------------------------------------------
+        !% Preliminaries:
+            Npack => npack_elemP(ep_JM)
+            if (Npack < 1) return
+            thisP => elemP(1:Npack,ep_JM)
+        !%------------------------------------------------------------------
+        
+        do ii=1,Npack 
+            tM => thisP(ii)
+            do kk=1,max_branch_per_node
+                tB = tM+kk
+                if (elemSI(tB,esi_JB_Exists) .ne. oneI) cycle 
+                elemR(tB,er_Head) = elemR(tM,er_Head)
+                if (elemR(tB,er_Head) < elemR(tB,er_Zbottom)) then 
+                    elemR(tB,er_Head) = elemR(tB,er_Zbottom)
+                end if
+            end do
+        end do
+
+    end subroutine IC_branch_head
+
+!%
+!%==========================================================================
+!%==========================================================================
+!%
+    subroutine IC_junctions () 
+        !%------------------------------------------------------------------
+        !% Description
+        !% mid-level routine for initial condition on JM and JB
+        !%------------------------------------------------------------------
+        !% Declarations
+            integer, pointer :: Npack, thisP(:)
+        !%------------------------------------------------------------------
+        
+        !% --- storing dummy values for branches that are invalid
+        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin branch dummy values'
+        call IC_branch_dummy_values ()
+
+        !% --- initialize branch values that need to be zero NOT IMPLEMENTED AS OF 20240629
+        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin branch zero values'
+        !call IC_branch_zero_values ()
+
+          ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'begin update_aux_variables JM'    
+        !% --- ensure the JB-adjacent faces have the CC element data
+        call face_push_all_adjacent_CCelem_to_JB_face ()
+
+        call face_push_all_adjacent_DiagElem_to_JB_face()
+
+        !% --- load the adjacent CC face data as initial JB data 
+        call face_pull_all_adjacent_face_to_JB_elem (ep_JM, .true., .false.)
+        
+        !% --- junction plan area
+        call geo_plan_area_from_volume_JM (elemPGetm, npack_elemPGetm, col_elemPGetm)
+
+        !% --- junction depth 
+        call geo_depth_from_volume_JM (elemPGetm, npack_elemPGetm, col_elemPGetm)
+
+        Npack => npack_elemP(ep_JM)
+        if (Npack > 0) then
+            thisP => elemP(1:Npack,ep_JM)
+            !% --- junction modified hydraulic depth
+            elemR(thisP,er_EllDepth) = elemR(thisP,er_Depth)
+            !% --- JM junction head
+            elemR(thisP,er_Head) = llgeo_head_from_depth_pure(thisP,elemR(thisP,er_Depth))
+            elemR(thisP,er_EllDepth) = elemR(thisP,er_Depth)
+        end if
+
+        !% --- set the JB head to the JM head. This includes diagnostic-adjacent JB, which
+        !%     are needed for face interpolation.
+        call IC_branch_head ()
+
+        !% --- set JB flowrates to zero in diagnostic-adjacent branches.
+        !%     note that CC adjacent already have a flowrate from the face push/pull of adjacent, above
+        call IC_branch_flowrate_diagnostic_adjacent
+
+        !% --- set all the diagnostic flowrates to zero for IC
+        call IC_diag_flowrate ()
+
+        !% --- need face interpolation of head and flowrate before assigning JB head using geo_assign
+        call face_interpolation (fp_noBC_IorS,.false.,.true.,.true.,.false.,.false.)  
+
+        !% --- assign head on JB and velocity (not flowrate!)
+        !%     also assigns asociated geometry, e.g. depth, area, volume
+        call geo_assign_JB_from_head (ep_JM)
+
+        !% --- Froude number, wavespeed, and interpwights on JB
+        Npack => npack_elemP(ep_JB)
+        if (Npack > 0) then 
+            thisP => elemP(1:Npack, ep_JB)
+            call update_Froude_number_element (thisP) 
+            call update_wavespeed_element(thisP)
+            call update_interpweights_JB (thisP, Npack, .false.)
+        end if
+
+        !% --- wave speed, Froude number on JM
+        Npack => npack_elemP(ep_JM)
+        if (Npack > 0) then
+            thisP => elemP(1:Npack, ep_JM)
+            call update_wavespeed_element(thisP)
+            call update_Froude_number_element (thisP) 
+        end if
+
+    end subroutine IC_junctions
+!%
+!%==========================================================================
+!%==========================================================================
+!%
+    subroutine IC_branch_flowrate_diagnostic_adjacent ()
+        !%------------------------------------------------------------------
+        !% Description
+        !% initializes velocity and flowrate in diagnostic-adjacent JB
+        !% branches
+        !%------------------------------------------------------------------
+        !% Declarations
+            integer, pointer :: Npack, thisP(:), tM
+            integer          :: ii, kk, tB
+        !%------------------------------------------------------------------
+        !% Preliminaries 
+            Npack => npack_elemP(ep_JB_Diag_Adjacent )
+            if (Npack < 1) return
+            thisP => elemP(1:Npack,ep_JB_Diag_Adjacent)
+        !%------------------------------------------------------------------
+        
+        do ii=1,Npack
+            tM => thisp(ii)
+            do kk=1,max_branch_per_node
+                tB = tM + kk
+                if (elemSI(tB,esi_JB_Exists) .ne. oneI) cycle
+                elemR(tB,er_Flowrate) = zeroR 
+                elemR(tB,er_Velocity) = zeroR
+            end do
+        end do 
+        
+    end subroutine IC_branch_flowrate_diagnostic_adjacent
+!%
+!%==========================================================================
+!%==========================================================================
+!%   
+    subroutine IC_diag_flowrate () 
+        !%------------------------------------------------------------------
+        !% Description
+        !% initializes all diagnostic element flowrates to zero
+        !%------------------------------------------------------------------
+        !% Declarations
+            integer, pointer :: Npack, thisp(:)
+        !%------------------------------------------------------------------
+        !% Preliminaries
+            Npack => npack_elemP(ep_Diag)
+            if (Npack < 1) return
+            thisP => elemP(1:Npack,ep_Diag)
+        !%------------------------------------------------------------------
+
+        elemR(thisP,er_Flowrate) = zeroR 
+        elemR(thisP,er_Velocity) = zeroR
+    
+    end subroutine IC_diag_flowrate
+!%
+!%==========================================================================
+!%==========================================================================
+!%
+    subroutine IC_set_SmallVolumes ()
         !%------------------------------------------------------------------
         !% Description
         !% set the small volume values in elements that are used with
@@ -4752,7 +5575,7 @@ contains
         !% in llgeo_tabular_depth_from_column
         !%------------------------------------------------------------------
         !% Declarations:
-            character(64)       :: subroutine_name = 'init_IC_set_SmallVolumes'
+            character(64)       :: subroutine_name = 'IC_set_SmallVolumes'
             real(8), pointer    :: MomentumDepthCutoff, smallVolume(:), length(:)
             real(8), pointer    :: theta(:), radius(:),  area(:)
             real(8), pointer    :: depth(:)
@@ -4984,12 +5807,12 @@ contains
         !% Closing
             if (setting%Debug%File%initial_condition) &
                 write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-    end subroutine init_IC_set_SmallVolumes
+    end subroutine IC_set_SmallVolumes
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_set_zero_lateral_inflow ()
+    subroutine IC_set_zero_lateral_inflow ()
         !%-----------------------------------------------------------------
         !% Description:
         !% set all the lateral inflows to zero before start of a simulation
@@ -4997,12 +5820,12 @@ contains
 
         elemR(:,er_FlowrateLateral) = zeroR
 
-    end subroutine init_IC_set_zero_lateral_inflow
+    end subroutine IC_set_zero_lateral_inflow
 !
 !==========================================================================
 !==========================================================================
 !
-    subroutine init_IC_oneVectors ()
+    subroutine IC_oneVectors ()
         !%-----------------------------------------------------------------
         !% Description:
         !% set up a vector of real ones (useful in sign functions)
@@ -5010,19 +5833,19 @@ contains
 
         elemR(:,er_ones) = oneR
 
-    end subroutine init_IC_oneVectors
+    end subroutine IC_oneVectors
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_slot ()
+    subroutine IC_slot ()
         !%-----------------------------------------------------------------
         !% Description:
         !% initialize Preissmann Slot
         !% get the geometry data for conduit links and calculate element volumes
         !%-----------------------------------------------------------------
         !% Declarations:
-            character(64) :: subroutine_name = 'init_IC_slot'
+            character(64) :: subroutine_name = 'IC_slot'
         !%-----------------------------------------------------------------
         !% Preliminaries
             if (setting%Debug%File%initial_condition) &
@@ -5030,24 +5853,24 @@ contains
         !%-----------------------------------------------------------------
 
         !% --- initialize preissmann slot variables for CC and JB elements
-        call init_IC_slot_CCJB ()
+        call IC_slot_CCJB ()
 
         !% --- initialize preissmann slot variables for JM elements
-        call init_IC_slot_JM ()
+        call IC_slot_JM ()
 
         !% --- initialize preissmann slot variables for Diagnostic elements
-        call init_IC_slot_Diag ()
+        call IC_slot_Diag ()
 
         !%------------------------------------------------------------------
         !% Closing
             if (setting%Debug%File%initial_condition) &
             write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-    end subroutine init_IC_slot
+    end subroutine IC_slot
 !
 !==========================================================================
 !==========================================================================
 !
-    subroutine init_IC_slot_CCJB ()
+    subroutine IC_slot_CCJB ()
         !%-----------------------------------------------------------------
         !% Description:
         !% initialize Preissmann Slot for CC, JB elements
@@ -5056,7 +5879,7 @@ contains
             real(8) :: OldTargetPCelerity
             integer, pointer    :: SlotMethod, thisColP, npack, thisP(:)
             real(8), pointer    :: TargetPCelerity, grav, Alpha, MinPnumber
-            character(64) :: subroutine_name = 'init_IC_slot_CCJB'
+            character(64) :: subroutine_name = 'IC_slot_CCJB'
         !%-----------------------------------------------------------------
         !% Preliminaries
             if (setting%Debug%File%initial_condition) &
@@ -5182,12 +6005,12 @@ contains
         !% Closing
             if (setting%Debug%File%initial_condition) &
             write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-    end subroutine init_IC_slot_CCJB
+    end subroutine IC_slot_CCJB
 !
 !==========================================================================
 !==========================================================================
 !
-    subroutine init_IC_slot_JM
+    subroutine IC_slot_JM
         !%-----------------------------------------------------------------
         !% Description:
         !% initialize Preissmann Slot for JM elements
@@ -5197,7 +6020,7 @@ contains
             real(8) :: PNadd
             integer, pointer    :: SlotMethod, thisColP, npack, thisP(:)
             real(8), pointer    :: TargetPCelerity, grav, Alpha, MinPnumber
-            character(64) :: subroutine_name = 'init_IC_slot_JM'
+            character(64) :: subroutine_name = 'IC_slot_JM'
         !%-----------------------------------------------------------------
         !% Preliminaries
             if (setting%Debug%File%initial_condition) &
@@ -5291,12 +6114,12 @@ contains
         !% Closing
             if (setting%Debug%File%initial_condition) &
             write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]" 
-    end subroutine init_IC_slot_JM
+    end subroutine IC_slot_JM
 !
 !==========================================================================
 !==========================================================================
 !
-    subroutine init_IC_slot_Diag
+    subroutine IC_slot_Diag
         !%-----------------------------------------------------------------
         !% Description:
         !% initialize Preissmann Slot for Diag elements
@@ -5308,7 +6131,7 @@ contains
             real(8) :: MaxCCPreissmannNumber
             integer, pointer    :: SlotMethod, thisColP, npack, thisP(:)
             real(8), pointer    :: TargetPCelerity, grav, Alpha, MinPnumber
-            character(64) :: subroutine_name = 'init_IC_slot_JM'
+            character(64) :: subroutine_name = 'IC_slot_JM'
         !%-----------------------------------------------------------------
         !% Preliminaries
             if (setting%Debug%File%initial_condition) &
@@ -5340,16 +6163,16 @@ contains
             elemR(thisP,er_SlotWidth)                 = zeroR
             elemR(thisP,er_SlotArea)                  = zeroR
             elemR(thisP,er_SlotVolume)                = zeroR
-!%-----------------------------------------------------------------
+        !%-----------------------------------------------------------------
         !% Closing
             if (setting%Debug%File%initial_condition) &
             write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]" 
-    end subroutine init_IC_slot_Diag
+    end subroutine IC_slot_Diag
 !
 !==========================================================================
 !==========================================================================
 !
-    subroutine init_reference_head ()
+    subroutine IC_reference_head ()
         !%------------------------------------------------------------------
         !% Description:
         !% computes the reference head 
@@ -5384,12 +6207,12 @@ contains
         call co_min(setting%Solver%MinZbottom)
         call co_max(setting%Solver%AverageZbottom)
   
-    end subroutine init_reference_head
+    end subroutine IC_reference_head
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_subtract_reference_head ()
+    subroutine IC_subtract_reference_head ()
         !%------------------------------------------------------------------
         !% Description:
         !% removes reference head from Z values in all arrays
@@ -5482,12 +6305,12 @@ contains
 
         !%------------------------------------------------------------------    
         !% Closing 
-    end subroutine init_subtract_reference_head
+    end subroutine IC_subtract_reference_head
 !%
 !%==========================================================================
 !%==========================================================================
 !%   
-    subroutine init_lateral_inflow_links ()
+    subroutine IC_lateral_inflow_links ()
         !%------------------------------------------------------------------
         !% Description
         !% sets of data in link and node arrays for boundary conditions
@@ -5677,12 +6500,12 @@ contains
             end if
         end do
 
-    end subroutine init_lateral_inflow_links
+    end subroutine IC_lateral_inflow_links
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_inflow_elem ()
+    subroutine IC_inflow_elem ()
         !%------------------------------------------------------------------
         !% Description:
         !% ensures every lateral inflow element (node or link sub-elem) has
@@ -5759,12 +6582,12 @@ contains
             end do
         end if
 
-    end subroutine init_inflow_elem   
+    end subroutine IC_inflow_elem   
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_bc_flow ()
+    subroutine IC_bc_flow ()
         !%------------------------------------------------------------------
         !% Description:
         !% initializes data in the BC%flowX arrays
@@ -5995,12 +6818,12 @@ contains
         end if
 
         
-    end subroutine init_bc_flow
+    end subroutine IC_bc_flow
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_bc_head ()
+    subroutine IC_bc_head ()
         !%------------------------------------------------------------------
         !% Description:
         !% initializes data in the BC%flowX arrays
@@ -6110,12 +6933,12 @@ contains
             end do
         end if
 
-    end subroutine init_bc_head 
+    end subroutine IC_bc_head 
 !%
 !%==========================================================================
 !%==========================================================================
 !%   
-    subroutine init_elem_bc_assign ()
+    subroutine IC_elem_bc_assign ()
         !%------------------------------------------------------------------
         !% Description:
         !% assigns the elemI(:,ei_lateralInflowBCidx) to inflow elements
@@ -6159,12 +6982,12 @@ contains
             end do
         end if
 
-    end subroutine init_elem_bc_assign
+    end subroutine IC_elem_bc_assign
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_bc()
+    subroutine IC_bc()
         !%------------------------------------------------------------------
         !% Description:
         !%    Initializes boundary connditions
@@ -6190,13 +7013,13 @@ contains
 
             integer, pointer :: nodeUp, linkIdx, nidx, ntype
 
-            character(64) :: subroutine_name = "init_bc"
+            character(64) :: subroutine_name = "IC_bc"
         !%---------------------------------------------------------------------
         !% Preliminaries
             if (setting%Debug%File%initialization)  &
                 write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
        
-            if (setting%Profile%useYN) call util_profiler_start (pfc_init_bc)
+            if (setting%Profile%useYN) call util_profiler_start (pfc_IC_bc)
         !%---------------------------------------------------------------------
 
         !% --- set the key values to undefinedKey
@@ -6204,7 +7027,7 @@ contains
 
         !% --- set the link/node arrays to identify link lateral inflow connections to nodes
         ! print *, 'calling init_lateral_inflow_links'
-        call init_lateral_inflow_links ()
+        call IC_lateral_inflow_links ()
 
         !% --- get the BC nodes (flow, head) for this image
         !%     must include nodes that may be formally on a different image but are
@@ -6217,21 +7040,21 @@ contains
         call pack_links_haveBC_thisImage() 
 
         !% --- set the element arrays to identify all lateral and node inflows
-        ! print *, 'calling init_inflow_elem'
-        call init_inflow_elem ()
+        ! print *, 'calling IC_inflow_elem'
+        call IC_inflow_elem ()
 
         !% --- allocate the BC arrays
         ! print *, 'calling util_allocate_bc'
         call util_allocate_bc()
 
         !% --- set the BC%flow and BC%head configurations
-        ! print *, 'calling init_bc_flow, and init_bc_head'
-        call init_bc_flow ()
-        call init_bc_head ()
+        ! print *, 'calling IC_bc_flow, and IC_bc_head'
+        call IC_bc_flow ()
+        call IC_bc_head ()
         
         !% --- assign BC index to the elements
-        ! print *, 'calling init_elem_bc_assign'
-        call init_elem_bc_assign ()
+        ! print *, 'calling IC_elem_bc_assign'
+        call IC_elem_bc_assign ()
     
         !% --- create packed arrays of BC data
         ! print *, 'calling pack_data_BC'
@@ -6246,16 +7069,16 @@ contains
 
         !%------------------------------------------------------------------
         !% Closing
-            if (setting%Profile%useYN) call util_profiler_stop (pfc_init_bc)
+            if (setting%Profile%useYN) call util_profiler_stop (pfc_IC_bc)
 
             if (setting%Debug%File%initialization)  &
                 write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-    end subroutine init_bc
+    end subroutine IC_bc
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_uniformtable_array ()
+    subroutine IC_uniformtable_array ()
         !%------------------------------------------------------------------
         !% Description:
         !% initializes sectionfactor arrays (depth = f(sectionFactor))
@@ -6263,7 +7086,7 @@ contains
         !%------------------------------------------------------------------
         !% Declarations
             integer :: ii,  lastUT_idx    
-            character(64) :: subroutine_name = 'init_uniformtable_array'
+            character(64) :: subroutine_name = 'IC_uniformtable_array'
         !%------------------------------------------------------------------
         
         call util_allocate_uniformtable_array()
@@ -6271,7 +7094,7 @@ contains
         lastUT_idx = 0  !% last used index to uniform table
 
         !% --- set up uniform tables for section factor and critical flow for head BC locations
-        call init_BChead_uniformtable (lastUT_idx)
+        call IC_bchead_uniformtable (lastUT_idx)
 
         !% THIS IS WHERE WE WOULD INSERT ANY OTHER UNIFORM TABLE INITIATIONS
         !% NEW DATA STARTs FROM lastUT_idx+1
@@ -6280,34 +7103,34 @@ contains
         do ii = 1,size(uniformTableDataR,1)
 
             !% --- uniformly-distributed section factor
-            call init_uniformtabledata_Uvalue(ii,utr_SFmax, utd_SF_uniform)
+            call IC_uniformtabledata_Uvalue(ii,utr_SFmax, utd_SF_uniform)
 
             !% -- uniformly-distributed critical flow
-            call init_uniformtabledata_Uvalue(ii,utr_QcritMax, utd_Qcrit_uniform)
+            call IC_uniformtabledata_Uvalue(ii,utr_QcritMax, utd_Qcrit_uniform)
    
             !% --- nonuniform values mapping from section factors
-            call init_uniformtabledata_nonUvalue (ii, utd_SF_depth_nonuniform, utd_SF_uniform)
-            call init_uniformtabledata_nonUvalue (ii, utd_SF_area_nonuniform,  utd_SF_uniform)
+            call IC_uniformtabledata_nonUvalue (ii, utd_SF_depth_nonuniform, utd_SF_uniform)
+            call IC_uniformtabledata_nonUvalue (ii, utd_SF_area_nonuniform,  utd_SF_uniform)
    
             !% --- nonuniform values mapping from critical flow
-            call init_uniformtabledata_nonUvalue (ii, utd_Qcrit_depth_nonuniform, utd_Qcrit_uniform)
-            call init_uniformtabledata_nonUvalue (ii, utd_Qcrit_area_nonuniform,  utd_Qcrit_uniform)
+            call IC_uniformtabledata_nonUvalue (ii, utd_Qcrit_depth_nonuniform, utd_Qcrit_uniform)
+            call IC_uniformtabledata_nonUvalue (ii, utd_Qcrit_area_nonuniform,  utd_Qcrit_uniform)
 
         end do
 
-    end subroutine init_uniformtable_array    
+    end subroutine IC_uniformtable_array    
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_BChead_uniformtable (UT_idx)
+    subroutine IC_bchead_uniformtable (UT_idx)
         !%------------------------------------------------------------------ 
         !% Description
         !% Get the maximum values (no necessarily at full!) that are used
         !% for normalizing the uniform tables that are lookup by SF or Depth
         !% UT_idx is the last uniform table index used, which is incremented
         !% as more table data is added
-        !% NOTE: see init_uniformtable_array for the actual table values
+        !% NOTE: see IC_uniformtable_array for the actual table values
         !%------------------------------------------------------------------ 
         !% Declarations
             integer, intent (inout) :: UT_idx
@@ -6315,7 +7138,7 @@ contains
             integer                 :: ii, jj
             real(8), pointer        :: grav
             real(8)                 :: sf, thisDepth, deltaD, depthTol
-            character(64)           :: subroutine_name = 'init_BChead_uniformtable'
+            character(64)           :: subroutine_name = 'IC_bchead_uniformtable'
         !%------------------------------------------------------------------ 
         !% Aliases
             grav         => setting%Constant%gravity
@@ -6369,12 +7192,12 @@ contains
             end do
         end do
 
-    end subroutine init_BChead_uniformtable
+    end subroutine IC_bchead_uniformtable
 !%
 !%==========================================================================
 !%==========================================================================
 !%  
-    subroutine init_uniformtabledata_nonUvalue ( &
+    subroutine IC_uniformtabledata_nonUvalue ( &
         UT_idx,     &  ! index of the uniform table
         utd_nonU,   &  ! slice in uniformTableDataR where nonuniform data are stored
         utd_uniform &  ! slice in uniformTableDataR where corresponding uniform data are stored
@@ -6394,7 +7217,7 @@ contains
             real(8)  :: thisDepth, thisArea
             real(8), parameter :: uTol = 1.d-3
             logical :: isIncreasing
-            character(64) :: subroutine_name = 'init_uniformtabledata_nonUvalue'
+            character(64) :: subroutine_name = 'IC_uniformtabledata_nonUvalue'
         !%------------------------------------------------------------------ 
         !% Aliases
             eIdx => uniformTableI(UT_idx,uti_elem_idx)  ! element index
@@ -6537,12 +7360,12 @@ contains
             end if
         end do
 
-    end subroutine init_uniformtabledata_nonUvalue
+    end subroutine IC_uniformtabledata_nonUvalue
 !%
 !%==========================================================================
 !%==========================================================================
 !%    
-    subroutine init_uniformtabledata_Uvalue ( &
+    subroutine IC_uniformtabledata_Uvalue ( &
          UT_idx,    &  ! index of the uniform table
          utr_max,   &  ! column in uniformTableR where max uniform value is stored
          utd_uniform & ! slice in uniformTableDataR where uniform data are stored
@@ -6559,7 +7382,7 @@ contains
             real(8), pointer :: uniformMax
             real(8)          :: thisValue, normDelta
             integer          :: jj
-            character(64)    :: subroutine_name = 'init_uniformtabledata_Uvalue'
+            character(64)    :: subroutine_name = 'IC_uniformtabledata_Uvalue'
         !%------------------------------------------------------------------ 
 
         !% --- maximum and mininum values of the uniform data
@@ -6581,12 +7404,12 @@ contains
 
         end do
 
-    end subroutine init_uniformtabledata_Uvalue
+    end subroutine IC_uniformtabledata_Uvalue
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_bottom_slope ()
+    subroutine IC_bottom_slope ()
         !%------------------------------------------------------------------ 
         !% Description:
         !% computes the bottom slope of all channel and conduit elements
@@ -6661,12 +7484,12 @@ contains
 
 
         !%------------------------------------------------------------------
-    end subroutine init_IC_bottom_slope    
+    end subroutine IC_bottom_slope    
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_ZeroValues_nondepth ()
+    subroutine IC_ZeroValues_nondepth ()
         !%------------------------------------------------------------------
         !% Description:
         !% ensures consistent initialization of zero values. 
@@ -6853,12 +7676,12 @@ contains
             call util_crashpoint(77395)
         end if
 
-    end subroutine init_IC_ZeroValues_nondepth
+    end subroutine IC_ZeroValues_nondepth
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    real(8) function init_IC_limited_fulldepth (thisDepth, thisLink) result(outDepth)
+    real(8) function IC_limited_fulldepth (thisDepth, thisLink) result(outDepth)
         !%------------------------------------------------------------------
         !% Description:
         !% Checks the input full depth and applies limiter (if needed)
@@ -6885,12 +7708,12 @@ contains
             end if
         end if
 
-    end function init_IC_limited_fulldepth
+    end function IC_limited_fulldepth
 !%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_IC_ponding_errorcheck ()
+    subroutine IC_ponding_errorcheck ()
         !%------------------------------------------------------------------
         !% Description
         !% Checks overall area scale of ponding. Too small of area will
@@ -6980,12 +7803,12 @@ contains
 
         end do
 
-    end subroutine
+    end subroutine IC_ponding_errorcheck
 !%
 !%==========================================================================       
 !%==========================================================================
 !%
-    subroutine init_IC_junction_plan_area ()
+    subroutine IC_junction_plan_area ()
         !%------------------------------------------------------------------
         !% Description
         !% Sets the junction plan area for ImpliedStorage junctions based
@@ -7044,6 +7867,11 @@ contains
 
                             case default 
                                 print *, 'CODE ERROR unexpected case default'
+                                print *, 'JBidx, JMidx ',JBidx, JMidx 
+                                print *, elemI(JBidx,ei_geometryType) 
+                                print *, reverseKey(elemI(JBidx,ei_geometryType))
+                                print *, elemI(JMidx,ei_node_Gidx_Bipquick)
+                                print *, trim(node%Names(elemI(JMidx,ei_node_Gidx_Bipquick))%str)
                                 call util_crashpoint(7722444)
                         end select
                         !% --- use the largest breadth connected to this junction
@@ -7094,12 +7922,58 @@ contains
             !% deallocate the temporary array
             deallocate(thisP)
 
-    end subroutine init_IC_junction_plan_area
+    end subroutine IC_junction_plan_area
 !%
 !%==========================================================================       
 !%==========================================================================
 !%
-    subroutine init_IC_air_entrapment ()
+    subroutine IC_junction_netflow ()
+        !%------------------------------------------------------------------
+        !% Description:
+        !% initializes the elemSR for net flow in/out of a junction
+        !%------------------------------------------------------------------
+        !% Declarations
+            integer, pointer    :: Npack, thisP(:), JMidx
+            integer             :: mm
+            real(8), pointer    :: Qnet
+            logical             :: isOverflow, isPonding, canOVerflowOrPond
+        !%-------------------------------------------------------------------
+        !% Preliminaries
+            Npack => npack_elemP(ep_JM)
+            if (Npack < 1) return
+            thisP => elemP(1:Npack,ep_JM)
+        !%-------------------------------------------------------------------
+
+        do mm = 1,Npack 
+            JMidx => thisP(mm)
+            Qnet  => elemSR(JMidx,esr_JM_StorageRate)
+
+            isOverflow                       = .false.
+            isPonding                        = .false.
+
+            if (elemSI(JMidx,esi_JM_OverflowType) == NoOverflow) then 
+                canOverflowOrPond = .false.
+            else 
+                canOverflowOrPond = .true.
+            end if
+
+            !% --- set the present plan area
+            elemSR(JMidx,esr_JM_Present_PlanArea) = lljunction_main_plan_area(JMidx)
+           
+            !% --- set the overflow/ponding heads
+            call lljunction_main_overflow_conditions (JMidx)
+
+            call lljunction_main_netFlowrate &
+                (JMidx, Qnet, canOverflowOrPond, isOverflow, isPonding)
+
+        end do
+
+    end subroutine IC_junction_netflow
+!%
+!%==========================================================================       
+!%==========================================================================
+!%
+    subroutine IC_air_entrapment ()
         !%------------------------------------------------------------------
         !% Description
         !% Set initial air entrapment conditions
@@ -7201,12 +8075,12 @@ contains
             end do
         end if
 
-    end subroutine init_IC_air_entrapment
+    end subroutine IC_air_entrapment
 !%
 !%==========================================================================       
 !%==========================================================================
 !%   
-    subroutine ic_phantom_link_distributed_inflow (linkIdx, nidx)
+    subroutine IC_phantom_link_distributed_inflow (linkIdx, nidx)
         !%------------------------------------------------------------------
         !% Description
         !% ensures that a distributed inflow is over the entire link
@@ -7244,12 +8118,12 @@ contains
         link%R(linkIdx,lr_InflowVolumeFraction) = Vol1 / (Vol1 + Vol2)
         link%R(linkUp ,lr_InflowVolumeFraction) = Vol2 / (Vol1 + Vol2)
 
-    end subroutine ic_phantom_link_distributed_inflow
+    end subroutine IC_phantom_link_distributed_inflow
 !%
 !%==========================================================================       
 !%==========================================================================
 !%
-    subroutine init_IC_error_check ()
+    subroutine IC_error_check ()
         !%------------------------------------------------------------------
         !% Description
         !% Configuration error checking
@@ -7289,7 +8163,7 @@ contains
             end if
         end do
 
-    end subroutine  init_IC_error_check
+    end subroutine  IC_error_check
 !%
 !%==========================================================================    
 !% END MODULE

@@ -23,6 +23,8 @@ module common_elements
     public :: common_outflow_energyhead_singular
     public :: common_flowchange_limiter_singular
 
+    integer :: printIdx = 923
+    integer :: stepcut  = 120908
     contains
 !%
 !%========================================================================== 
@@ -96,13 +98,24 @@ module common_elements
         !%------------------------------------------------------------------        
         !% head on a diagnostic element as the maximum of upstream, downstream, or crest height.
         Head = max(UpstreamFaceHead , DownstreamFaceHead)
+
+        ! if (eIdx == 2106) then 
+        !     print *, 'Head ',Head
+        ! end if
         
         !% flow direction on a diagnostic element assigned based up upstream and downstream heads
         FlowDirection = int(sign(oneR, (UpstreamFaceHead - DownstreamFaceHead)))
-        
+
         !% nominal downstream head on a diagnostic element (i.e., the downstream based on actual flow direction)
         NominalDSHead = min(UpstreamFaceHead, DownstreamFaceHead)
 
+
+        ! if (eIdx == 2106) then 
+        !     print *, 'Head         ',Head
+        !     print *, 'flowDir      ',FlowDirection
+        !     print *, 'nominalDHead ',NominalDSHead
+        ! end if
+        
         !% --- airflow venting settings
         if (CurrentSetting == zeroR) then
             faceYN(iupf, fYN_isAirflowBlocked) = .true.
@@ -199,26 +212,88 @@ module common_elements
         !% --- the increase in downstream flowrate or negative magnitude increase of upstream flowrate 
         !%     that would eliminate a fraction of the upstream (or downstream) volume associated with 
         !%     the head difference across the element
-        dQlimit = FlowVolumeLimitFactor * dH * faceR(fup,fr_Length_Adjacent) * faceR(fup,fr_Topwidth_Adjacent) / dt
-
-        if (dH .ge. zeroR) then 
-            if ((Flowrate - FlowrateN0) > dQlimit) then 
-                !% --- limit the change in the flowrate by the dQlimit
-                Flowrate = FlowrateN0 + dQlimit 
+        if (dH  > zeroR) then 
+            if (FlowrateN0 .ge. zeroR) then 
+                !% --- downstream flow
+                !%     limit the acceleration of the inflow into the diagnostic element
+                dQlimit = FlowVolumeLimitFactor  * dH * faceR(fup,fr_Length_Adjacent_to_JB) * faceR(fup,fr_Topwidth_Adjacent_to_JB) / dt
             else
-                !% no action
+                !% --- reverse flow
+                !%     limit the deceleration of the reverse inflow into the diagnostic element to zero flow
+                dQlimit = -FlowrateN0
             end if
-        else
-            !% --- the increase in negative (upstream) dQ that would eliminate the volume associated with
-            !%     a fraction of the head difference
-            dQlimit = 0.1d0 * dH * faceR(fdn,fr_Length_Adjacent) * faceR(fdn,fr_Topwidth_Adjacent) / dt
-            if ((Flowrate - FlowrateN0) < dQlimit) then 
-                !% --- limit the change in the flowrate by dQlimit
-                Flowrate = FlowrateN0 + dQlimit 
+        elseif (dH < zeroR) then 
+            if (FlowrateN0 .le. zeroR) then 
+                !% --- reverse flow
+                !%     limit the acceleration of the reverse inflow into the diagnostic element
+                dQlimit = FlowVolumeLimitFactor * dH * faceR(fdn,fr_Length_Adjacent_to_JB) * faceR(fdn,fr_Topwidth_Adjacent_to_JB) / dt
+            else 
+                !% --- downstream flow
+                !%     limit the deceleration of the downstream flow into the diagnostic element to zero
+                dQlimit = -FlowrateN0
+            end if
+        else !% dH == 0
+            if (FlowrateN0 .ge. zeroR) then 
+                dQlimit = -FlowrateN0
             else
-                !% no action 
+                dQlimit = FlowrateN0
             end if
         end if
+
+       ! dQlimit = FlowVolumeLimitFactor * dH * faceR(fup,fr_Length_Adjacent_to_JB) * faceR(fup,fr_Topwidth_Adjacent_to_JB) / dt
+
+        ! if ((setting%Time%Step > stepCut) .and. (eIdx == printIdx)) then
+        !     print *, ' '
+        !     print *, '    in common element correction '
+        !     print *, '    dH, dQlimit ',dH, dQlimit
+        !     print *, '    FlowrateN0  ',FlowrateN0
+        ! end if
+
+        if (dH > zeroR) then 
+            if ((Flowrate - FlowrateN0) > dQlimit) then 
+                !% --- limit the accelerating flow downstream change by the dQlimit
+                Flowrate = FlowrateN0 + dQlimit 
+            else
+                !% --- no action, flow acceleration is sufficiently small
+            end if
+        elseif (dH < zeroR) then 
+            if ((Flowrate - FlowrateN0) < dQlimit) then 
+                !% --- limit the accelerating flow upstream change by the dQlimit
+                Flowrate = FlowrateN0 + dQlimit
+            else 
+                !% --- no action, flow upstream acceleration is sufficiently small
+            end if
+        else !% dH == 0
+            !% --- no driving head difference
+            if (FlowrateN0 .ge. zeroR) then   
+                !% --- downstream flow
+                if (Flowrate < zeroR) then 
+                    !% --- downstream flow that is reversed is set to zero
+                    Flowrate = zeroR 
+                elseif ((Flowrate - FlowrateN0) > zeroR) then 
+                    !% --- downstream flowrate cannot increase under zero dH
+                    Flowrate = onehalfR * FlowrateN0    
+                else 
+                    !% --- no action, flowrate is decreasing, but not reversing 
+                end if
+            else 
+                !% --- upstream flow
+                if (Flowrate > zeroR) then 
+                    !% --- upstream flow that is reversed (to downstream) is set to zero
+                    Flowrate = zeroR 
+                elseif ((Flowrate - FlowrateN0) < zeroR) then 
+                    !% --- flowrate cannot increase in upstream direction under zero dh 
+                    Flowrate = onehalfR * FlowrateN0 
+                else
+                    !% --- no action flowrate is decreasing in magnitude towards zero
+                end if
+            end if
+        end if
+
+        ! if ((setting%Time%Step > stepCut) .and. (eIdx == printIdx)) then
+        !     print *, '    Flowrate    ',Flowrate
+        !     print *, ' '
+        ! end if
 
     end subroutine common_flowchange_limiter_singular
 !%

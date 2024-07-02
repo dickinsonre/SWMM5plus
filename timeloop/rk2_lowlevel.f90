@@ -15,7 +15,7 @@ module rk2_lowlevel
     use define_indexes
     use define_keys
     use geometry, only : geo_area_from_depth_singular
-    use utility, only: util_sign_with_ones
+    !use utility, only: util_sign_with_ones
     use utility_output
     use utility_crash, only: util_crashpoint
 
@@ -476,6 +476,7 @@ module rk2_lowlevel
             integer, intent (in) :: inoutCol,  thisCol, Npack
             integer, pointer     :: thisP(:)
             real(8), pointer     :: momentum(:), volume(:)
+            integer :: ii
         !%------------------------------------------------------------------
         !% Preliminaries
             if (Npack < 1) return
@@ -494,6 +495,16 @@ module rk2_lowlevel
         elsewhere
             elemR(thisP,inoutCol) = momentum(thisP) / volume(thisP)
         endwhere
+
+        ! print *, 'in rk2 lower level'
+        ! do ii=1,Npack 
+        !     if (abs(elemR(thisP(ii),inoutCol)) > 1.d12) then
+        !         print *, thisP(ii), momentum(thisP(ii)), volume(thisP(ii))
+        !         print *, trim(reverseKey(elemI(thisP(ii),ei_elementType)))
+        !     end if
+        ! end do
+
+        !stop 509875
 
         !% --- minimum flowrate 
         if (setting%Limiter%Velocity%ZeroMinimumVelocitiesYN) then 

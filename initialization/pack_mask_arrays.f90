@@ -15,7 +15,7 @@ module pack_mask_arrays
     use define_keys
     use define_settings
     use utility_crash
-    use utility, only : util_unique_rank
+    use utility, only : util_unique_rank !
     
     implicit none
     private
@@ -248,7 +248,7 @@ contains
     !             write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
     !     !%------------------------------------------------------------------
 
-    !     !% --- moved into init_BC
+    !     !% --- moved into IC_bc
     !     !N_flowBCnode = count(node%YN(:,nYN_has_inflow) .and. &
     !     !                (node%I(:,ni_P_image) == this_image()))
 
@@ -258,7 +258,7 @@ contains
     !             node%YN(:,nYN_has_inflow) .and. (node%I(:,ni_P_image) == this_image()))
     !     end if
 
-    !     !% --- moved into init_BC
+    !     !% --- moved into IC_bc
     !     !% HACK -- this assumes that a head BC is always a downstream BC.
     !    ! N_headBCnode = count((node%I(:, ni_node_type) == nBCdn) .and. &
     !     !                (node%I(:,ni_P_image) == this_image()))
@@ -1740,11 +1740,11 @@ contains
                 ) )
         end if
 
-    !% ep_FM_HW_all
+    !% ep_FM_HW
         !% --- all force main (CC) elements that HW roughness method
         if (setting%Solver%ForceMain%AllowForceMainTF) then
             
-            ptype => col_elemP(ep_FM_HW_all)
+            ptype => col_elemP(ep_FM_HW)
             npack => npack_elemP(ptype)
 
             npack = count(                                            &
@@ -2348,53 +2348,119 @@ contains
 
         !%===================
         !% ---- fp_JB_upstream_is_zero_IorS
+        !%      upstream of JB face is zero depth but downstream is not
+        !%      Applies only to CC and JB elements
             ptype => col_faceP(fp_JB_upstream_is_zero_IorS)
             npack => npack_faceP(ptype)
             npack = count(                                                &
                                    elemYN(eUp(fJB),eYN_isZeroDepth)       &
                             .and.                                         &
                             (.not. elemYN(eDn(fJB),eYN_isZeroDepth))      &
+                            .and.                                         &
+                            ( (elemI(eUp(fJB),ei_elementType) .eq. CC)    &
+                                .or.                                      &
+                              (elemI(eUp(fJB),ei_elementType) .eq. JB)    &
+                            )                                             &
+                            .and.                                         &
+                            ( (elemI(eDn(fJB),ei_elementType) .eq. CC)    &
+                            .or.                                          &
+                              (elemI(eDn(fJB),ei_elementType) .eq. JB)    &
+                            )                                             &
                         ) 
             if (npack > 0) then 
                 faceP(1:npack,ptype) = pack(fJB ,                         &
-                                elemYN(eUp(fJB),eYN_isZeroDepth)       &
-                            .and.                                          &
+                                   elemYN(eUp(fJB),eYN_isZeroDepth)       &
+                            .and.                                         &
                             (.not. elemYN(eDn(fJB),eYN_isZeroDepth))      &
-                        )     
+                            .and.                                         &
+                            ( (elemI(eUp(fJB),ei_elementType) .eq. CC)    &
+                                .or.                                      &
+                              (elemI(eUp(fJB),ei_elementType) .eq. JB)    &
+                            )                                             &
+                            .and.                                         &
+                            ( (elemI(eDn(fJB),ei_elementType) .eq. CC)    &
+                            .or.                                          &
+                              (elemI(eDn(fJB),ei_elementType) .eq. JB)    &
+                            )                                             &
+                        )  
             end if
 
         !%=========================
         !% ---- fp_JB_downstream_is_zero_IorS 
+        !%      downstream of JB face is zero depth, but upstream is not
             ptype => col_faceP(fp_JB_downstream_is_zero_IorS)
             npack => npack_faceP(ptype)
-            npack = count(                                                 &
-                                elemYN(eDn(fJB),eYN_isZeroDepth)       &
-                            .and.                                          &
+            npack = count(                                                &
+                                elemYN(eDn(fJB),eYN_isZeroDepth)          &
+                            .and.                                         &
                             (.not. elemYN(eUp(fJB),eYN_isZeroDepth))      &
+                            .and.                                         &
+                            ( (elemI(eUp(fJB),ei_elementType) .eq. CC)    &
+                                .or.                                      &
+                              (elemI(eUp(fJB),ei_elementType) .eq. JB)    &
+                            )                                             &
+                            .and.                                         &
+                            ( (elemI(eDn(fJB),ei_elementType) .eq. CC)    &
+                            .or.                                          &
+                              (elemI(eDn(fJB),ei_elementType) .eq. JB)    &
+                            )                                             &
                         ) 
             if (npack > 0) then 
                 faceP(1:npack,ptype) = pack(fJB ,                         &
-                                elemYN(eDn(fJB),eYN_isZeroDepth)       &
-                            .and.                                          &
+                                   elemYN(eDn(fJB),eYN_isZeroDepth)       &
+                            .and.                                         &
                             (.not. elemYN(eUp(fJB),eYN_isZeroDepth))      &
+                            .and.                                         &
+                            ( (elemI(eUp(fJB),ei_elementType) .eq. CC)    &
+                                .or.                                      &
+                              (elemI(eUp(fJB),ei_elementType) .eq. JB)    &
+                            )                                             &
+                            .and.                                         &
+                            ( (elemI(eDn(fJB),ei_elementType) .eq. CC)    &
+                            .or.                                          &
+                              (elemI(eDn(fJB),ei_elementType) .eq. JB)    &
+                            )                                             &
                         )
     
             end if  
 
         !%================
         !% ---- fp_JB_bothsides_are_zero_IorS 
+        !%      both JB and upstream or downstream CC are zero depth
+        !%      
             ptype => col_faceP(fp_JB_bothsides_are_zero_IorS)
             npack => npack_faceP(ptype)
-            npack = count(                                                 &
-                                elemYN(eDn(fJB),eYN_isZeroDepth)       &
-                            .and.                                          &
-                                elemYN(eUp(fJB),eYN_isZeroDepth)       &
-                        ) 
+            npack = count(                                                &
+                            elemYN(eDn(fJB),eYN_isZeroDepth)              &
+                            .and.                                         &
+                            elemYN(eUp(fJB),eYN_isZeroDepth)              &
+                            .and.                                         &
+                            ( (elemI(eUp(fJB),ei_elementType) .eq. CC)    &
+                                .or.                                      &
+                              (elemI(eUp(fJB),ei_elementType) .eq. JB)    &
+                            )                                             &
+                            .and.                                         &
+                            ( (elemI(eDn(fJB),ei_elementType) .eq. CC)    &
+                            .or.                                          &
+                              (elemI(eDn(fJB),ei_elementType) .eq. JB)    &
+                            )                                             &
+                        )
+        
             if (npack > 0) then 
                 faceP(1:npack,ptype) = pack(fJB ,                         &
-                                elemYN(eDn(fJB),eYN_isZeroDepth)       &
-                            .and.                                          &
-                                elemYN(eUp(fJB),eYN_isZeroDepth)       &
+                            elemYN(eDn(fJB),eYN_isZeroDepth)              &
+                            .and.                                         &
+                            elemYN(eUp(fJB),eYN_isZeroDepth)              &
+                            .and.                                         &
+                            ( (elemI(eUp(fJB),ei_elementType) .eq. CC)    &
+                                .or.                                      &
+                              (elemI(eUp(fJB),ei_elementType) .eq. JB)    &
+                            )                                             &
+                            .and.                                         &
+                            ( (elemI(eDn(fJB),ei_elementType) .eq. CC)    &
+                            .or.                                          &
+                              (elemI(eDn(fJB),ei_elementType) .eq. JB)    &
+                            )                                             &
                         )
   
             end if  
@@ -2419,21 +2485,21 @@ contains
             fIdx   => faceI(1:Nfaces,fi_Lidx)
         !%------------------------------------------------------------------
         
-    !% fp_Diag_all
-        !% --- all faces adjacent to a diagnostic element
-        ptype => col_faceP(fp_Diag_all)
+        !% fp_Diag_any
+        !% --- faces adjacent on either side to a diagnostic element
+        ptype => col_faceP(fp_Diag_any)
         npack => npack_faceP(ptype)
 
-        npack = count(faceYN(1:Nfaces,fYN_isDiag_adjacent_all))
+        npack = count(faceYN(1:Nfaces,fYN_isDiag_adjacent_any))
 
         if (npack > 0) then 
             faceP(1:npack,ptype) = pack(fIdx,                        &
-                      faceYN(1:Nfaces,fYN_isDiag_adjacent_all))
+                      faceYN(1:Nfaces,fYN_isDiag_adjacent_any))
         end if
 
-    !% fp_JB_all
+    !% fp_JB_any
         !% --- all faces with JB on either side
-        ptype => col_faceP(fp_JB_all)
+        ptype => col_faceP(fp_JB_any)
         npack => npack_faceP(ptype)
         npack = count(                                           &
                       faceYN(1:Nfaces,fYN_isFaceUpstreamOfJB)      &
@@ -2451,6 +2517,7 @@ contains
 
     !% fp_notJB_all
         !% --- CC or Diag faces that are not adjacent to JB
+        !%     on either sice
         ptype => col_faceP(fp_notJB_all)
         npack => npack_faceP(ptype)
         npack = count(                                                   &
@@ -2466,16 +2533,16 @@ contains
                         )
         end if
 
-    !% fp_JBorDiag_all
+    !% fp_JBorDiag_any
         !% --- faces connected to either a JB or a Diag or or both  
-        ptype => col_faceP(fp_JBorDiag_all)
+        ptype => col_faceP(fp_JBorDiag_any)
         npack => npack_faceP(ptype)
         npack = count(                                             &
                         (faceYN(1:Nfaces,fYN_isFaceUpstreamOfJB))    &
                         .or.                                       &
                         (faceYN(1:Nfaces,fYN_isFaceDownstreamOfJB) ) &
                         .or.                                       &
-                        (faceYN(1:Nfaces,fYN_isDiag_adjacent_all)) &
+                        (faceYN(1:Nfaces,fYN_isDiag_adjacent_any)) &
                       )
         if (npack > 0) then 
             faceP(1:npack,ptype) = pack(fIdx,                      &
@@ -2483,7 +2550,7 @@ contains
                         .or.                                       &
                         (faceYN(1:Nfaces,fYN_isFaceDownstreamOfJB) ) &
                         .or.                                       &
-                        (faceYN(1:Nfaces,fYN_isDiag_adjacent_all)) &
+                        (faceYN(1:Nfaces,fYN_isDiag_adjacent_any)) &
                        )
         end if
 

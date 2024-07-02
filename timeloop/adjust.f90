@@ -14,7 +14,7 @@ module adjust
     use define_settings, only: setting
     use pack_mask_arrays, only: pack_small_or_zero_depth_elements, pack_CC_zeroDepth_interior_faces
     use preissmann_slot, only: slot_Vshaped_adjust
-    use utility
+    use utility, only: util_sign_with_ones, util_sign_with_ones_or_zero !
     use utility_crash
 
     implicit none
@@ -34,6 +34,7 @@ module adjust
     integer :: printJB2 = 263
     integer :: printUp = 260
     integer :: printDn = 272
+    integer :: printE = 377
     integer :: stepCut = 76116
 
     contains
@@ -41,13 +42,14 @@ module adjust
 !% PUBLIC
 !%==========================================================================
 !%
-    subroutine adjust_element_toplevel (elementType)
+    subroutine adjust_element_toplevel (elementType, isConservativeTF)
         !%------------------------------------------------------------------
         !% Description
         !% adjustments for zero depth or small depth
         !%------------------------------------------------------------------
         !% Declarations
             integer, intent(in) :: elementType !%, CC, JM, JB
+            logical, intent(in) :: isConservativeTF !% true means that artificial volume inflow is included in adjustment
             integer :: npack
         !%------------------------------------------------------------------
 
@@ -55,20 +57,45 @@ module adjust
         !% --- identify zero depths (.true. is zero depth)
         call adjust_zero_or_small_depth_identify_NEW(elementType,.true.)
 
+        ! print *, ' '
+        ! print *, 'in adjust AAA'
+        ! print *, elemR(printE,er_Volume), elemR(printE,er_Volume_N0), elemR(printE,er_Volume) -elemR(printE,er_Volume_N0)
+        ! print *, ' '
+
         if (setting%SmallDepth%useMomentumCutoffYN) then    
             !% --- identify small depths (.false. is small depth)
             call adjust_zero_or_small_depth_identify_NEW(elementType,.false.)                
         end if
 
+        ! print *, ' '
+        ! print *, 'in adjust BBB'
+        ! print *, elemR(printE,er_Volume), elemR(printE,er_Volume_N0), elemR(printE,er_Volume) -elemR(printE,er_Volume_N0)
+        ! print *, ' '
+
         !% --- create packed arrays of zero and small depths
         call pack_small_or_zero_depth_elements (elementType,.true.)
+
+        ! print *, ' '
+        ! print *, 'in adjust CCC'
+        ! print *, elemR(printE,er_Volume), elemR(printE,er_Volume_N0), elemR(printE,er_Volume) -elemR(printE,er_Volume_N0)
+        ! print *, ' '
 
         if (setting%SmallDepth%useMomentumCutoffYN) then   
             call pack_small_or_zero_depth_elements (elementType,.false.)
         end if
 
+        ! print *, ' '
+        ! print *, 'in adjust DDD'
+        ! print *, elemR(printE,er_Volume), elemR(printE,er_Volume_N0), elemR(printE,er_Volume) -elemR(printE,er_Volume_N0)
+        ! print *, ' '
+
         !% --- adjust head, flowrate, and auxiliary values at zero depth
-        call adjust_zerodepth_element_values (elementType) 
+        call adjust_zerodepth_nonvolume_element_values (elementType, isConservativeTF) 
+
+        ! print *, ' '
+        ! print *, 'in adjust EEE'
+        ! print *, elemR(printE,er_Volume), elemR(printE,er_Volume_N0), elemR(printE,er_Volume) -elemR(printE,er_Volume_N0)
+        ! print *, ' '
 
         select case (elementType)
             case (CC) 
@@ -86,6 +113,11 @@ module adjust
                 print *, 'CODE ERROR unexpected case default'
                 call util_crashpoint(2250983)
         end select
+
+        ! print *, ' '
+        ! print *, 'in adjust FFF'
+        ! print *, elemR(printE,er_Volume), elemR(printE,er_Volume_N0), elemR(printE,er_Volume) -elemR(printE,er_Volume_N0)
+        ! print *, ' '
 
     end subroutine adjust_element_toplevel
 !%
@@ -111,45 +143,54 @@ module adjust
 !%==========================================================================
 !%==========================================================================  
 !%        
-    subroutine adjust_limit_by_zerovalues (geocol, geozero, thisP, isVolume)
+    subroutine adjust_limit_by_zerovalues (geocol, geozero, thisP, isVolume, istep)
         !%------------------------------------------------------------------
         !% Description:
         !% This applies a zero value limiter for a packed array that is not
         !% a priori limited to zero value elements
+        !% Note that istep=0 can be used whenever the VolumeArtificialInflow
+        !% adjustment is not needed
         !%------------------------------------------------------------------
         !% Declarations:
-            integer, intent(in) :: geocol, thisP(:)
+            integer, intent(in) :: geocol, thisP(:), istep
             real(8), intent(in) :: geozero
             logical, intent(in) :: isVolume
-            real(8), pointer    :: geovalue(:), overflow(:)    
+            real(8), pointer    :: geovalue(:), VolumeArtificialInflow(:)    
             character(64) :: subroutine_name = 'adjust_limit_by_zerovalues'
         !%------------------------------------------------------------------
         !% Preliminaries
-            if (setting%Debug%File%adjust) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
         !%------------------------------------------------------------------
         !% Aliases
-            geovalue     => elemR(:,geocol)
-            overflow     => elemR(:,er_VolumeOverFlow)
+            geovalue               => elemR(:,geocol)
+            VolumeArtificialInflow => elemR(:,er_VolumeArtificialInflow)
         !%------------------------------------------------------------------
 
         if (isVolume) then
             !% --- we are gaining volume by resetting to the geozero (minimum),so
-            !%    count this as a negative overflow
-            where (geovalue(thisP) < geozero)
-                overflow(thisP) = overflow(thisP) - (geozero - geovalue(thisP)) 
-                geovalue(thisP) = geozero
-            end where
+            !%    count this as an artificial inflow
+            if (istep == twoI) then
+                !% --- for a conservation flux step (2 in RK2) set the artificial inflow
+                where (geovalue(thisP) < geozero)
+                    VolumeArtificialInflow(thisP) = (geozero - geovalue(thisP))
+                    geovalue(thisP) = geozero
+                end where
+                ! if (sum(VolumeArtificialInflow(thisP)) .ne. zeroR) then 
+                !     print *, ' '
+                !     print *, 'In adjust_limit_by_zerovalues , artificialInflow ',sum(VolumeArtificialInflow(thisP))
+                !     print *, ' '
+                !     !stop 509874
+                ! end if
+            else
+                !% --- non-conservation steps simply set the minimum volume
+                where (geovalue(thisP) < geozero)
+                    geovalue(thisP) = geozero
+                end where
+            end if
         else
             where (geovalue(thisP) .le. geozero)
                 geovalue(thisP) = geozero * 0.99d0
             endwhere
         end if
-       
-        !%------------------------------------------------------------------
-        !% Closing
-            if (setting%Debug%File%adjust) &
-                write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
 
     end subroutine adjust_limit_by_zerovalues
 !%
@@ -157,43 +198,49 @@ module adjust
 !%==========================================================================  
 !%    
     subroutine adjust_limit_by_zerovalues_singular &
-        (eIdx, geocol, geozero, isVolume)
+        (eIdx, geocol, geozero, isVolume, istep)
         !%------------------------------------------------------------------
         !% Description:
         !% Applies either the ZeroValue limiter (geozero) or zeroR as a lower limit to the
         !% geometry variable in elemR(:,geocol) for the single elemetn eIdx
+        !% Note that istep=0 can be used whenever the VolumeArtificialInflow
+        !% adjustment is not needed
         !%------------------------------------------------------------------
         !% Declarations:
-            integer, intent(in) :: geocol, eIdx
+            integer, intent(in) :: geocol, eIdx, istep
             real(8), intent(in) :: geozero
             logical, intent(in) :: isVolume
-            real(8), pointer :: geovalue(:), overflow(:)        
+            real(8), pointer :: geovalue(:), VolumeArtificialInflow(:)    
             character(64) :: subroutine_name = 'adjust_limit_by_zerovalues_singular'
         !%------------------------------------------------------------------
         !% Preliminaries:
-            if (setting%Debug%File%adjust) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
         !%------------------------------------------------------------------
         !% Aliases:
-            geovalue => elemR(:,geocol)
-            overflow => elemR(:,er_VolumeOverFlow)
+            geovalue               => elemR(:,geocol)
+            VolumeArtificialInflow => elemR(:,er_VolumeArtificialInflow)
         !%------------------------------------------------------------------
         if (geovalue(eIdx) .le. geozero) then
             if (isVolume) then
-                !% --- we are gaining volume by resetting to the geozero (minimum),so
-                !%    count this as a negative overflow
-                overflow(eIdx) = overflow(eIdx) - (geozero - geovalue(eIdx))
-                geovalue(eIdx) = geozero
+                if (istep == twoI) then
+                    !% --- we are gaining volume by resetting to the geozero (minimum),so
+                    !%    count this as a negative overflow
+                    VolumeArtificialInflow(eIdx) = (geozero - geovalue(eIdx))
+                    geovalue(eIdx) = geozero
+                else
+                    geovalue(eIdx) = geozero
+                end if
+
+                ! if (VolumeArtificialInflow(eIdx) .ne. zeroR) then 
+                !     print *, ' '
+                !     print *, 'In adjust_limit_by_zerovalues_singular ', eIdx,VolumeArtificialInflow(eIdx)
+                !     print *, ' '
+                !     !stop 509874
+                ! end if
             else
                 geovalue(eIdx) = geozero * 0.99d0
             end if
             
         end if
-
-        !%------------------------------------------------------------------
-        !% Closing
-            if (setting%Debug%File%adjust) &
-                write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
                 
     end subroutine adjust_limit_by_zerovalues_singular
 !%
@@ -406,13 +453,14 @@ module adjust
 !%==========================================================================   
 !%==========================================================================
 !%
-    subroutine adjust_zerodepth_element_values (whichType)  !% PRIVATE
+    subroutine adjust_zerodepth_nonvolume_element_values (whichType, isConservativeTF)  !% PRIVATE
         !% -----------------------------------------------------------------
         !% Description:
         !% thisCol must be one of the ZeroDepth packed arrays that identifies
         !% all the (near) zero depth locations.
         !% -----------------------------------------------------------------
             integer, intent(in)  :: whichType
+            logical, intent(in)  :: isConservativeTF
             integer, pointer :: thisCol, npack, thisP(:)
         !% -----------------------------------------------------------------
         !% Preliminaries
@@ -439,7 +487,7 @@ module adjust
         end where
 
         elemR(thisP,er_Area)         = setting%ZeroValue%Area
-        elemR(thisP,er_dHdA)         = oneR / setting%ZeroValue%TopWidth
+        !elemR(thisP,er_dHdA)         = oneR / setting%ZeroValue%TopWidth
         elemR(thisP,er_EllDepth)     = setting%ZeroValue%Depth * 0.99d0
         elemR(thisP,er_Flowrate)     = zeroR 
         elemR(thisP,er_FroudeNumber) = zeroR
@@ -450,12 +498,21 @@ module adjust
         elemR(thisP,er_WaveSpeed)    = zeroR
         elemR(thisP,er_Head)         = setting%ZeroValue%Depth*0.99d0 + elemR(thisP,er_Zbottom)
     
-        !% --- only reset volume when it gets negative
-        where (elemR(thisP,er_Volume) .le. zeroR)  !% changed to remove zero volume 20231005 brh
-            elemR(thisP,er_Volume) = setting%ZeroValue%Volume 
-        end where
+        ! where (elemR(thisP,er_Volume) < setting%ZeroValue%Volume)
+        !     elemR(thisP,er_Volume) = setting%ZeroValue%Volume 
+        ! endwhere
+
+        !% --- this is done for CC in call to adjust_limit_by_zerovalues in call from rk2_step_CC
+        ! if (isConservativeTF) then
+        !     !% --- store volume change as artificial inflow
+        !     where (elemR(thisP,er_Volume) < setting%ZeroValue%Volume) 
+        !         elemR(thisP,er_VolumeArtificialInflow)                     &
+        !             = elemR(thisP,er_VolumeArtificialInflow)               &
+        !             + (setting%ZeroValue%Volume - elemR(thisP,er_Volume))
+        !     end where
+        ! end if
     
-    end subroutine adjust_zerodepth_element_values 
+    end subroutine adjust_zerodepth_nonvolume_element_values 
 !%  
 !%==========================================================================   
 !%==========================================================================

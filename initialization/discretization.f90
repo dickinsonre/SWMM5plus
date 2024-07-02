@@ -18,7 +18,7 @@ module discretization
 
     implicit none
 
-    public init_discretization_nominal
+    public discretization_nominal
     private
 
 contains
@@ -27,7 +27,7 @@ contains
 !% PUBLIC
 !%==========================================================================
 !%
-    subroutine init_discretization_nominal(link_idx)
+    subroutine discretization_nominal(link_idx)
     !%----------------------------------------------------------------------
     !% Description:
     !%   This subroutine sets the number of elements per link.  The element length
@@ -39,11 +39,9 @@ contains
         real(8), pointer :: elem_nominal_length
         integer, pointer :: min_elem_per_link
         logical, pointer :: use_nominal_length
-        character(64) :: subroutine_name = 'init_discretization_nominal'
+        character(64) :: subroutine_name = 'discretization_nominal'
     !%----------------------------------------------------------------------
     !% Preliminaries
-        if (setting%Debug%File%discretization) &
-            write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
     !%----------------------------------------------------------------------
     !% Aliases
         !use_nominal_length  => setting%Discretization%UseNominalElemLength
@@ -52,7 +50,6 @@ contains
     !%----------------------------------------------------------------------
 
         !% --- treatment of for special links
-        !%     note that equivalent orifices have type lOrifice
         if ((link%I(link_idx,li_link_type) == lWeir)    .or. &
             (link%I(link_idx,li_link_type) == lOrifice) .or. &
             (link%I(link_idx,li_link_type) == lOutlet)  .or. &
@@ -61,6 +58,13 @@ contains
             link%R(link_idx, lr_ElementLength) = link%R(link_idx, lr_Length)
             return
         end if 
+
+        !% --- equivalent orifice links count as a single link
+        if (link%YN(link_idx,lYN_isEquivalentOrifice)) then
+            link%I(link_idx, li_N_element) = oneI
+            link%R(link_idx, lr_ElementLength) = link%R(link_idx, lr_Length)
+            return
+        end if  
 
         !% --- for channel and pipe only
         if  ((link%I(link_idx,li_link_type) == lChannel)  .or. &
@@ -76,7 +80,7 @@ contains
                     remainder = mod(link%R(link_idx,lr_Length), elem_nominal_length)
                     
                     if ( remainder == zeroR ) then
-                        !% --- the elements fit evenly into the length of link
+                        !% --- the elements fit precisely into the length of link
                         link%I(link_idx, li_N_element)     = int(link%R(link_idx, lr_Length) / elem_nominal_length)
                         link%R(link_idx, lr_ElementLength) = link%R(link_idx, lr_Length) / link%I(link_idx, li_N_element)
 
@@ -100,21 +104,37 @@ contains
                         link%R(link_idx, lr_ElementLength) = link%R(link_idx, lr_Length)
                     end if
 
+                    !% --- check for small channel or conduit link that cannot be subdivided
+                    !%     note that EquivalentOrifice links should never reach this point
                     if ((link%I(link_idx, li_N_element)     < min_elem_per_link)                .or. &
                         (link%R(link_idx, lr_ElementLength) < (onehalfR * elem_nominal_length))        ) then
 
                         select case (setting%Discretization%SmallElementHandling)
 
-                            case (EquivalentOrifice,LengthenLink,FailLimiter) 
-                                !% --- this should not be rearched as initialization should fix the problem
-                                write(*,*) 'CODE ERROR: in Small Element Handling'
+                            case (EquivalentOrifice)
+                                write(*,*) 'CODE ERROR: unexpected EquivalentOrifice case'
+                                call util_crashpoint(798273)
+
+                            case (LengthenLink) 
+                                write(*,*) 'USER CONFIGURATION ERROR: LengthenLink is not supported'
+                                write(*,*) 'for setting.Discretization.SmallElementHandling.'
+                                write(*,*) 'Use EquivalentOrifice, AllowSmallLinks, or FailLimiter)'
+                                call util_crashpoint(2209874)
+
+                            case (FailLimiter) 
+                                !% --- small link found
+                                write(*,*) 'USER CONFIGURATION ERROR: '
+                                write(*,*) 'caused by setting.Discretization.SmallElementHandling value of FailLimiter'
                                 write(*,*) 'Link with insufficient length found in discretization'
-                                write(*,*) 'but this should have been fixed in link initialization'
-                                write(*,*) 'Link # is ',link_idx 
-                                write(*,*) 'Link Name is ',trim(link%Names(link_idx)%str)
+                                write(*,*) 'Link # is      ',link_idx 
+                                write(*,*) 'Link Name is   ',trim(link%Names(link_idx)%str)
                                 write(*,*) 'Link length    ',link%R(link_idx, lr_Length)
-                                write(*,*) 'Element length ',link%R(link_idx, lr_ElementLength)
                                 write(*,*) 'nominal length ',elem_nominal_length
+                                write(*,*) 'number of elements per link ',min_elem_per_link
+                                write(*,*) 'Minimum link length is      ', min_elem_per_link * elem_nominal_length
+                                write(*,*) 'You may set the setting.Discretization.SmallElementHandling'
+                                write(*,*) 'to EquivalentOrifice or AllowSmallLinks or you can manually lengthen'
+                                write(*,*) 'the small link in your *.inp file'
                                 write(*,*) 
                                 call util_crashpoint(72120987)
 
@@ -125,23 +145,12 @@ contains
 
                             case default 
                                 write(*,*) 'CODE ERROR: unexpected case default'
-                                call util_crashpoint(2209874)
+                                call util_crashpoint(22098744)
 
                         end select
                     else 
                         !% --- continue, sufficient elements per link
                     end if
-
-                    ! !% --- only force a minimum number of elements per link if the minimum
-                    ! !%     number of elements per link settings is set to greater than one
-                    ! if (min_elem_per_link > oneI) then
-                    !     !% check for links that has less elements than 
-                    !     !% the specified minimum number of elements
-                    !     if (link%I(link_idx, li_N_element) < min_elem_per_link) then
-                    !         link%I(link_idx, li_N_element) = min_elem_per_link
-                    !         link%R(link_idx, lr_ElementLength) = link%R(link_idx, lr_Length) / link%I(link_idx, li_N_element)
-                    !     end if 
-                    ! end if
 
                 case (UnequalElements)
                     !% --- use the minimum number of elements per link in each link
@@ -152,19 +161,34 @@ contains
                     if (link%R(link_idx, lr_ElementLength) < (onehalfR * elem_nominal_length)) then
 
                         select case (setting%Discretization%SmallElementHandling)
-                            case (EquivalentOrifice,LengthenLink,FailLimiter) 
-                                !% --- this should not be reached as initialization should fix the problem
-                                write(*,*) 'CODE ERROR: in Small Element Handling'
-                                write(*,*) 'Link with insufficient length found in discretization'
-                                write(*,*) 'but this should have been fixed in link initialization'
-                                write(*,*) 'Link # is ',link_idx 
-                                write(*,*) 'Link Name is ',trim(link%Names(link_idx)%str)
-                                write(*,*) 'Link length    ',link%R(link_idx, lr_Length)
-                                write(*,*) 'Element length ',link%R(link_idx, lr_ElementLength)
-                                write(*,*) 'nominal length ',elem_nominal_length
-                                write(*,*) 
-                                call util_crashpoint(829887)
 
+                            case (EquivalentOrifice)
+                                write(*,*) 'CODE ERROR: unexpected EquivalentOrifice case'
+                                call util_crashpoint(798274)
+
+                            case (LengthenLink) 
+                                write(*,*) 'USER CONFIGURATION ERROR: LengthenLink is not supported'
+                                write(*,*) 'for setting.Discretization.SmallElementHandling.'
+                                write(*,*) 'Use EquivalentOrifice, AllowSmallLinks, or FailLimiter)'
+                                call util_crashpoint(2209871)
+
+                            case (FailLimiter) 
+                                !% --- small link found
+                                write(*,*) 'USER CONFIGURATION ERROR: '
+                                write(*,*) 'caused by setting.Discretization.SmallElementHandling value of FailLimiter'
+                                write(*,*) 'Link with insufficient length found in discretization'
+                                write(*,*) 'Link # is      ',link_idx 
+                                write(*,*) 'Link Name is   ',trim(link%Names(link_idx)%str)
+                                write(*,*) 'Link length    ',link%R(link_idx, lr_Length)
+                                write(*,*) 'nominal length ',elem_nominal_length
+                                write(*,*) 'number of elements per link ',min_elem_per_link
+                                write(*,*) 'Minimum link length is      ', min_elem_per_link * elem_nominal_length
+                                write(*,*) 'You may set the setting.Discretization.SmallElementHandling'
+                                write(*,*) 'to EquivalentOrifice or AllowSmallLinks or you can manually lengthen'
+                                write(*,*) 'the small link in your *.inp file'
+                                write(*,*) 
+                                call util_crashpoint(7212099)
+                      
                             case (AllowSmallLinks)
                                 !% --- subdivide link into smaller elements to meet minimum
                                 link%I(link_idx, li_N_element) = min_elem_per_link
@@ -172,7 +196,7 @@ contains
 
                             case default 
                                 write(*,*) 'CODE ERROR: unexpected case default'
-                                call util_crashpoint(2209874)
+                                call util_crashpoint(2209834)
                         end select
                     else
                         !% --- continue, small element length not found
@@ -187,9 +211,10 @@ contains
 
         else 
             write(*,*) 'CODE ERROR -- unexpected else reached'
+            call util_crashpoint (2555987)
         end if
 
-    end subroutine init_discretization_nominal
+    end subroutine discretization_nominal
 !%
 !%==========================================================================
 !%==========================================================================
@@ -204,7 +229,7 @@ contains
         !% Description:
         !%   This subroutine computes the "Adusted_Length" that is a section of the
         !%   a channel/conduit that is used for a junction branch, which is completed
-        !%   in init_network_nJm_branch_length()
+        !%   in network_nJm_branch_length()
         !% 
         !%   If "isAdjustLinkLength = .true., then this value is subtracted
         !%   from the channel/conduit length herein 

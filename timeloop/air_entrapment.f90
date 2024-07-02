@@ -150,7 +150,7 @@ contains
 
                     !% if an airpocket is vented through JM, add that airpocket JM airpocket
                     !% and save the  maps of the airI array to the elemSI structure
-                    !% BRH Maps are now saved in init_IC_air_entrapment and initialization is
+                    !% BRH Maps are now saved in IC_air_entrapment and initialization is
                     !% done in airpockets detection
                     !call airpockets_junction_air_maps (ii, jj)
 
@@ -1098,7 +1098,7 @@ contains
     !                     case (upReleaseAirpocket)
     !                         if (ventedUpJM .and. JunctionAirPocket) then
     !                             ! elemSR(upJMidx,esr_JM_Air_MassInflowRate) = - massOutflow + elemSR(upJMidx,esr_JM_Air_MassInflowRate)
-    !                             !elemSI(upJBidx,esi_JB_vLink_Connection) = sc_Idx BRH Set in init_IC_air_entrapment
+    !                             !elemSI(upJBidx,esi_JB_vLink_Connection) = sc_Idx BRH Set in IC_air_entrapment
     !                             !elemSI(upJBidx,esi_JB_air_pocket_index) = aIdx !BRH set in airpockets_detection
     !                             !elemYN(upJBidx,eYN_hasAirPocket) = .true.  !BRH set in airpockets_detection
     !                             !elemYN(dnJBidx,eYN_hasAirPocket) = .true.
@@ -1106,7 +1106,7 @@ contains
     !                     case (dnReleaseAirpocket)
     !                         if (ventedDnJM .and. JunctionAirPocket) then
     !                             ! elemSR(dnJMidx,esr_JM_Air_MassInflowRate) = - massOutflow + elemSR(upJMidx,esr_JM_Air_MassInflowRate)
-    !                             !elemSI(dnJBidx,esi_JB_vLink_Connection) = sc_Idx BRH Set in init_IC_air_entrapment
+    !                             !elemSI(dnJBidx,esi_JB_vLink_Connection) = sc_Idx BRH Set in IC_air_entrapment
     !                             !elemSI(dnJBidx,esi_JB_air_pocket_index) = aIdx  !BRH set in airpockets_detection
     !                             !elemYN(dnJBidx,eYN_hasAirPocket) = .true.  !BRH set in airpockets_detection
     !                             !elemYN(dnJBidx,eYN_hasAirPocket) = .true.

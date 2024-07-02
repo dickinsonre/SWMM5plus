@@ -316,7 +316,7 @@ module define_globals
     integer :: lastTransectIdx = 0
 
     !% --- dummy index for elements/faces that do not exist
-    !%     value set in init_network_set_dummy_elem()
+    !%     value set in network_set_dummy_elem()
     integer               :: dummyIdx
     integer, dimension(1) :: dummyUnitArray
 

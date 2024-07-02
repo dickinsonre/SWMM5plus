@@ -43,26 +43,26 @@
         enumerator :: ALL                   !% all elements
 
         !% --- different link and their geometry types (HACK: probably could be consolidated to element types)
-        enumerator :: lChannel              !% channel link
-        enumerator :: lPipe                 !% pipe link
-        enumerator :: lWeir                 !% weir link
-        enumerator :: lTransverseWeir       !% transverse weir link
-        enumerator :: lSideFlowWeir         !% sideflow weir link
-        enumerator :: lRoadWayWeir          !% roadway weir link
-        enumerator :: lVnotchWeir           !% vnotch weir link
-        enumerator :: lTrapezoidalWeir      !% trapezoidal weir link
-        enumerator :: lOrifice              !% orifice link
-        enumerator :: lBottomOrifice        !% bottom orifice link
-        enumerator :: lSideOrifice          !% side orifice link
-        enumerator :: lEquivalentOrificeChannel    !% link converted to equivalent orifice
-        enumerator :: lEquivalentOrificePipe
-        enumerator :: lPump                 !% pump link
-        enumerator :: lType1Pump            !% type 1 pump link
-        enumerator :: lType2Pump            !% type 2 pump link
-        enumerator :: lType3Pump            !% type 3 pump link
-        enumerator :: lType4Pump            !% type 4 pump link
-        enumerator :: lTypeIdealPump        !% ideal pump link
-        enumerator :: lOutlet               !% outlet link
+        enumerator :: lChannel              !% channel link (li_link_type)
+        enumerator :: lPipe                 !% pipe link  (li_link_type)
+        enumerator :: lWeir                 !% weir link (li_link_type)
+        enumerator :: lTransverseWeir       !% transverse weir link (li_link_subtype)
+        enumerator :: lSideFlowWeir         !% sideflow weir link (li_link_subtype)
+        enumerator :: lRoadWayWeir          !% roadway weir link (li_link_subtype)
+        enumerator :: lVnotchWeir           !% vnotch weir link (li_link_subtype)
+        enumerator :: lTrapezoidalWeir      !% trapezoidal weir link (li_link_subtype)
+        enumerator :: lOrifice              !% orifice link (li_link_type)
+        enumerator :: lBottomOrifice        !% bottom orifice link (li_link_subtype)
+        enumerator :: lSideOrifice          !% side orifice link (li_link_subtype)
+        enumerator :: lEquivalentOrificeChannel !% link converted to equivalent orifice (li_link_subtype)
+        enumerator :: lEquivalentOrificePipe    !% link converted to equivalent orifice (li_link_subtype)
+        enumerator :: lPump                 !% pump link (li_link_type)
+        enumerator :: lType1Pump            !% type 1 pump link (li_link_subtype)
+        enumerator :: lType2Pump            !% type 2 pump link (li_link_subtype)
+        enumerator :: lType3Pump            !% type 3 pump link (li_link_subtype)
+        enumerator :: lType4Pump            !% type 4 pump link (li_link_subtype)
+        enumerator :: lTypeIdealPump        !% ideal pump link (li_link_subtype
+        enumerator :: lOutlet               !% outlet link (li_link_type)
         enumerator :: lNodeDepth            !% outlet having functional\curve flow vs depth relationship  
         enumerator :: lNodeHead             !% outlet having functional\curve flow vs head relationship 
 
@@ -116,6 +116,7 @@
         enumerator :: FunctionalStorage     !% junction main storage is cauculated from a user provided function
         enumerator :: TabularStorage        !% junction main storage is cauculated from a user provided table
         enumerator :: manhole               !% manhole elemen (HACK: not sure if we need this)
+        enumerator :: allType               !% key for applying to any (all) types
         enumerator :: dummy                 !% dummy element type
 
         !% --- SWMM5+ CC geometry types

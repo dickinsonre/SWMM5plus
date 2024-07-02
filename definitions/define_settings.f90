@@ -58,8 +58,12 @@ module define_settings
 
     !% setting%Output%CommandLine
     type CommandLineType
-        logical :: quietYN = .false.
-        integer :: interval = 1000 !% steps between commandline output
+        logical         :: quietYN = .false.
+        logical         :: showVolumeConservation = .false.
+        logical         :: showTimeToCompletion = .false.
+        logical         :: noBlank = .false.
+        integer         :: interval = 1000 !% steps between commandline output
+        integer(kind=8) :: startoutput = 0  !% time step to start command line output
     end type CommandLineType
 
     !% setting%Time%CPU
@@ -127,6 +131,19 @@ module define_settings
         real(8) :: Default_ManningsN = 0.03  !% used on FM elements when AllowForceMainTF = false
         real(8) :: minimum_slope  = 1.0d-3  !% minimum slope in HW computation
     end type ForceMainType
+
+    !% setting%Debug%GlobalVolume
+    !% setting%Debug%LocalVolume
+    !% --- note that both global and local must have same defaults here
+    !%     but are modified in define_settings_default
+    type DebugVolumeType
+        logical :: useVolumeBalanceTF = .true. !% conducts volume balance at each time step
+        real(8) :: FailureThreshold   = 1.d-8  !% normalized volume non-conservation causing code to stop
+        real(8) :: LatestValue        = 0.d0   !% NOT A USER SETTING
+        real(8) :: LatestScaledValue  = 0.d0   !% NOT A USER SETTING
+        real(8) :: CumulativeValue    = 0.d0   !% NOT A USER SETTING
+        real(8) :: CumulativeScaledValue = 0.d0 !% NOT A USER SETTING
+    end type DebugVolumeType
 
     !% setting%BC%InflowBC
     type InflowBCType
@@ -423,8 +440,10 @@ module define_settings
 
     !% setting%Debug
     type DebugType
-        logical :: isGlobalVolumeBalance = .true. !% conducts global volume balance at each time step
-        real(8) :: GlobalVolumeBalance = 0.d0 !% NOT A USER SETTING
+        type(DebugVolumeType) :: GlobalVolume
+        type(DebugVolumeType) :: LocalVolume
+        !logical :: isGlobalVolumeBalance = .true. !% conducts global volume balance at each time step
+        !real(8) :: GlobalVolumeBalance = 0.d0 !% NOT A USER SETTING
         logical :: checkIsNanTF = .false. !% only need true if util_utext_checkIsNan is called (not standard)
         !% THESE debugFile WILL BE OBSOLETE
         type(DebugFileYNType) :: File
@@ -438,12 +457,13 @@ module define_settings
         !% NOTE Channel overflow not tested and is disabled as of 20230508
         logical :: AllowChannelOverflowTF = .false. !% if true, then open channels (CC) can overflow (lose water) NOT IN EPA SWMM
         integer :: Method               = EqualElements      !% EqualElements, UnequalElements
-        integer :: SmallElementHandling = EquivalentOrifice  !% EquivalentOrifice, LengthenLink, FailLimiter, AllowSmallLinks
+        integer :: SmallElementHandling = EquivalentOrifice  !% EquivalentOrifice, AllowSmallLinks, FailLimiter, LengthenLink
         real(8) :: NominalElemLength    = 10.0d0
         integer :: MinElementPerLink    = 3               !% force a minimum number of elements per link
-        real(8) :: MinLinkLength        = 10.0d0            !% elements below the larger of min link length or nominalElementPerLink * MinElementPerLink cause error or are replaced with equivalent orifice
+        real(8) :: MinLinkLength        = 10.0d0          !% elements below the larger of min link length or nominalElementPerLink * MinElementPerLink cause error or are replaced with equivalent orifice
         real(8) :: FullConduitTopwidthDepthFraction = 0.95d0  !% fraction of full depth used for full topwidth
-    end type DiscretizationType
+        logical :: EquivalentOrificesFound = .false.          !% NOT A USER SETTING
+        end type DiscretizationType
 
     ! setting%Eps
     type EpsilonType
@@ -600,6 +620,7 @@ module define_settings
         real(8) :: MinShutoffTime = 60.d0  !% seconds for pump to be idle before starting again 
         real(8) :: delta = 0.01d0  !% used for compute dQdH
         real(8) :: FlowVolumeLimitFactor = 0.1d0 !% fraction of upstream DH volume removed in a time step
+        real(8) :: PipeDiameterDefault = 0.5d0 
     end type PumpSettingType
 
     !% setting%Simulation
@@ -836,6 +857,9 @@ contains
         !% are provided below
         !% -----------------------------------------------------------------
 
+    setting%Debug%GlobalVolume%FailureThreshold = 1.0d-8
+    setting%Debug%LocalVolume%FailureThreshold  = 1.0d-5
+
     setting%Time%Hydrology%Dt = 600.0d0
 
     setting%Weir%Transverse%WeirExponent = 1.5d0
@@ -888,6 +912,7 @@ contains
             character(kind=json_CK, len=:), allocatable :: c, cvec(:)
             integer              :: ii, integer_value, n_controls, n_cols, n_rows,var_type
             integer              :: len_max, n_cols1, n_rows1
+            integer(kind=8)      :: long_integer_value
             integer, allocatable :: ilen(:)
             real(8)              :: real_value
             real(8), allocatable :: rvec(:)
@@ -1606,7 +1631,7 @@ contains
 
     !% Link. =====================================================================
         !%                      Link.DefaultInitDepthType    
-        !% --- HACK presently disabled -- needs to be rewritten in init_IC_get_head_and_depth   
+        !% --- HACK presently disabled -- needs to be rewritten in IC_get_head_and_depth   
         call json%get('Link.DefaultInitDepthType', c, found)
         if (found) stop "Error - json file," // "setting Link.DefaultInitDepthType is not presently supported"
         ! if (found) then            
@@ -1702,11 +1727,31 @@ contains
         call json%get('Output.CommandLine.quietYN', logical_value, found)
         if (found) setting%Output%CommandLine%quietYN = logical_value
         if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Output.CommandLine.quietYN not found'
+
+                !%                       CommandLine.noBlank
+        call json%get('Output.CommandLine.noBlank', logical_value, found)
+        if (found) setting%Output%CommandLine%noBlank= logical_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Output.CommandLine.noBlank not found'
+
+                !%                       CommandLine.showVolumeConservation
+        call json%get('Output.CommandLine.showVolumeConservation', logical_value, found)
+        if (found) setting%Output%CommandLine%showVolumeConservation = logical_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Output.CommandLine.showVolumeConservation not found'
+
+                        !%                       CommandLine.showTimeToCompletion
+        call json%get('Output.CommandLine.showTimeToCompletion', logical_value, found)
+        if (found) setting%Output%CommandLine%showTimeToCompletion = logical_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Output.CommandLine.showTimeToCompletion not found'
         
         !%                       CommandLine.interval
         call json%get('Output.CommandLine.interval', integer_value, found)
         if (found) setting%Output%CommandLine%interval = integer_value
         if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Output.CommandLine.interval not found'
+
+                !%                       CommandLine.startoutput
+        call json%get('Output.CommandLine.startoutput', integer_value, found)
+        if (found) setting%Output%CommandLine%startoutput = integer_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Output.CommandLine.startoutput not found'
 
 
         !% --- Output.DataOut
@@ -2019,6 +2064,21 @@ contains
         call json%get('Pump.MinShutoffTime', real_value, found)
         if (found) setting%Pump%MinShutoffTime = real_value
         if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Pump.MinShutoffTime not found'
+
+        !%                       delta
+        call json%get('Pump.delta', real_value, found)
+        if (found) setting%Pump%delta = real_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Pump.delta not found'
+
+        !%                       FlowVolumeLimitFactor
+        call json%get('Pump.FlowVolumeLimitFactor', real_value, found)
+        if (found) setting%Pump%FlowVolumeLimitFactor = real_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Pump.FlowVolumeLimitFactor not found'
+
+        !%                       PipeDiameterDefault
+        call json%get('Pump.PipeDiameterDefault', real_value, found)
+        if (found) setting%Pump%PipeDiameterDefault = real_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Pump.PipeDiameterDefault not found'
   
     !% Simulation. =====================================================================
         !%                       AllowReverseGradientInitialConditionsTF
@@ -2505,11 +2565,27 @@ contains
       
 
     !% Debug. =====================================================================
-        !%                       isGlobalVolumeBalance 
-        call json%get('Debug.isGlobalVolumeBalance', logical_value, found)
-        if (found) setting%Debug%isGlobalVolumeBalance = logical_value
-        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Debug.isGlobalVolumeBalance not found'
-        
+        !%                       GlobalVolume.useGlobalBalance 
+        call json%get('Debug.GlobalVolume.useVolumeBalanceTF', logical_value, found)
+        if (found) setting%Debug%GlobalVolume%useVolumeBalanceTF = logical_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Debug.GlobalVolume.useVolumeBalanceTF not found'
+       
+        !%                       GlobalVolume.FailureThreshold
+        call json%get('Debug.GlobalVolume.FailureThreshold', real_value, found)
+        if (found) setting%Debug%GlobalVolume%FailureThreshold = real_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Debug.GlobalVolume.FailureThreshold not found'
+
+        !%                       LocalVolume.useVolumeBalance 
+        call json%get('Debug.LocalVolume.useVolumeBalanceTF', logical_value, found)
+        if (found) setting%Debug%LocalVolume%useVolumeBalanceTF = logical_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Debug.LocalVolume.useVolumeBalanceTF not found'
+       
+        !%                       LocalVolume.FailureThreshold
+        call json%get('Debug.LocalVolume.FailureThreshold', real_value, found)
+        if (found) setting%Debug%LocalVolume%FailureThreshold = real_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Debug.LocalVolume.FailureThreshold not found'
+
+
         !%                       checkIsNanTF
         call json%get('Debug.checkIsNanTF', logical_value, found)
         if (found) setting%Debug%checkIsNanTF = logical_value

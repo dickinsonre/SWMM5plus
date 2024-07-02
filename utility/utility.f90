@@ -23,6 +23,8 @@ module utility
     public :: util_print_programheader
 
     public :: util_setting_constraints
+
+    public :: util_get_adjacent_CC_link
     
     public :: util_count_node_types
     public :: util_sign_with_ones
@@ -32,13 +34,14 @@ module utility
 
     public :: util_read_blankline_or_EOF 
     
-    public :: util_accumulate_volume_conservation
+    public :: util_global_volume_balance
+    public :: util_local_volume_balance
     public :: util_total_volume_conservation
 
-    public :: util_find_elements_in_link
-    public :: util_find_elements_in_junction_node
-    public :: util_find_neighbors_of_CC_element
-    public :: util_find_neighbors_of_JM_element
+    !public :: util_find_elements_in_link
+    !public :: util_find_elements_in_junction_node
+    !public :: util_find_neighbors_of_CC_element
+    !public :: util_find_neighbors_of_JM_element
 
     public :: util_unique_rank
 
@@ -108,6 +111,19 @@ module utility
             call util_crashpoint(559872)
         end if
 
+        if (setting%Discretization%MinLinkLength           &
+            < (  setting%Discretization%NominalElemLength  &
+             * setting%Discretization%MinElementPerLink)     ) then
+            print *, ' '
+            print *, 'NOTE: setting.Discretization.MinLinkLength defined by settings.f90'
+            print *, 'defaults or in *.json file is ', setting%Discretization%MinLinkLength
+            print *, 'which is smaller than the minimum link length required based on' 
+            print *, 'the implied minimum link of (NominalElemLength)(MinElementPerLink).' 
+            print *, 'The larger implied minimum of ', setting%Discretization%NominalElemLength * setting%Discretization%MinElementPerLink
+            print *, 'is used for discretization.'
+            print *, ' '
+        end if
+
         !% --- set the minimum link length allowed for normal discretization
         !% --- the minimum link length is the larger of the value
         !%     in settings or the product of the element length and mininum elements per link
@@ -119,7 +135,138 @@ module utility
                 setting%Discretization%MinLinkLength            &
                 )
 
+                !print *, 'in util_setting_constraints', setting%Discretization%MinLinkLength
+
+
     end subroutine util_setting_constraints
+!%
+!%==========================================================================
+!%==========================================================================
+!%
+    integer function util_get_adjacent_CC_link &
+        (JMorNode, notLink, isUpstream, isJMidx)    &
+        result (outLink)
+        !%------------------------------------------------------------------
+        !% Description
+        !% Gets an adjacent CC (lPipe, lChannel) link adjacent to the 
+        !% JMorNode input node. 
+        !% If isJMidx is true, the JMorNode is a JMidx
+        !% If isJMidx is false, the JMorNode is a nodeIdx
+        !% The notLink is the reference link, which cannot be returned.
+        !% If isUpstream, then looks first at upstream links 
+        !% to the JMorNode then, if none found, looks for downstream links. 
+        !% If no CC link is found, then 0 is returned.  If more than
+        !% one upstream (or downstream) link exists, then it chooses the 
+        !% conduit link (if it exists) if more than one conduit exists
+        !% it chooses the largest. If conduits do not exist, it chooses the
+        !% largest of connected channels  
+        !% This is used where "notLink" is a diagnostic element either upstream
+        !% or downstream of a JM and we would like to find a CC element on the
+        !% opposite side (i.e., downstream if notLinkis upstream) that can 
+        !% be used for the entrance/exit geometry of the diagnostic element
+        !%------------------------------------------------------------------
+        !% Declarations
+            integer, intent(in) :: JMorNode, notLink 
+            logical, intent(in) :: isUpstream, isJMidx
+
+            integer, pointer :: numNode, tLink
+
+            integer          :: inNode
+
+            integer :: outLinkPipe, outLinkChan, mm, ii, Cstart
+            real(8) :: pipeDepth, chanDepth
+
+        !%------------------------------------------------------------------
+        !%------------------------------------------------------------------ 
+
+        pipeDepth    = zeroR
+        chanDepth    = zeroR
+        outLinkChan  = zeroI
+        outLinkPipe  = zeroI
+
+        if (isJMidx) then
+            inNode = elemI(JMorNode,ei_node_Gidx_BIPquick)
+        else
+            inNode = JMorNode
+        end if
+
+        if (isUpstream) then 
+            !% --- number of upstream links
+            numNode => node%I(inNode,ni_N_link_u)
+            Cstart  =  ni_Mlink_u1
+        else
+            !% --- number of downstream links
+            numNode => node%I(inNode,ni_N_link_d)
+            Cstart  =  ni_Mlink_d1
+        end if
+          
+        !print *, ''
+        !% --- cycle through both upstream and downstream links to a node
+        do mm=1,2   
+            !% ---- cycle through the first set of links
+            do ii = Cstart, (Cstart + numNode - 1 )
+                tLink => node%I(inNode,ii)
+
+                if (tLink == notLink) cycle  !% --- originating link
+
+                if (link%I(tlink,li_barrels) > 1) cycle !% --- skip multi-barrel links
+
+                select case (link%I(tLink,li_link_type))
+
+                    case (lPipe) 
+                        !% --- found pipe, see if it is largest
+                        if (link%R(tLink,lr_FullDepth) > pipeDepth) then 
+                            pipeDepth = link%R(tLink,lr_FullDepth) 
+                            outLinkPipe = tLink
+                        end if
+
+                    case (lChannel)
+                        !% --- found channel, see if it is largest
+                        if (link%R(tLink,lr_FullDepth) > chanDepth) then 
+                            chanDepth = link%R(tLink,lr_FullDepth) 
+                            outLinkChan = tLink
+                        end if
+
+                    case default
+                        !% --- no action 
+                end select
+            end do
+
+            if (outLinkPipe > 0) then 
+                outLink = outLinkPipe
+                !% --- found a candidate link, so return
+                return
+            elseif (outLinkChan > 0) then 
+                outlink = outLinkChan
+                !% --- found a candidate link, so return
+                return
+            else
+                !% --- no candidate link found on the opposite side of notLink
+                !%     so search on the same side
+                if (ii==1) then
+                    !% --- continue, with opposite up/down selection
+                    if (.not. isUpstream) then 
+                        !% --- started with downstream, so check upstream links
+                        numNode => node%I(inNode,ni_N_link_u)
+                        Cstart  =  ni_Mlink_u1
+                    else
+                        !% --- started with upstream, so check downstream links
+                        numNode => node%I(inNode,ni_N_link_d)
+                        Cstart  =  ni_Mlink_d1
+                    end if
+                else !% ii==2, no CC link found 
+                    !% --- continue
+                end if
+            end if
+
+        end do
+
+        !% --- if reached here, then the JMorNode cannot be used
+        !%     to get an adjacent CC link
+        outLink = 0 
+        return
+
+    end function util_get_adjacent_CC_link 
 !%
 !%==========================================================================
 !%==========================================================================
@@ -268,243 +415,451 @@ module utility
 !%==========================================================================
 !%==========================================================================
 !%    
-    subroutine util_accumulate_volume_conservation ()
+    subroutine util_global_volume_balance ()
         !%------------------------------------------------------------------
         !% Description:
-        !% Computes/stores the cumulative mass conservation for each CC and JM
-        !% element that is NOT small volume or zero depth
+        !% Computes the global volume balance by assuming that all interior
+        !% fluxes are conserved.
         !% Note that this should only be called at a place in the code where
         !% the elem(:,er_Volume) reflects the total volume (i.e., full + slot)
         !% HACK -- need a separate volume cons for the small/zero losses
         !% HACK -- presently requires further work for debugging use
         !%------------------------------------------------------------------
         !% Declarations:
-            real(8), pointer :: eCons(:), fQ(:), eQLat(:), VolNew(:), VolOld(:), dt
-            real(8), pointer :: VolOver(:), VolSlot(:), VolArtInflow(:), tempCons(:)
-            real(8), pointer :: VolPond(:)
-            integer, pointer :: thisColCC, thisColJM, npack, thisP(:)
-            integer, pointer :: fdn(:), fup(:), BranchExists(:), fBarrels(:)
-            integer :: ii,kk, mm
-            real(8) :: netQ
-            real(8) :: Qbranches
+            real(8), pointer :: dt
+            integer, pointer :: Npack, thisP(:)
+            real(8) :: volume1, volume2, totalvolume
+            real(8) :: latInflowVolume, bcInflowVolume, bcOutflowVolume, globalDiff
+            real(8) :: overflowVolume, pondingVolume, VolumeArtificialInflow
+            real(8) :: nonconservation_scale, dVolume
+            integer :: ii
         !%------------------------------------------------------------------
         !% Preliminaries:
+            if (.not. setting%Debug%GlobalVolume%useVolumeBalanceTF) return
         !%------------------------------------------------------------------
         !% Aliases:
-            thisColCC => col_elemP(ep_CC)
-            thisColJM => col_elemP(ep_JM)
-            fQ      => faceR(:,fr_Flowrate_Conservative)
-            fBarrels=> faceI(:,fi_barrels)
-            eCons   => elemR(:,er_VolumeConservation)
-            tempCons=> elemR(:,er_Temp01)
-            eQLat   => elemR(:,er_FlowrateLateral)
-            VolNew  => elemR(:,er_Volume)  
-            VolOld  => elemR(:,er_Volume_N0) 
-            VolOver => elemR(:,er_VolumeOverFlow)
-            VolPond => elemR(:,er_VolumePonded)
-            VolSlot => elemR(:,er_SlotVolume) 
-            VolArtInflow => elemR(:,er_VolumeArtificialInflow)
-            fup     => elemI(:,ei_Mface_uL)
-            fdn     => elemI(:,ei_Mface_dL)
             dt      => setting%Time%Hydraulics%Dt
-            BranchExists => elemSI(:,esi_JB_Exists)
         !%------------------------------------------------------------------
 
-        !% --- for the CC elements
-        npack   => npack_elemP(thisColCC)
+        !% --- initialize
+        setting%Debug%GlobalVolume%LatestValue = zeroR
+        elemR(:,er_Temp01) = zeroR
+        latInflowVolume    = zeroR
+        bcInflowVolume     = zeroR
+        bcOutflowVolume    = zeroR
+        overflowVolume     = zeroR
+        pondingVolume      = zeroR
+        globalDiff         = zeroR
+        volume1            = zeroR
+        volume2            = zeroR
 
-        tempCons = zeroR
+        !% --- get all in-line inflows (+ is inflow)
+        Npack => npack_faceP(fp_BCup)
+        if (Npack > 0) then 
+            thisP => faceP(1:Npack,fp_BCup)
+            bcInflowVolume  = sum(faceR(thisP,fr_Flowrate)) * dt
+        end if
+
+        ! if (setting%Time%Step .ge. 120910) then 
+        !     print *, ' '
+        !     print *, ' step ',setting%Time%Step
+        !     print *, 'Net inflow from bounds   ' , bcInflowVolume
+        ! end if
+
+        !% --- get all outfall outflows (+ is outflow)
+        Npack => npack_faceP(fp_BCdn)
+        if (Npack > 0) then 
+            thisP => faceP(1:Npack,fp_BCdn)
+            bcOutflowVolume  = sum(faceR(thisP,fr_Flowrate_Conservative)) * dt
+        end if
+
+        ! if (setting%Time%Step .ge. 120910) then 
+        !     print *, 'Net outflow from faces   ',bcOutflowVolume
+        ! end if
+
+        Npack => npack_elemP(ep_CCJM)
+        if (Npack > 0) then 
+            thisP => elemP(1:Npack,ep_CCJM)
+            !% --- initial volume
+            volume1 = sum(elemR(thisP,er_Volume_N0)) 
+            !% --- final volume
+            volume2 = sum(elemR(thisP,er_Volume))
+
+            !% --- lateral inflows to inflow (+ is inflow)
+            latInflowVolume = sum(elemR(thisP,er_FlowrateLateral)) * dt
+
+            ! if (setting%Time%Step .ge. 120911) then 
+            !     print *, 'Net inflow with lateral  ', latInflowVolume
+            ! end if
+
+            !% --- overflowing (lost) volume
+            overflowVolume = sum(elemR(thisP,er_VolumeOverFlow))
+
+            ! if (setting%Time%Step .ge. 120910) then 
+            !     print *, 'Net overflow             ',overflowVolume
+            ! end if
+
+            !% --- ponded (stored) volume
+            pondingVolume = sum(elemR(thisP,er_VolumePonded))
+
+            ! if (setting%Time%Step .ge. 120910) then 
+            !     print *, 'Net  ponding             ',pondingVolume
+            ! end if
+
+            VolumeArtificialInflow = sum(elemR(thisP,er_VolumeArtificialInflow))
+
+            ! if (setting%Time%Step .ge. 120910) then 
+            !     print *, 'Artificial inflow       ',VolumeArtificialInflow   
+            ! end if
+
+        end if
+
+        ! if (setting%Time%Step .ge. 120910) then 
+        !     print *, 'Net volume change        ',volume2 - volume1
+        !     print *, '                          _________________'
+        ! end if
+
+        !% --- create sum of volume change for CCJM
+        globalDiff = volume2 - (volume1 + latInflowVolume + bcInflowVolume - bcOutflowVolume  &
+                                 + VolumeArtificialInflow - pondingVolume - overflowVolume )
+
+        ! if (setting%Time%Step > 38268) then 
+        !     print *, ' '
+        !     print *, 'step ', setting%Time%Step
+        !     print *, 'volume2                ',volume2
+        !     print *, 'volume1                ',volume1
+        !     print *, 'latInflow              ',latInflowVolume 
+        !     print *, 'bcInflow               ',bcInflowVolume 
+        !     print *, 'bcOutflow              ',bcOutflowVolume
+        !     print *, 'VolumeArtificialInflow ',VolumeArtificialInflow
+        !     print *, 'overflowVolume         ',overflowVolume
+        !     print *, 'pondingVolume          ',pondingVolume
+        !     print *, 'globalDiff             ',globalDiff
+        !     print *, ' '
+
+        !     do ii=1,N_elem(this_image())
+        !         dVolume = elemR(ii,er_Volume) - elemR(ii,er_Volume_N0)
+        !         select case (elemI(ii,ei_elementType))
+        !         case (CC) 
+        !             if (abs(dVolume) > 1.d0) then 
+        !                 print *, 'CC ',ii, dVolume
+        !             end if
+        !         case (JM)
+        !             if (abs(dVolume) > 1.d0) then 
+        !                 print *, 'JM ',ii, dVolume
+        !             end if
+        !         end select
+        !     end do
+    
+
+        ! end if
+
+
+        ! if (setting%Time%Step .ge. 120910) then 
+        !     print *, 'globalDiff      ',globalDiff
+        !     print *, ' '
+        ! end if
+
+        totalvolume  = max(volume1, volume2)
+
+        ! if (setting%Time%Step .ge. 120910) then 
+        !     print *, 'vol1, vol2 ',volume1, volume2
+        !     print *, 'total volume ', totalvolume
+        !     print *, ' '
+
+        !     if (setting%Time%Step .eq. 120912) then 
+        !         call util_local_volume_balance (.true.)
+        !         print *, ' '
+        !         stop 6698734
+        !     end if 
+
+
+        ! end if
+
+        if (totalvolume .ge. oneR) then
+            !% --- use normalized volume unless total volume is small
+            setting%Debug%GlobalVolume%LatestValue =  globalDiff  / totalvolume
+        else
+            !% --- use raw values
+            setting%Debug%GlobalVolume%LatestValue = + globalDiff  
+        end if
+        setting%Debug%GlobalVolume%LatestScaledValue = setting%Debug%GlobalVolume%LatestValue / (real(N_elem(this_image()),8))
+
+        setting%Debug%GlobalVolume%CumulativeValue = setting%Debug%GlobalVolume%CumulativeValue &
+                                                   + setting%Debug%GlobalVolume%LatestValue 
+
+        setting%Debug%GlobalVolume%CumulativeScaledValue = setting%Debug%GlobalVolume%CumulativeValue / real( N_elem(this_image()) * setting%Time%Step,8)
+
+        if (abs(setting%Debug%GlobalVolume%CumulativeScaledValue) > setting%Debug%GlobalVolume%FailureThreshold ) then 
+            print *, 'CODE IS STOPPING DUE TO GLOBAL CONSERVATION ERROR'
+            print *, 'Cumulative scaled non-conservation is       ',setting%Debug%GlobalVolume%CumulativeScaledValue
+            print *, 'Cumulative total volume non-conservation is ',setting%Debug%GlobalVolume%CumulativeValue
+            print *, 'Latest time step non-conservation is        ',setting%Debug%GlobalVolume%LatestValue 
+            print *, 'Failure threshold setting is                ',setting%Debug%GlobalVolume%FailureThreshold 
+
+
+            call util_local_volume_balance (.true.)
+
+            call util_crashpoint(509873)
+        end if
+
+        ! print *, 'DEBUG ', setting%Debug%GlobalVolume%LatestValue, globalDiff
+        ! print *, ' '        
+
+        ! if (setting%Time%Step .ge. 120912) then 
+        !     stop 6660987
+        ! end if
+
+    end subroutine util_global_volume_balance
+
+!%
+!%==========================================================================
+!%==========================================================================
+!%   
+    subroutine util_local_volume_balance (isOverrideTF)
+        !%------------------------------------------------------------------
+        !% Description:
+        !% Computes local volume conservation. The "isOverride" allows the
+        !% code to call this during a crash even if the user specified
+        !% the setting%Debug%LocalVolume%useVolumeBalanceTF = false
+        !% Note that this should only be called at a place in the code where
+        !% the elem(:,er_Volume) reflects the total volume (i.e., full + slot)
+        !% HACK -- need a separate volume cons for the small/zero losses
+        !% HACK -- presently requires further work for debugging use
+        !%------------------------------------------------------------------
+        !% Declarations:
+            logical, intent(in) :: isOverrideTF
+            real(8), pointer :: VolumeConservation(:), VolumeConservationTotal(:)
+            real(8), pointer :: fQ(:), eQLat(:), VolNew(:), VolOld(:), dt
+            real(8), pointer :: VolumeOverflow(:), VolumeSlot(:), VolumeArtificialInflow(:)
+            real(8), pointer :: VolumePonded(:)
+            real(8), pointer :: FlowrateNetConservative(:)
+            integer, pointer :: thisColCC, thisColJM, thisColDiag, npack, thisP(:)
+
+            integer, pointer :: fdn(:), fup(:), BranchExists(:), fBarrels(:)
+            integer          :: ii, kk, mm
+            real(8)          :: Qbranches, relativeConservation, VolNorm
+            logical          :: iserrorTF, foundErrorTF
+        !%------------------------------------------------------------------
+        !% Preliminaries:
+            if (      (.not. setting%Debug%LocalVolume%useVolumeBalanceTF) &
+                .and. (.not. isOverrideTF)) return
+        !%------------------------------------------------------------------
+        !% Aliases:
+            VolumeConservation      => elemR(:,er_VolumeConservation)
+            VolumeConservationTotal => elemR(:,er_VolumeConservationTotal)
+
+            dt             => setting%Time%Hydraulics%Dt
+            thisColCC      => col_elemP(ep_CC)
+            thisColJM      => col_elemP(ep_JM)
+            thisColDiag    => col_elemP(ep_Diag)
+            fup            => elemI(:,ei_Mface_uL)
+            fdn            => elemI(:,ei_Mface_dL)
+            BranchExists   => elemSI(:,esi_JB_Exists)
+            fQ             => faceR(:,fr_Flowrate_Conservative)
+            fBarrels       => faceI(:,fi_barrels)
+            eQLat          => elemR(:,er_FlowrateLateral)
+            VolNew         => elemR(:,er_Volume)  
+            VolOld         => elemR(:,er_Volume_N0) 
+            VolumeOverflow => elemR(:,er_VolumeOverFlow)
+            VolumePonded   => elemR(:,er_VolumePonded)
+            VolumeSlot     => elemR(:,er_SlotVolume) 
+            VolumeArtificialInflow  => elemR (:,er_VolumeArtificialInflow)
+            FlowrateNetConservative => elemSR(:,esr_JM_FlowrateNetConservative)
+            
+        !%------------------------------------------------------------------
+        setting%Debug%LocalVolume%LatestValue = zeroR
+        VolumeConservation(:) = zeroR
+        iserrorTF = .false.
+        foundErrorTF = .false.
+
+        if (isOverrideTF) print *, 'in local volume balance'
 
         !% --- CONDUIT ELEMENTS =========================================
+        !% --- for the CC elements
+        npack   => npack_elemP(thisColCC)
         if (npack > 0) then
             thisP => elemP(1:npack,thisColCC)
 
-            !% HACK does not handle overflow (20230423)
+            !% --- the local volume conservation 
+            VolumeConservation(thisP) =  &
+                (VolNew(thisP) - VolOld(thisP))                            &  !% increase of actual volume
+                + VolumeOverflow(thisP) + VolumePonded(thisP)              &  !% volume that overflows (must inflow or come from storage)
+                 - (dt * (fQ(fup(thisP)) - fQ(fdn(thisP)) + eQlat(thisP))) &   !% net inflow
+                 - VolumeArtificialInflow(thisP)
 
-            !% --- the volume conservation rate
-            tempCons(thisP) = fQ(fup(thisP)) - fQ(fdn(thisP)) + eQlat(thisP) - (VolNew(thisP) - VolOld(thisP))/dt
+            !% --- accumulator
+            VolumeConservationTotal(thisP) = VolumeConservationTotal(thisP) + VolumeConservation(thisP)
 
-            do ii=1,size(thisP)
-                mm = thisP(ii)
-                if ((abs(tempCons(mm)) > 1.d-4) .and. (elemR(mm,er_Depth) > twoR * setting%ZeroValue%Depth)) then 
-                ! if  (abs(tempCons(mm)) > 1.d-4)  then 
-                    print *, ' '
-                    print *, 'Volume conservation issue Conduit/Channel cell ',mm
-                    print *, 'Q in    ',fQ(fup(mm))
-                    print *, 'Q out   ',fQ(fdn(mm))
-                    print *, 'Q lat   ',eQlat(mm)
-                    print *, 'Vol old ',VolOld(mm)
-                    print *, 'Vol new ',VolNew(mm)
-                    print *, 'Net Q   ', fQ(fup(mm)) - fQ(fdn(mm)) +eQlat(mm)
-                    print *, 'Vol rate', (VolNew(mm) - VolOld(mm)) / dt
-                    print *, ' '
-                    print *, 'depth ',elemR(mm,er_Depth)
-                    ! call util_crashpoint(6209872)
-                end if
-            end do
+            !% --- check for error
+            if (any(abs(VolumeConservation(thisP)) > setting%Debug%LocalVolume%FailureThreshold)) iserrorTF = .true.
 
-            ! !% --- sum of the net inflow and lateral flow should be the change in volume from head
-            ! !% --- for output, use an accumulator
-            ! tempCons(thisP) =                                                      &
-            !              + dt * ( fQ(fup(thisP)) - fQ(fdn(thisP)) + eQlat(thisP) ) &
-            !              - (VolNew(thisP) - VolOld(thisP))  - VolOver(thisP)
+            !% --- get a total value for CC elements
+            setting%Debug%LocalVolume%LatestValue = sum(VolumeConservation(thisP))
 
-            ! eCons(thisP) = eCons(thisP) + tempCons(thisP)
-                      
-            ! !% --- check conservation
-            ! do ii = 1,size(thisP)
-            !     if (abs(tempCons(thisP(ii))) > 1.0e-4) then
-            !         if (elemYN(thisP(ii),eYN_isZeroDepth)) then
-            !             !% --- more volume out than exists in small depth cell,
-            !             !%     artificial inflow caused by zero depth
-            !             VolArtInflow(thisP(ii)) = - tempCons(thisP(ii))
-            !         else
-            !             print *, 'CONSERVATION ISSUE CC element'
-            !             print *, 'elem index ', thisP(ii),' on image = ', this_image()
-            !             print *, 'exceeding limit in one time step'
-            !             print *, 'Mass gain/loss = ',tempCons(thisP(ii))
-            !             print *, 'fluxes  ',fQ(fup(thisP(ii))), fQ(fdn(thisP(ii))), eQlat(thisP(ii))
-            !             print *, 'volumes ',VolNew(thisP(ii)), VolOld(thisP(ii))
-            !             print *, 'Delta Vol - fluxes', VolNew(thisP(ii)) - VolOld(thisP(ii)) & 
-            !                     - dt * fQ(fup(thisP(ii))) + dt * fQ(fdn(thisP(ii))) - dt * eQlat(thisP(ii)) 
-            !             print *, 'vol overflow ',elemR(thisP(ii),er_VolumeOverFlow)
-            !             call util_crashpoint(358783)
-            !         end if
-            !     end if
-            ! end do  
+            if (isOverrideTF)  print *, 'SUM of local CC balance ', sum(VolumeConservation(thisP))
+
+            ! print *, 'VolNew ',sum(VolNew(thisP))
+            ! print *, 'VolOld ',sum(VolOld(thisP))
+            ! print *, 'fQup   ',sum(fQ(fup(thisP)))
+            ! print *, 'fQdn   ',sum(fQ(fdn(thisP)))
+            ! print *, 'eQlat  ',sum(eQlat(thisP))
+            ! print *, 'VolArt ',sum(VolumeArtificialInflow(thisP))
+            ! print *, 'volOver',sum(VolumeOverflow(thisP))
+            ! print *, 'volPond',sum(VolumePonded(thisP))
+
         end if
 
+
         !% --- JM elements ====================================
-        tempCons = zeroR
         npack   => npack_elemP(thisColJM)
         if (npack > 0) then
             thisP => elemP(1:npack,thisColJM)
 
             !% HACK does not handle barrels 
-            !% --- net flow rate
-            tempCons(thisP) = eQlat(thisP) - (VolNew(thisP) - VolOld(thisP))/dt - VolOver(thisP)/dt - VolPond(thisP)/dt
+            !% --- net flow rate excluding junctions
+            VolumeConservation(thisP) = &
+                (VolNew(thisP) - VolOld(thisP))                           & !% increase of actual volume
+                + VolumeOverFlow(thisP) + VolumePonded(thisP)             & !% volume overflows or ponding
+                - dt * (eQlat(thisP) + FlowrateNetConservative(thisP))    &
+                - VolumeArtificialInflow(thisP)
 
-            !% --- cycle through the JM to get the branch flows
-            do ii=1,size(thisP)
-                mm = thisP(ii)
-                Qbranches = zeroR
-                do kk=1,max_branch_per_node
-
-                    if (elemSI(mm+kk,esi_JB_Exists) .ne. oneI) cycle
-
-                    if (mod(kk,2) == 0) then 
-                        !% --- downstream branch
-                        Qbranches =  Qbranches &
-                            + BranchSign(kk) * fQ(elemI(mm+kk,ei_Mface_dL))
-                        !print *, 'Qb 1 ',Qbranches
-                    else 
-                        !% --- upstream branch
-                        Qbranches =  Qbranches &
-                            + BranchSign(kk) * fQ(elemI(mm+kk,ei_Mface_uL))
-                        !print *, 'Qb 2 ',Qbranches    
-                    end if
-                end do
-
-                tempCons(mm) = tempCons(mm) + Qbranches
-
-                ! if ((setting%Time%Step > stepCut) .and. (mm == printJM))  then 
-                !     print *, ' '
-                !     print *, 'CONS printJM ',tempCons(mm)
-                !     print *, ' '
-                ! end if
+            !% --- accumulator
+            VolumeConservationTotal(thisP) = VolumeConservationTotal(thisP) + VolumeConservation(thisP)
                 
-                if ((abs(tempCons(mm)) > 1.d-4) .and. (elemR(mm,er_Depth) > twoR * setting%ZeroValue%Depth)) then
-                ! if (abs(tempCons(mm)) > 1.d-4) then    
-                    print *, ' '
-                    print *, 'Volume conservation issue Junction ',mm
-                    print *, 'tempCons   ',tempCons(mm)
-                    print *, 'Q branches ',Qbranches
-                    print *, 'Q lat      ',eQlat(mm)
-                    print *, 'Q overflow ',-VolOver(mm) / dt
-                    print *, 'Q ponded   ',-VolPond(mm) / dt
-                    print *, 'Q Storage  ',(VolNew(mm) - VolOld(mm)) / dt
-                    print *, 'Net Q      ', Qbranches + eQlat(mm) - VolOver(mm) / dt -VolPond(mm) / dt
-                    print *, ' '
-                    print *, 'Vol old    ',VolOld(mm)
-                    print *, 'Vol new    ',VolNew(mm)
-                    print *, ' '
-                    print *, 'head, dt   ',elemR(mm,er_Head), dt
-                    !call util_crashpoint(62098734)
+            !% --- check for error
+            if (any(abs(VolumeConservation(thisP)) > setting%Debug%LocalVolume%FailureThreshold)) iserrorTF = .true.
+
+            if (isOverrideTF)  print *, 'SUM of local JM balance ', sum(VolumeConservation(thisP))
+
+            !% --- add JM elements to the CC total value
+            setting%Debug%LocalVolume%LatestValue = setting%Debug%LocalVolume%LatestValue + sum(VolumeConservation(thisP))            
+
+        end if
+
+        !% --- Diagnostic elements ====================================
+        npack   => npack_elemP(thisColDiag)
+        if (npack > 0) then
+            thisP => elemP(1:npack,thisColDiag)
+
+
+           ! print *, 'thisP, type ',thisP, elemI(thisP,ei_elementType)
+           ! print *, 'type  ', trim(reverseKey(elemI(thisP(1),ei_elementType)))
+            !print *, 'type  ', trim(reverseKey(elemI(thisP(2),ei_elementType)))
+
+            VolumeConservation(thisP) =    dt * (                         &
+                 faceR(elemI(thisP,ei_Mface_uL),fr_Flowrate_Conservative) &
+                -faceR(elemI(thisP,ei_Mface_dL),fr_Flowrate_Conservative)    ) 
+
+        !% --- accumulator
+        !VolumeConservationTotal(thisP) = VolumeConservationTotal(thisP) + VolumeConservation(thisP)
+
+            ! if (setting%Time%Step .ge. 120911) then
+            !     print *, ' '
+            !     print *, 'VolConservation Diag ',VolumeConservation(thisP)
+            !     print *, ' '
+            ! end if
+
+            !stop 59873
+            
+        end if
+
+                    
+        !% --- add to accumulator
+        setting%Debug%LocalVolume%CumulativeValue = setting%Debug%LocalVolume%CumulativeValue + setting%Debug%LocalVolume%LatestValue
+        
+        !% --- scaled value
+        setting%Debug%LocalVolume%LatestScaledValue = setting%Debug%LocalVolume%LatestValue / real(N_elem(this_image()),8)
+
+        !% --- cumulative scaled value
+        setting%Debug%LocalVolume%CumulativeScaledValue = setting%Debug%LocalVolume%CumulativeValue & 
+                                                        / real( N_elem(this_image()) * setting%Time%Step,8)
+
+                                     
+
+        !% --- output for crash on conservation
+        if ((iserrorTF) .or. (isOverrideTF)) then 
+
+            do ii=1,N_elem(this_image())
+                !% --- only apply to JJ and CC elements
+                if ( (elemI(ii,ei_elementType) .eq. JM) .or. (elemI(ii,ei_elementType) .eq. CC) ) then
+
+                    !% --- consider relative conservation for larger volumes
+                    !%     but raw values for small volumes
+                    VolNorm = max(VolNew(ii),VolOld(ii))
+                    if (VolNorm > oneR) then 
+                        relativeConservation = abs(VolumeConservation(ii)) / VolNorm
+                    else
+                        relativeConservation = abs(VolumeConservation(ii))
+                    end if
+
+                    ! if ((relativeConservation > setting%Debug%LocalVolume%FailureThreshold)  &
+                    !    .or. &
+                    !    (isOverrideTF .and. (relativeConservation > setting%Debug%GlobalVolume%FailureThreshold)) &
+                    !    ) then 
+                    ! if ((isOverrideTF) .and. (elemI(ii,ei_elementType) .eq. JM) ) then
+
+                    if ((isOverrideTF) .and. (ii==13) ) then
+
+                        if ((.not. foundErrorTF) .and. (.not. isOverrideTF)) then 
+                            !% --- write a header the first volume found
+                            print *, ' '
+                            print *, 'CODE IS STOPPING DUE TO LOCAL VOLUME CONSERVATION ISSUE'
+                            print *, 'Volume conservation issue at one or more locations'
+                            print *, 'Time Step = ',setting%Time%Step
+                            foundErrorTF = .true.
+                        end if
+
+                        print *, '----------------------------------------------------- '
+                        print *, 'element index ',ii,' on image = ', this_image()
+                        print *, 'relative non-conservation  ',relativeConservation
+                        print *, 'Volume Non-conservation:   ', VolumeConservation(ii) 
+                        print *, 'Volume Actual Change       ',VolNew(ii) - VolOld(ii)
+                        select case (elemI(ii,ei_elementType))
+                            case (CC)
+                                if (elemI(ii,ei_link_Gidx_SWMM) .ne. nullvalueI) then
+                                    print *, 'CC element of link ',trim(link%Names(elemI(ii,ei_link_Gidx_SWMM))%str)
+                                else
+                                    print *, 'index error? ', ii, elemI(ii,ei_link_Gidx_SWMM)
+                                    stop 509874
+                                end if
+                                print *, 'Net Volume Change by Flows ',dt * (eQlat(ii) +fQ(fup(ii)) - fQ(fdn(ii)) &
+                                                                            - VolumeOverflow(ii) - VolumePonded(ii)       &
+                                                                            + VolumeArtificialInflow(ii))
+                                print *, 'Volume Inflow from CC      ',(fQ(fup(ii)) - fQ(fdn(ii)))*dt
+                            case (JM)
+                                if (elemI(ii,ei_node_Gidx_SWMM) .ne. nullvalueI) then
+                                    print *, 'JM element of node ',trim(node%Names(elemI(ii,ei_node_Gidx_SWMM))%str)
+                                else
+                                    print *, 'index error? ', ii, elemI(ii,ei_node_Gidx_SWMM)
+                                    stop 4098734
+                                end if
+
+                                print *, 'Net Volume Change by Flows ',dt * (eQlat(ii)   &
+                                                                             + FlowrateNetConservative(ii)           &
+                                                                             - VolumeOverflow(ii) - VolumePonded(ii)  &
+                                                                             + VolumeArtificialInflow(ii))
+                                print *, 'Volume Inflow from CC      ', FlowrateNetConservative(ii)*dt
+                            case default
+                                print *, 'CODE ERROR, unexpected case default'
+                                stop 39874
+                        end select
+                        print *, 'Volume Inflow from Lateral ',eQlat(ii)*dt
+                        print *, 'Volume Overflow            ',VolumeOverflow(ii)
+                        print *, 'Volume Ponding             ',VolumePonded(ii)
+                        print *, 'Volume Artificial Inflow   ',VolumeArtificialInflow(ii)
+                        print *, 'Volume Old                 ',VolOld(ii)
+                        print *, 'Volume New                 ',VolNew(ii)
+                        print *, 'depth, dt                  ',elemR(ii,er_Depth), dt
+                    end if
                 end if
-
             end do
-
-           ! tempCons(thisP) = dt * eQlat(thisP) - VolOver(thisP)
-
-            ! ! print *, ' '
-            ! ! print *, 'tempCons 00',tempCons(thisP) 
-
-            ! !% --- volume and lateral flux terms on JM
-            ! where (elemSI(thisP,esi_JM_Type) .ne. NoStorage)
-            !     tempCons(thisP) =  tempCons(thisP) - (VolNew(thisP) - VolOld(thisP))
-            ! endwhere
-
-            ! ! print *, 'VolNew ',VolNew(thisP)
-            ! ! print *, 'VolOld ',VolOld(thisP)
-            ! ! print *, 'VolOver',VolOver(thisP)
-            ! ! print *, 'Qlat   ',eQlat(thisP)
-            ! ! print *, 'tempCons 01',tempCons(thisP)        
-
-            ! !% --- get fluxes on branches for JM
-            ! do ii=1,max_branch_per_node,2
-            !     where ((fup(thisP+ii) /= nullvalueI) .and. (elemSI(thisP+ii,esi_JB_Exists) .eq. oneI))
-            !         tempCons(thisP) = tempCons(thisP)                                                                                &
-            !             + dt * real(BranchExists(thisP+ii  ),8) * fQ(fup(thisP+ii  )) * real(fBarrels(fup(thisP+ii  )),8)  
-            !     endwhere
-            !     where ((fdn((thisP+ii+1)) /= nullvalueI)  .and. (elemSI(thisP+ii+1,esi_JB_Exists) .eq. oneI))
-            !         tempCons(thisP) = tempCons(thisP)                                                                                  &
-            !             - dt * real(BranchExists(thisP+ii+1),8) * fQ(fdn(thisP+ii+1)) * real(fBarrels(fdn(thisP+ii+1)),8)    
-            !     endwhere                         
-            ! end do
-
-            ! ! print *, 'tempCons 02',tempCons(thisP) 
-
-            ! eCons(thisP) = eCons(thisP) + tempCons(thisP)
-
-            ! do ii = 1,size(thisP)
-            !     if (abs(tempCons(thisP(ii))) > 1.0e-4) then
-
-            !         if (elemYN(thisP(ii),eYN_isZeroDepth)) then
-            !             !% --- more volume out than exists in small depth cell,
-            !             !%     artificial inflow caused by zero depth
-            !             VolArtInflow(thisP(ii)) = -tempCons(thisP(ii))
-            !             ! print *, ' '
-            !             ! print *, 'VolArtInflow', VolArtInflow(thisP(ii)) 
-            !             ! print *, ' '
-            !         else
-            !            print *, ' '
-            !             print *, 'CONSERVATION ISSUE JM', ii, thisP(ii), this_image()
-            !             print *, 'is zerodepth =',elemYN(thisP(ii),eYN_isZeroDepth), ';   is smalldepth = ',elemYN(thisP(ii),eYN_isSmallDepth)
-            !             print *,  'volume overflow ', VolOver(thisP(ii))
-            !             print *,  'mass gain/loss ',tempCons(thisP(ii))
-            !             print *,  'node # ',elemI(thisP(ii),ei_node_Gidx_SWMM)
-            !             print *,  'node name ',trim(node%Names(elemI(thisP(ii),ei_node_Gidx_SWMM))%str)
-            !             do kk = 1,max_branch_per_node,2
-            !                 if (elemSI(thisP(ii)+kk,esi_JB_Exists)) then
-            !                     if (fup(thisP(ii)+kk) /= nullvalueI) then
-            !                         print *, 'branch Q Fup',fup(thisP(ii)+kk),   fQ(fup(thisP(ii)+kk  )) * real(BranchExists(thisP(ii)+kk  ),8)  * real(fBarrels(fup(thisP(ii)+kk  )),8)
-            !                     end if
-            !                     if (fdn(thisP(ii)+kk+1) /= nullvalueI) then
-            !                         print *, 'branch Q Fdn',fdn(thisP(ii)+kk+1), fQ(fdn(thisP(ii)+kk+1)) * real(BranchExists(thisP(ii)+kk+1),8)  * real(fBarrels(fdn(thisP(ii)+kk+1)),8)
-            !                     endif
-            !                 end if
-            !             end do
-            !             ! call util_crashpoint(3587832)
-
-            !         end if    
-            !     end if
-            ! end do   
-
+            if (foundErrorTF) call util_crashpoint(62098734)
         end if
 
         !%------------------------------------------------------------------
 
-    end subroutine util_accumulate_volume_conservation
+    end subroutine util_local_volume_balance
 !%==========================================================================
 !%==========================================================================
 !%

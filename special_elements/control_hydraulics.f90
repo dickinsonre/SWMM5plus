@@ -22,7 +22,7 @@ module control_hydraulics
     use outlet_elements
     use adjust,           only: adjust_face_for_zero_setting_singular
     use utility_allocate, only: util_allocate_monitor_points, util_allocate_action_points
-    use utility,          only: util_unique_rank
+    use utility,          only: util_unique_rank !
     use utility_crash,    only: util_crashpoint
 
     implicit none
@@ -98,6 +98,10 @@ contains
         !% --- get the number of locations in link, node arrays that are
         !%     involved with control and monitoring
         call interface_controls_count(nRules, nPremise, nThenAction, nElseAction)
+
+        ! print *, ' '
+        ! print *, 'in control_init_monitoring_and_action_from_EPASWMM'
+        ! print *, nRules, nPremise, nThenAction, nElseAction
 
         !% --- allocate and initialize the monitorI(:,:) array from control premise data
         call control_init_monitor_points(nPremise, nRules)
@@ -514,6 +518,10 @@ contains
             integer, allocatable :: irank(:)
             character(64) :: subroutine_name = 'control_init_monitor_points'
         !%------------------------------------------------------------------
+
+        ! print *, ' '
+        ! print *, 'in control_init_monitor_points'    
+
         !% --- each premise may add two monitoring points (LHS and RHS)
         npoint = twoI * nPremise
 
@@ -618,6 +626,15 @@ contains
             end do
         end if
 
+        ! print *, 'monitor points ', monitorI(1,mi_linknode_idx)
+        ! print *, 'point type     ', monitorI(1,mi_linknodesimType)
+        ! if (monitorI(1,mi_linknodesimType) == 0) then 
+        !     print *, 'node name ',trim(node%Names(monitorI(1,mi_linknode_idx))%str)
+        ! else 
+        !     print *, 'link name ',trim(link%NameS(monitorI(1,mi_linknode_idx))%str)
+        ! end if
+        ! print *, ' '
+
         !%------------------------------------------------------------------
         !% Closing:
             deallocate(irank)
@@ -645,8 +662,13 @@ contains
         !%------------------------------------------------------------------
         if (nRules < 1) return
 
+        print *, ' '
+        print *, 'in control_init_action_points'
+
         !% --- total number of action points that are possible
         npoint = nThenAction + nElseAction
+
+        print *, 'npoint', npoint
 
         if (npoint < 1) return
 
@@ -662,6 +684,11 @@ contains
 
         kIdx = 1 !% index for the action storage
 
+        print *, 'kIdx ',kIdx
+        do ii=1,10
+            print *, ii, trim(link%Names(ii)%str)
+        end do
+
         !% --- cycle through the rules (they index from 0 in C)
         do rr = 0, nRules-1
             !% --- get the "then" actions
@@ -675,24 +702,40 @@ contains
                     location (kIdx),                             &
                     attribute(kIdx),                             &
                     thisActionLevel, rr, success,isThen)  
+
+                    print *, 'location etc at AAA'
+                    print *, location(kIdx), attribute(kIdx), thisActionLevel
+                    print *, rr, success, isThen
+                    print *, ' '
                     
                 !% when rr = nRules - 1 (last loop), kIdx can be become > npoint
                 !% that causes a subscript  greater than the size of  location and attribute
                 !% arrays and causes segmentation fault at the second do while loop
                 if ((success) .and. (rr < nRules-1)) kIdx = kIdx +1  
+
             end do    
 
             !% --- get the "else" actions
-            thisActionLevel = 0
-            success = 1
-            do while (success == 1)
-                isThen = 0
-                call interface_controls_get_action_data (   &
-                    location (kIdx),                             &
-                    attribute(kIdx),                             &
-                    thisActionLevel, rr, success,isThen)  
-                if (success) kIdx = kIdx +1  
-            end do   
+            if (nElseAction > 0) then
+                thisActionLevel = 0
+                success = 1
+                do while (success == 1)
+                    isThen = 0
+                    call interface_controls_get_action_data (   &
+                        location (kIdx),                             &
+                        attribute(kIdx),                             &
+                        thisActionLevel, rr, success,isThen)  
+
+                        print *, 'location etc at BBB'
+                        print *, location(kIdx), attribute(kIdx), thisActionLevel
+                        print *, rr, success, isThen
+                        print *, ' '
+
+                    if (success) kIdx = kIdx +1  
+                end do 
+            else 
+                !% --- no else action to process
+            end if  
         end do
 
         !% --- find unique locations for actions, 
@@ -721,7 +764,12 @@ contains
 
         !% --- error checking
             ! print *, 'checking that link location is in index set'
+        print *, 'in control_init_action_points'
+        print *, 'linkd idx '
+        print *, link%I(:,li_idx)
         do ii=1,N_ActionPoint
+            print *, 'ii, ai_link_idx ',ii, ai_link_idx
+            print *, 'action point ', actionI(ii,ai_link_idx)
             rr = count(link%I(:,li_idx) == actionI(ii,ai_link_idx))
             if (rr .ne. 1) then
                 print *, 'CODE ERROR action point does not match link indexes'

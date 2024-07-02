@@ -560,8 +560,8 @@ contains
         !% --- Cumulative volume conservation
         if (setting%Output%DataOut%isVolumeConsOut) then
             ii = ii+1
-            output_types_elemR(ii) = er_VolumeConservation
-            output_typenames_elemR(ii) = 'VolumeConservation'
+            output_types_elemR(ii) = er_VolumeConservationTotal
+            output_typenames_elemR(ii) = 'VolumeConservationTotal'
             output_typeUnits_elemR(ii) = 'm^3'
             output_typeProcessing_elemR(ii) = SumElements
             output_typeMultiplyByBarrels_elemR(ii) = zeroI
@@ -808,15 +808,15 @@ contains
             output_static_typeMultiplyByBarrels_Link(jj) = zeroI
         end if
        
-        !% --- Link Adjusted Length
-        if (setting%Output%DataOut%isLinkAdjustedLengthOut) then
-            jj = jj+1
-            output_static_types_Link(jj) = lr_AdjustedLength
-            output_static_typenames_Link(jj) = 'Link Adjusted Length'
-            output_static_typeUnits_Link(jj) = 'm'
-            output_static_typeProcessing_Link(jj) = AverageElements
-            output_static_typeMultiplyByBarrels_Link(jj) = zeroI
-        end if
+        ! !% --- Link Adjusted Length
+        ! if (setting%Output%DataOut%isLinkAdjustedLengthOut) then
+        !     jj = jj+1
+        !     output_static_types_Link(jj) = lr_AdjustedLength
+        !     output_static_typenames_Link(jj) = 'Link Adjusted Length'
+        !     output_static_typeUnits_Link(jj) = 'm'
+        !     output_static_typeProcessing_Link(jj) = AverageElements
+        !     output_static_typeMultiplyByBarrels_Link(jj) = zeroI
+        ! end if
        
         !% --- Link Inlet Offset 
         if (setting%Output%DataOut%isLinkInletOffsetOut) then

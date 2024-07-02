@@ -150,7 +150,7 @@ module outlet_elements
             FlowDirection      => elemSI(eIdx,esi_Outlet_FlowDirection)
             CurveID            => elemSI(eIdx,esi_Outlet_CurveID)
             Depth              => elemR (eIdx,er_Depth)
-            dQdH               => elemSR(eIdx,esr_Outlet_dQdHe)
+            dQdH               => elemSR(eIdx,esr_Outlet_dQdH_upstream)
             Flowrate           => elemR (eIdx,er_Flowrate) 
             CurrentSetting     => elemR (eIdx,er_Setting) 
             qCoeff             => elemSR(eIdx,esr_Outlet_Coefficient)
@@ -212,7 +212,7 @@ module outlet_elements
         Area      =  (fAUp + fADn) / twoR
 
         !% --- apply geometry limiters
-        call adjust_limit_by_zerovalues_singular (eIdx, er_Area, setting%ZeroValue%Area, .false.)
+        call adjust_limit_by_zerovalues_singular (eIdx, er_Area, setting%ZeroValue%Area, .false., zeroI)
 
     end subroutine outlet_geometry_update
 !%    

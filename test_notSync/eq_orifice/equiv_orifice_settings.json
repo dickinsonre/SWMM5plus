@@ -8,11 +8,10 @@
     },
     "Discretization" : {
         "NominalElemLength"     : 100.00,
-        "Method"                : "EqualElements",
         "SmallElementHandling"  : "EquivalentOrifice"
     },
-    "AirTracking" :{
-        "UseAirTrackingYN"          : false
+    "Junction" :{
+        "ForceNodesJM" : false
     }
 }
 

@@ -1,0 +1,28 @@
+{
+    "JSON_FoundFileYN" : true,
+    "JSON_CheckAllInputYN" : false,
+    "CaseName" : {
+        "Long"  : "test",
+        "Short" : "test"
+},
+    "Debug" :{
+        "GlobalVolume" : {
+            "FailureThreshold" : 1.0e-13
+        },
+        "LocalVolume" : {
+            "FailureThreshold" : 1.0e-14
+        }
+    },
+    "Discretization" : {
+        "NominalElemLength" : 30.00,
+        "SmallElementHandling" : "EquivalentOrifice"
+    },
+    "Junction" : {
+        "ForceInfiniteExtraDepth" : false
+    },
+    "Output" : {
+        "CommandLine" : {
+            "interval" : 1000
+        }
+    }
+}

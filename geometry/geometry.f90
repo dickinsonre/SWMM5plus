@@ -57,6 +57,8 @@ module geometry
     public :: geo_assign_JB_from_head
     public :: geo_common_initialize
     public :: geo_sectionfactor_from_depth_singular
+    public :: geo_hyddepth_from_area_and_topwidth_singular
+    public :: geo_perimeter_from_depth_singular
     public :: geo_Qcritical_from_depth_singular
     public :: geo_critical_value_singular
     public :: geo_normaldepth_singular
@@ -143,13 +145,13 @@ module geometry
         !     print *, elemYN(113,eYN_isPSsurcharged), elemYN(113,eYN_isSurcharged)
         ! end if
 
-        !% --- ZERO DEPTH CC
+        !% --- ZERO DEPTH CC REMOVED 20240529 as conflict with volumeArtificialInflow
         !%     reset all zero or near-zero depths in CC
         !%     Arguably this should not be needed as the individual depth computations
         !%     in geo_depth_from_volume_by_type_CC should use the zerovalues as minimums
-        !%     but this needs to be confirmed.
-        call adjust_limit_by_zerovalues &
-            (er_Depth, setting%ZeroValue%Depth, thisP, .false.)
+        ! !%     but this needs to be confirmed.
+        ! call adjust_limit_by_zerovalues &
+        !     (er_Depth, setting%ZeroValue%Depth, thisP, .false.)
 
             ! if (.not. isSingularYN) call util_utest_CLprint('       555 geo  - - - - - - - - - - ')
             ! if ((.not. isSingularYN) .and. (setting%Time%Step > 102057) ) then 
@@ -1060,7 +1062,7 @@ module geometry
         if (Npack > 0) then
             thisP => elemPGx(1:Npack,thisCol)
             call storage_functional_depth_from_volume (thisP,Npack)
-            call geo_ZeroDepth_from_volume  (thisP)
+            !call geo_ZeroDepth_from_volume  (thisP)
         end if
 
         !% JM with tabular geometry
@@ -1069,7 +1071,7 @@ module geometry
         if (Npack > 0) then
             thisP => elemPGx(1:Npack,thisCol)
             call storage_tabular_depth_from_volume (thisP, Npack)
-            call geo_ZeroDepth_from_volume  (thisP)
+            !call geo_ZeroDepth_from_volume  (thisP)
         end if
 
         !% JM with implied storage 
@@ -1079,7 +1081,7 @@ module geometry
             !print *, 'in implied storage'
             thisP => elemPGx(1:Npack,thisCol)
             call storage_implied_depth_from_volume (thisP, Npack)
-            call geo_ZeroDepth_from_volume  (thisP)
+            !call geo_ZeroDepth_from_volume  (thisP)
         end if
 
         !% --- note that NoStorage junctions have no volume
@@ -1225,7 +1227,7 @@ module geometry
             integer, pointer :: fup(:), fdn(:)
             real(8), pointer :: area(:), depth(:), head(:), hydradius(:), AreaVelocity(:)
             real(8), pointer :: length(:), perimeter(:), topwidth(:), velocity(:), flowrate(:)
-            real(8), pointer :: volume(:), zBtm(:), Kfac(:), dHdA(:), ellDepth(:)
+            real(8), pointer :: volume(:), zBtm(:), Kfactor(:), ellDepth(:) !, dHdA(:)
             real(8), pointer :: zCrown(:), fullArea(:), fulldepth(:), fullperimeter(:)
             real(8), pointer :: sedimentDepth(:), fulltopwidth(:), breadthmax(:)
             real(8), pointer :: fullhydradius(:), Atable(:), Ttable(:), Rtable(:), Stable(:)
@@ -1248,7 +1250,7 @@ module geometry
             AreaVelocity  => elemR(:,er_AreaVelocity)
             breadthmax    => elemR(:,er_BreadthMax)
             depth         => elemR(:,er_Depth)
-            dHdA          => elemR(:,er_dHdA)
+            !dHdA          => elemR(:,er_dHdA)
             ellDepth      => elemR(:,er_EllDepth)
             flowrate      => elemR(:,er_Flowrate)
             head          => elemR(:,er_Head)
@@ -1266,7 +1268,7 @@ module geometry
             fullTopWidth  => elemR(:,er_FullTopWidth)
             fullhydradius => elemR(:,er_FullHydRadius)
             fullperimeter => elemR(:,er_FullPerimeter)
-            Kfac          => elemSR(:,esr_JB_Kfactor)
+            Kfactor       => elemSR(:,esr_JB_Kfactor)
             BranchExists  => elemSI(:,esi_JB_Exists)
             thisSolve     => elemI(:,ei_tmType)
 
@@ -1364,7 +1366,7 @@ module geometry
                                     !% --- surcharged inflow of upstream branch
                                     !%     reduce by Kfactor
                                     head(tB) = fHead_d(fup(tB)) &
-                                        - Kfac(tB) * (fVel_d(fup(tB))**twoI) / (twoR * grav)
+                                        - Kfactor(tB) * (fVel_d(fup(tB))**twoI) / (twoR * grav)
                                 else
                                     !% --- Fr=1 inflow from upstream branch
                                     head(tB) = zBtm(tB) + sedimentDepth(tB)  &
@@ -1386,7 +1388,7 @@ module geometry
                                     !% --- surcharged inflow of downstream branch
                                     !%     reduce by Kfactor
                                     head(tB) = fHead_u(fdn(tB)) &
-                                        - Kfac(tB) * (fVel_u(fdn(tB))**twoI) / (twoR * grav)
+                                        - Kfactor(tB) * (fVel_u(fdn(tB))**twoI) / (twoR * grav)
                                 else
                                     !% --- Fr=1 inflow from downstream branch
                                     head(tB) = zBtm(tB) + sedimentDepth(tB)  &
@@ -1412,7 +1414,7 @@ module geometry
                         perimeter(tB)    = fullperimeter(tB)
                         topwidth(tB)     = setting%ZeroValue%Topwidth
                         hydRadius(tB)    = fulldepth(tB) / fullperimeter(tB)
-                        dHdA(tB)         = oneR / setting%ZeroValue%Topwidth
+                        !dHdA(tB)         = oneR / setting%ZeroValue%Topwidth
                         ellDepth(tBA)    = llgeo_elldepth_pure(tBA)
                         elemYN(tB,eYN_isSurcharged) = .true.
 
@@ -1424,7 +1426,7 @@ module geometry
                         topwidth(tB)     = setting%ZeroValue%Topwidth
                         perimeter(tB)    = setting%ZeroValue%Topwidth + setting%ZeroValue%Depth
                         hydRadius(tB)    = setting%ZeroValue%Depth
-                        dHdA(tB)         = oneR / setting%ZeroValue%Topwidth
+                        !dHdA(tB)         = oneR / setting%ZeroValue%Topwidth
                         ellDepth(tB)     = setting%ZeroValue%Depth * 0.99d0 
                         elemYN(tB,eYN_isSurcharged) = .false.
 
@@ -1705,7 +1707,7 @@ module geometry
                         AreaVelocity(tB) = area(tB)
 
                         !% --- standard for all geometries
-                        dHdA(tB)     = oneR / topwidth(tB)
+                        !dHdA(tB)     = oneR / topwidth(tB)
 
                     end if
                     !% --- universal computation of volume

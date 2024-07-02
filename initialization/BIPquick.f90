@@ -13,8 +13,8 @@ module BIPquick
     use define_indexes
     use define_globals
     use define_settings
-    use discretization, only: init_discretization_nominal
-    use utility
+    use discretization, only: discretization_nominal
+    use utility, only: util_count_node_types !
     use utility_crash, only: util_crashpoint
 
     implicit none
@@ -341,14 +341,14 @@ contains
 
         !% --- check that length values are reasonable
         length = link%R(link_index, lr_Length)
-        if ( (length < 0.0) .or. (length > nullValueI) ) then
-            length = 1.0
+        if ( (length < zeroR) .or. (length > nullValueI) ) then
+            length = oneR
         end if
 
         !% --- handle lr_ElementLength that are infinity Infinity
         element_length = link%R(link_index, lr_ElementLength)
-        if ( (element_length < 0.0) .or. (element_length > length) ) then
-            element_length = 1.0
+        if ( (element_length < zeroR) .or. (element_length > length) ) then
+            element_length = oneR
         end if
         
         !% --- The link weight is equal to the link length divided by the element length
@@ -364,7 +364,13 @@ contains
             .or.                                            &
             (link%I(link_index,li_link_type) == lOutlet)    &
             ) then
-                weight = 0.0
+                weight = zeroR
+        end if
+
+        if (setting%Discretization%EquivalentOrificesFound) then 
+            if (link%YN(link_index,lYN_isEquivalentOrifice)) then 
+                weight = zeroR
+            end if
         end if
 
         !%------------------------------------------------------------------
@@ -1082,8 +1088,8 @@ contains
         end if
 
         !% --- set the number of elements and nominal element size for each link
-        call init_discretization_nominal(phantom_link_idx)
-        call init_discretization_nominal(spanning_link)
+        call discretization_nominal(phantom_link_idx)
+        call discretization_nominal(spanning_link)
 
         !% --- Save the original downstream node for the spanning link
         downstream_node = link%I(spanning_link, li_Mnode_d)

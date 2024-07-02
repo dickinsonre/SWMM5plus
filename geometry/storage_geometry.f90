@@ -14,7 +14,7 @@ module storage_geometry
     use define_keys
     use utility_interpolate
     use utility_allocate
-    use utility
+    use utility, only : util_linspace !
 
     implicit none
 
@@ -84,7 +84,7 @@ module storage_geometry
                         !%     aExpon, and volume are positive
                         depth = (- bb + sqrt(bb**2 + fourR * aa * vv) ) / (twoR * aa)
                     else            
-                        !% --- interpolate from the curve created in initial_condition/init_IC_get_junction_data
+                        !% --- interpolate from the curve created in initial_condition/IC_get_junction_data
                         !      using storage_create_curve_from_function()
                         call util_curve_lookup_singular(curveID, er_Volume, er_Depth, curve_storage_volume, &
                             curve_storage_depth, 1)
@@ -193,7 +193,7 @@ module storage_geometry
             if (elemSI(thisP(ii),esi_JM_type) == ImpliedStorage) return
             if (elemSI(thisP(ii),esi_JM_type) == NoStorage) return
            
-            !% --- interpolate from the curve created in initial_condition/init_IC_get_junction_data
+            !% --- interpolate from the curve created in initial_condition/IC_get_junction_data
             !      using storage_create_curve_from_function()
             call util_curve_lookup_singular(curveID, er_Volume, er_Temp01, curve_storage_volume, &
                  curve_storage_area, 1)
@@ -410,7 +410,7 @@ module storage_geometry
         !% --- store current volume and depth
         tvolume = elemR(idx,er_Volume)   
         tdepth  = elemR(idx,er_Depth) 
-      
+
         !% --- temporary switch of indepth into the current depth for interpolation
         elemR(idx,er_Depth) = indepth
 

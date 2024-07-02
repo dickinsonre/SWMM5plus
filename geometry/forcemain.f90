@@ -13,7 +13,7 @@ module forcemain
     use define_globals
     use define_indexes
     use define_keys
-    use utility, only: util_sign_with_ones
+    !use utility, only: util_sign_with_ones 
     use utility_output
     use utility_crash, only: util_crashpoint
 
@@ -49,12 +49,12 @@ module forcemain
         if (.not. setting%Solver%ForceMain%HazenWilliams_equivalent_isSetTF) then
             !% --- the HW equivalent only needs to be called once and the equivalent
             !%     Manning's n is stored for re-use
-            thisPackCol => col_elemP(ep_FM_HW_all)
+            thisPackCol => col_elemP(ep_FM_HW)
             Npack       => npack_elemP(thisPackCol)
             if (Npack > 0) then
                 call fm_equivalent_manningsN (thisPackCol,Npack,HazenWilliams)
             endif
-            !% --- only check this once. The ep_FM_HW_all is a static pack, so
+            !% --- only check this once. The ep_FM_HW is a static pack, so
             !%     if Npack = 0 on the first time through it will always be zero
             setting%Solver%ForceMain%HazenWilliams_equivalent_isSetTF = .true.
         else 

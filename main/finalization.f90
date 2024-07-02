@@ -13,7 +13,7 @@ module finalization
     use define_globals
     use define_indexes
     use interface_
-    use utility
+    use utility, only : util_total_volume_conservation !
     use utility_datetime
     use utility_deallocate
     use utility_profiler

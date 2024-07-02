@@ -12,14 +12,18 @@ module partitioning
     !%       - Default (simple)
     !%       - Random (used only for testing -- don't use!)
     !%
+    !% NOTE that any form of partitioning must meet the following criteria
+    !% 1) the break point must always be in the middle of a channel or
+    !%    conduit link. It cannot be adjacent to a JB or Diag element 
+    !% 2) the break point CANNOT be in an EquivalentOrifice link
     !%==========================================================================
 
     use define_keys
     use define_globals
     use define_indexes
     use define_settings, only: setting
-    use discretization, only: init_discretization_nominal
-    use utility
+    use discretization, only: discretization_nominal
+    use utility, only : util_count_node_types !
     use utility_allocate
     use BIPquick
     use utility_deallocate

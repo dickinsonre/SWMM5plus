@@ -13,7 +13,7 @@ module boundary_conditions
     use define_indexes
     use define_keys
     use define_globals
-    use utility, only: util_print_warning
+    use utility, only: util_print_warning   !
     use utility_interpolate
     use define_settings, only: setting
     use face, only: face_interpolate_bc

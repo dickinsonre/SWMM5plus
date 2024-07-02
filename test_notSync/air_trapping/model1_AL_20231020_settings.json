@@ -1,13 +1,6 @@
 {
     "JSON_FoundFileYN" : true,
     "JSON_CheckAllInputYN" : false,
-
-    "BC" : {
-        "InflowBC" : {
-            "UseLinkDistributionTF"  : false,
-            "LinkDistributionMethod" : "BC_AllUpstreamLinks"
-        }
-    },
     
     "CaseName" : {
         "Long"  : "test2",
@@ -53,6 +46,6 @@
             "Method"         : "DynamicSlot",
             "TargetCelerity" : 50.0
         }
-    },
+    }
 }
 

@@ -21,7 +21,8 @@ module utility_key_default
     
     private
 
-    public :: util_key_default_linknode
+    public :: util_key_default_link
+    public :: util_key_default_node
     public :: util_key_default_bc
     public :: util_key_default_elemX
     public :: util_key_default_face
@@ -32,10 +33,10 @@ module utility_key_default
 !% PUBLIC
 !%==========================================================================
 !%
-    subroutine util_key_default_linknode ()
+    subroutine util_key_default_link ()
         !%------------------------------------------------------------------
         !% Description
-        !% sets default undefinedKey for link%I and node%I arrays
+        !% sets default undefinedKey for link%I  arrays
         !%------------------------------------------------------------------
             integer, allocatable :: keylist(:)
         !%------------------------------------------------------------------
@@ -50,6 +51,19 @@ module utility_key_default
         link%I(:,keylist) = undefinedKey
         deallocate(keylist)
 
+    end subroutine util_key_default_link
+!%
+!%==========================================================================
+!%==========================================================================
+!%
+    subroutine util_key_default_node ()
+        !%------------------------------------------------------------------
+        !% Description
+        !% sets default undefinedKey for  node%I arrays
+        !%------------------------------------------------------------------
+            integer, allocatable :: keylist(:)
+        !%------------------------------------------------------------------
+
         !% --- for nodes
         !%     keylist must match the number of KEY columns for ni_ indexes
         allocate(keylist(1))
@@ -57,9 +71,9 @@ module utility_key_default
         node%I(:,keylist) = undefinedKey
         deallocate(keylist)
 
-    end subroutine util_key_default_linknode
+    end subroutine util_key_default_node
 !%
-!%==========================================================================
+!%==========================================================================    
 !%==========================================================================
 !%
     subroutine util_key_default_bc()

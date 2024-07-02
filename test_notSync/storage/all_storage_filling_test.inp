@@ -1,0 +1,194 @@
+[TITLE]
+;;Project Title/Notes
+
+[OPTIONS]
+;;Option             Value
+FLOW_UNITS           CMS
+INFILTRATION         MODIFIED_GREEN_AMPT
+FLOW_ROUTING         DYNWAVE
+LINK_OFFSETS         DEPTH
+MIN_SLOPE            0
+ALLOW_PONDING        YES
+SKIP_STEADY_STATE    NO
+
+START_DATE           10/12/2021
+START_TIME           00:00:00
+REPORT_START_DATE    10/12/2021
+REPORT_START_TIME    00:00:00
+END_DATE             10/14/2021
+END_TIME             00:00:00
+SWEEP_START          1/1
+SWEEP_END            12/31
+DRY_DAYS             0
+REPORT_STEP          00:06:00
+WET_STEP             00:05:00
+DRY_STEP             01:00:00
+ROUTING_STEP         0:00:01 
+RULE_STEP            00:00:00
+
+INERTIAL_DAMPING     NONE
+NORMAL_FLOW_LIMITED  BOTH
+FORCE_MAIN_EQUATION  D-W
+VARIABLE_STEP        0.75
+LENGTHENING_STEP     0
+MIN_SURFAREA         0
+MAX_TRIALS           0
+HEAD_TOLERANCE       0
+SYS_FLOW_TOL         5
+LAT_FLOW_TOL         5
+MINIMUM_STEP         0.5
+THREADS              1
+
+[EVAPORATION]
+;;Data Source    Parameters
+;;-------------- ----------------
+CONSTANT         0.0
+DRY_ONLY         NO
+
+[JUNCTIONS]
+;;Name           Elevation  MaxDepth   InitDepth  SurDepth   Aponded   
+;;-------------- ---------- ---------- ---------- ---------- ----------
+;;; t1
+ J1a               0.2         2          0.7        999          0   
+ J1b               0.1         2          0.7        999          0  
+ J1c               0.75        1          0          999          0  
+;;; t2
+ J2a               0.2         2          0.7          999          0   
+ J2b               0.1         2          0.7          999          0  
+ J2c               0.75        1          0          999          0  
+;;; t3
+J3a               0.2         2          0.7          999          0   
+J3b               0.1         2          0.7          999          0  
+J3c               0.5        1          0          999          0  
+
+[OUTFALLS]
+;;Name           Elevation  Type       Stage Data       Gated    Route To        
+;;-------------- ---------- ---------- ---------------- -------- ----------------
+ Out1             0.0          FREE                        NO                       
+ Out2             0.0          FREE                        NO       
+Out3             0.0          FREE                        NO                    
+
+[STORAGE]
+;;Name           Elev.    MaxDepth   InitDepth  Shape      Curve Name/Params            N/A      Fevap    Psi      Ksat     IMD     
+;;-------------- -------- ---------- ----------- ---------- ---------------------------- -------- --------          -------- --------
+ST1              0.00      20        0.7         FUNCTIONAL 1000      1         10       0        0       
+ST2              0.00      20        0.7         TABULAR    Storage2                     0        0       
+ST3              0.00      20        0.7         TABULAR    Storage3                     0        0       
+
+[CONDUITS]
+;;Name           From Node        To Node          Length     Roughness  InOffset   OutOffset  InitFlow   MaxFlow   
+;;-------------- ---------------- ---------------- ---------- ---------- ---------- ---------- ---------- ----------
+;;; t1
+ C1a               J1a              J1b              1000       0.015      0          0          0          0   
+ C1b               J1b              ST1              1000       0.015      0          0          0          0
+ C1c               ST1              J1c              1000       0.015      1.0          0          0          0
+ C1d               J1c              Out1             1000       0.015      0          0          0          0
+;;; t2
+ C2a               J2a              J2b              1000       0.015      0          0          0          0  
+ C2b               J2b              ST2              1000       0.015      0          0          0          0     
+ C2c               ST2              J2c              1000       0.015      1.0          0          0          0   
+ C2d               J2c              Out2             1000       0.015      0          0          0          0      
+;;; t3  
+C3a               J3a              J3b              1000       0.015      0          0          0          0  
+C3b               J3b              ST3              1000       0.015      0          0          0          0     
+C3c               ST3              J3c              1000       0.015      1.0          0          0          0   
+C3d               J3c              Out3             1000       0.015      0          0          0          0        
+
+[XSECTIONS]
+;;Link           Shape        Geom1            Geom2      Geom3      Geom4      Barrels    Culvert   
+;;-------------- ------------ ---------------- ---------- ---------- ---------- ---------- ----------
+;;; t1
+ C1a               CIRCULAR     4                0          0          0          1  
+ C1b               CIRCULAR     4                0          0          0          1   
+ C1c               CIRCULAR     0.5                0          0          0          1   
+ C1d               CIRCULAR     0.5                0          0          0          1   
+;;; t2
+ C2a               CIRCULAR     4                0          0          0          1          
+ C2b               CIRCULAR     4                0          0          0          1    
+ C2c               CIRCULAR     0.5                0          0          0          1  
+ C2d               CIRCULAR     0.5                0          0          0          1           
+;;; t3 
+C3a               CIRCULAR     4.0                0          0          0          1          
+C3b               CIRCULAR     4.0                0          0          0          1    
+C3c               CIRCULAR     0.5                0          0          0          1      
+C3d               CIRCULAR     0.5                0          0          0          1   
+
+[INFLOWS]
+;;Node           Constituent      Time Series      Type     Mfactor  Sfactor  Baseline Pattern
+;;-------------- ---------------- ---------------- -------- -------- -------- -------- --------
+ J1a              FLOW             T01              FLOW     1.0      1.0   
+ J2a              FLOW             T01              FLOW     1.0      1.0   
+J3a              FLOW             T01              FLOW     1.0      1.0   
+
+[CURVES]
+;;Name           Type       X-Value    Y-Value   
+;;-------------- ---------- ---------- ----------
+;;; t2
+ Storage2          Storage    0.0        500       
+ Storage2                     0.5        1000      
+ Storage2                     1.0        1000      
+ Storage2                     3.0        5000     
+ Storage2                     10         5000     
+ Storage2                     20         5000
+;;; t3
+Storage3          Storage    0.         500       
+Storage3                     0.5        1000      
+Storage3                     1.5        1000      
+Storage3                     1.55       1000  
+Storage3                     1.6        1.2     
+Storage3                     2.5        1.2   
+Storage3                     3.0        1.2
+Storage3                     5.0        1.2
+Storage3                    20.0        1.2
+
+
+[TIMESERIES]
+;;Name           Date       Time       Value     
+;;-------------- ---------- ---------- ----------
+T01              10/12/2021  0:00       0.0   
+T01              10/12/2021  0:10       0.02  
+T01              10/12/2021  0:20       0.04  
+T01              10/12/2021  0:30       0.08 
+T01              10/12/2021  0:40       0.16 
+T01              10/12/2021  0:50       0.20 
+T01              10/12/2021  1:00       0.225    
+T01              10/12/2021  2:00       0.225  
+T01              10/12/2021  8:00       0.225 
+T01              10/12/2021  8:10       0.2 
+T01              10/12/2021  8:20       0.18
+T01              10/12/2021  8:30       0.16
+T01              10/12/2021  8:40       0.14
+T01              10/12/2021  8:50       0.12
+T01              10/13/2021  0:00       0.1 
+T01              10/14/2021  0:00       0.1 
+T01              10/15/2021  0:00       0.1 
+
+[REPORT]
+;;Reporting Options
+SUBCATCHMENTS ALL
+NODES ALL
+LINKS ALL
+
+[TAGS]
+
+[MAP]
+DIMENSIONS 0.000 0.000 10000.000 10000.000
+Units      None
+
+[COORDINATES]
+;;Node           X-Coord            Y-Coord           
+;;-------------- ------------------ ------------------
+
+[VERTICES]
+;;Link           X-Coord            Y-Coord           
+;;-------------- ------------------ ------------------
+
+[PROFILES]
+;;Name           Links     
+;;-------------- ----------
+ "t1           " C1a C1b C1c C1d
+ "t2           " C2a C2b C2c C2d 
+"t3           " C3a C3b C3c C3d
+
+
+ 

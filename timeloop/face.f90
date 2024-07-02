@@ -23,7 +23,7 @@ module face
     use pack_mask_arrays, only: pack_CC_zeroDepth_interior_faces, pack_CC_zeroDepth_shared_faces
     use update, only: update_area_for_velocity
     use utility_profiler
-    use utility, only: util_sign_with_ones
+    !use utility, only: util_sign_with_ones
     use utility_crash, only: util_crashpoint
 
     implicit none
@@ -31,9 +31,12 @@ module face
     private 
 
     public :: face_pull_facedata_to_JBelem
+    public :: face_pull_all_adjacent_face_to_JB_elem
     public :: face_push_JBelem_to_face
     public :: face_push_diag_data_to_JBelem
     public :: face_push_elemdata_to_face
+    public :: face_push_all_adjacent_CCelem_to_JB_face
+    public :: face_push_all_adjacent_DiagElem_to_JB_face
     public :: face_push_diag_adjacent_data_to_face
     public :: face_make_up_dn_identical
     public :: face_interpolation
@@ -107,13 +110,17 @@ module face
         (thisPCol, frCol, erCol, elemXR, UpstreamFaceTF)
         !%------------------------------------------------------------------
         !% Description
-        !% pushes one column (erCol) of elemXR(:,:) array to one fr_.. column for the
-        !% elemP packed column. If UpstreamFaceTF is true the push is to the
+        !% pushes one element column of elemXR(:,erCol) array to one face 
+        !% column of faceR(:,frCol) for the indexes in the 
+        !% elemP packed column thisPCol. 
+        !% If UpstreamFaceTF is true the push is to the
         !% upstream face from the element, otherwise to downstream 
         !% NOTE this can give a segmentation fault if the face map for the
         !% any of the packed elements gives a nullvalueI. To prevent this from
         !% happening, make sure that calls to this including JB elements are
         !% done either using upstream only or downstream only.
+        !% NOTE: This is generic for any JB, CC or Diag packing, but should
+        !% not be used with JM packs
         !%------------------------------------------------------------------
         !% Declarations
             real(8), intent(in) :: elemXR(:,:)
@@ -137,6 +144,7 @@ module face
 
         !% --- check if the elem data has either been pushed 
         !%     to a shared face. if so then mark that face
+        !%     NOTE: this should be irrelevant when called with JB packing
         where (faceYN(elemI(thisP,eiMface),fYN_isSharedFace))
             faceYN(elemI(thisP,eiMface),fYN_isSharedFaceDiverged) = .true.
         end where
@@ -230,12 +238,12 @@ module face
                 !% --- set the adjacent element value storage on the face
                 select case (elemI(thisP(ii),ei_elementType))
                     case (weir)
-                        !faceR(ff,fr_EnergyHead_Adjacent) = elemR (thisP(ii),er_EnergyHead)
-                        !faceR(ff,fr_Zcrest_Adjacent)     = elemSR(thisP(ii),esr_Weir_Zcrest)
+                        !faceR(ff,fr_EnergyHead_Adjacent_to_JB) = elemR (thisP(ii),er_EnergyHead)
+                        !faceR(ff,fr_Zcrest_Adjacent_to_JB)     = elemSR(thisP(ii),esr_Weir_Zcrest)
                         if (kk==1) then
-                            faceR(ff,fr_dQdH_Adjacent)   = elemSR(thisP(ii),esr_Weir_dQdH_upstream)
+                            faceR(ff,fr_dQdH_Adjacent_to_JB)   = elemSR(thisP(ii),esr_Weir_dQdH_upstream)
                         else
-                            faceR(ff,fr_dQdH_Adjacent)   = elemSR(thisP(ii),esr_Weir_dQdH_downstream)
+                            faceR(ff,fr_dQdH_Adjacent_to_JB)   = elemSR(thisP(ii),esr_Weir_dQdH_downstream)
                         end if
 
                         ! print *, ' '
@@ -249,32 +257,47 @@ module face
                             faceYN(ff,fYN_isSharedFaceDiverged) = .true.
                         end if
                     case (orifice)
-                        !faceR(ff,fr_EnergyHead_Adjacent) = elemR (thisP(ii),er_EnergyHead)
-                        !faceR(ff,fr_Zcrest_Adjacent)     = elemSR(thisP(ii),esr_Orifice_Zcrest)
-                        !faceR(ff,fr_dQdH_Adjacent)       = elemSR(thisP(ii),esr_Orifice_dQdHe)
+                        !faceR(ff,fr_EnergyHead_Adjacent_to_JB) = elemR (thisP(ii),er_EnergyHead)
+                        !faceR(ff,fr_Zcrest_Adjacent_to_JB)     = elemSR(thisP(ii),esr_Orifice_Zcrest)
+                        !faceR(ff,fr_dQdH_Adjacent_to_JB)       = elemSR(thisP(ii),esr_Orifice_dQdHe)
                         if (kk==1) then
-                            faceR(ff,fr_dQdH_Adjacent)   = elemSR(thisP(ii),esr_Orifice_dQdH_upstream)
+                            faceR(ff,fr_dQdH_Adjacent_to_JB)   = elemSR(thisP(ii),esr_Orifice_dQdH_upstream)
                         else
-                            faceR(ff,fr_dQdH_Adjacent)   = elemSR(thisP(ii),esr_Orifice_dQdH_downstream)
+                            faceR(ff,fr_dQdH_Adjacent_to_JB)   = elemSR(thisP(ii),esr_Orifice_dQdH_downstream)
                         end if
                         !% --- check if the elem data has either been pushed 
                         !%     to a shared face. if so then mark that face
                         if (faceYN(ff,fYN_isSharedFace)) then
                             faceYN(ff,fYN_isSharedFaceDiverged) = .true.
                         end if
+
+                        ! if ((thisP(ii) == 12) .and. (setting%Time%Step > 38269)) then
+                        !     print *, 'in face push adj data to face'
+                        !     print *, thisP(ii), ff , kk
+                        !     if (kk==1) then 
+                        !         print *, elemSR(thisP(ii),esr_Orifice_dQdH_upstream)
+                        !     else 
+                        !         print *, elemSR(thisP(ii),esr_Orifice_dQdH_downstream)
+                        !     end if
+                        ! end if
+
                     case (outlet)
-                        !faceR(ff,fr_EnergyHead_Adjacent) = elemR (thisP(ii),er_EnergyHead)
-                        !faceR(ff,fr_Zcrest_Adjacent)     = elemSR(thisP(ii),esr_Outlet_Zcrest)
-                        faceR(ff,fr_dQdH_Adjacent)       = elemSR(thisP(ii),esr_Outlet_dQdHe)
+                        !faceR(ff,fr_EnergyHead_Adjacent_to_JB) = elemR (thisP(ii),er_EnergyHead)
+                        !faceR(ff,fr_Zcrest_Adjacent_to_JB)     = elemSR(thisP(ii),esr_Outlet_Zcrest)
+                        faceR(ff,fr_dQdH_Adjacent_to_JB)       = elemSR(thisP(ii),esr_Outlet_dQdH_upstream)
                         !% --- check if the elem data has either been pushed 
                         !%     to a shared face. if so then mark that face
                         if (faceYN(ff,fYN_isSharedFace)) then
                             faceYN(ff,fYN_isSharedFaceDiverged) = .true.
                         end if
                     case (pump)
-                        !faceR(ff,fr_EnergyHead_Adjacent) = elemR (thisP(ii),er_EnergyHead)
-                        !faceR(ff,fr_Zcrest_Adjacent)     = elemSR(thisP(ii),esr_Pump_Zcrest)
-                        faceR(ff,fr_dQdH_Adjacent)       = elemSR(thisP(ii),esr_Pump_dQdHp)
+                        !faceR(ff,fr_EnergyHead_Adjacent_to_JB) = elemR (thisP(ii),er_EnergyHead)
+                        !faceR(ff,fr_Zcrest_Adjacent_to_JB)     = elemSR(thisP(ii),esr_Pump_Zcrest)
+                        if (kk==1) then
+                            faceR(ff,fr_dQdH_Adjacent_to_JB)       = elemSR(thisP(ii),esr_Pump_dQdH_upstream)
+                        else
+                            faceR(ff,fr_dQdH_Adjacent_to_JB)       = elemSR(thisP(ii),esr_Pump_dQdH_downstream)
+                        end if
                         !% --- check if the elem data has either been pushed 
                         !%     to a shared face. if so then mark that face
                         if (faceYN(ff,fYN_isSharedFace)) then
@@ -382,37 +405,103 @@ module face
 !%==========================================================================
 !%      
     subroutine face_pull_facedata_to_JBelem &
-        (thisColP, thisFaceCol, thisElemCol, isJBupstreamYN)
+        (thisColP, thisFaceCol, thisElemCol, elemXR, isCC, isDiag)
         !%------------------------------------------------------------------
         !% Description
         !% Forces JB of the JM to face values without interpolation.
-        !% isJBupstreamYN decides whether the upstream or downstream JB
-        !% are handled in a call. This must be called twice, using .true.
-        !% and .false. on separate calls to handle all JB.
+        !% pulls data from faceR(:,thisFaceCol) and stores in 
+        !% elemXR(:,thisElemCol), where elemXR is elemR, elemSR, etc
+        !% Forces JB that are adjacent to CC elements when isCC is true
+        !% Forces JB that are adjacent to Diag elements when isDiag is true
+        !% Note that both may be true
         !%------------------------------------------------------------------
         !% Declarations:
+            real(8), intent(inout) :: elemXR(:,:)
             integer, intent(in) :: thisColP, thisFaceCol, thisElemCol
-            logical, intent(in) :: IsJBupstreamYN !% true if JB is upstream of JM
+            logical, intent(in) :: isCC !% pull if adjacent element is CC 
+            logical, intent(in) :: isDiag !% pull if adjacent element is Diag
             integer, pointer    :: thisJM(:), Npack
-            integer :: mm, ei_Mface, kstart
+            integer :: mm, kk, ei_Mface, fi_eType, JBidx
         !%------------------------------------------------------------------
         !% Preliminaries:
             Npack => npack_elemP(thisColP)
             if (Npack < 1) return
             thisJM => elemP(1:Npack,thisColP) 
-            if (isJBupstreamYN) then 
-                ei_Mface = ei_Mface_uL
-                kstart = oneI !% JB upstream of JM
-            else
-                ei_Mface = ei_Mface_dL
-                kstart = twoI !% JB downstream of JM
-            end if
         !%------------------------------------------------------------------
+
         do mm=1,Npack
-            call face_pull_facevalue_to_JB (thisFaceCol, thisElemCol, ei_Mface, thisJM(mm), kstart) 
+            do kk=1,max_branch_per_node
+                JBidx = thisJM(mm) + kk 
+                if (elemSI(JBidx,esi_JB_Exists) .ne. oneI) cycle 
+
+                if (mod(kk,2) == zeroI) then 
+                    !% --- downstream
+                    ei_Mface = ei_Mface_dL
+                    fi_eType = fi_eType_dL
+                else 
+                    !% --- upstream
+                    ei_Mface = ei_Mface_uL
+                    fi_eType = fi_eType_uL
+                end if
+
+                !% --- check the case of the JB-adjacent element
+                select case (faceI(elemI(JBidx,ei_Mface),fi_eType))
+                    case (CC)
+                        if (isCC) then 
+                            elemXR(JBidx,thisElemCol) = faceR(elemI(JBidx,ei_Mface),thisFaceCol)
+                        else 
+                            !% --- skip 
+                        end if
+                    case (pump, weir, orifice)
+                        if (isDiag) then 
+                            elemXR(JBidx,thisElemCol) = faceR(elemI(JBidx,ei_Mface),thisFaceCol)
+                        else 
+                            !% --- skip 
+                        end if
+                    case default 
+                        print *, 'CODE ERROR: unexpected case default'
+                        call util_crashpoint(7209873)
+                end select
+
+            end do
         end do
     
     end subroutine face_pull_facedata_to_JBelem 
+!%    
+!%==========================================================================    
+!%==========================================================================
+!%    
+    subroutine face_pull_all_adjacent_face_to_JB_elem (thisColJM, isCC, isDiag)
+        !%------------------------------------------------------------------
+        !% Description:
+        !% pulls the adjacent element data (stored in ...fr_Adjacent_to_JB)
+        !% from the face storage into the JB element
+        !% If isCC is true then pulls when adjacent element is CC 
+        !% if isDiag is true then pulls when adjacent element is diag (pump, weir, orifice)
+        !% Both isCC and isDiag may be true
+        !% NOTE: does not include geometry values for length or Zcrest
+        !%------------------------------------------------------------------
+        !% Declarations
+            integer, intent(in) :: thisColJM
+            logical, intent(in) :: isCC, isDiag
+            integer, pointer    :: Npack
+        !%------------------------------------------------------------------
+        !% Preliminaries
+            Npack => npack_elemP(thisColJM)
+            if (Npack < 1) return
+        !%------------------------------------------------------------------
+
+        call face_pull_facedata_to_JBelem (thisColJM, fr_Head_Adjacent_to_JB,       er_Head,         elemR,  isCC, isDiag)
+        call face_pull_facedata_to_JBelem (thisColJM, fr_EnergyHead_Adjacent_to_JB, er_EnergyHead,   elemR,  isCC, isDiag)
+        call face_pull_facedata_to_JBelem (thisColJM, fr_Flowrate_Adjacent_to_JB,   er_Flowrate,     elemR,  isCC, isDiag)
+        call face_pull_facedata_to_JBelem (thisColJM, fr_Topwidth_Adjacent_to_JB,   er_Topwidth,     elemR,  isCC, isDiag)
+        call face_pull_facedata_to_JBelem (thisColJM, fr_dQdH_Adjacent_to_JB,       esr_JB_dQdHjm,   elemSR, isCC, isDiag)
+        call face_pull_facedata_to_JBelem (thisColJM, fr_Velocity_Adjacent_to_JB,   er_Velocity,     elemR,  isCC, isDiag)
+        call face_pull_facedata_to_JBelem (thisColJM, fr_Froude_Adjacent_to_JB,     er_FroudeNumber, elemR,  isCC, isDiag)
+        call face_pull_facedata_to_JBelem (thisColJM, fr_Depth_Adjacent_to_JB,      er_Depth,        elemR,  isCC, isDiag)
+
+
+    end subroutine face_pull_all_adjacent_face_to_JB_elem
 !%    
 !%==========================================================================    
 !%==========================================================================
@@ -452,6 +541,148 @@ module face
         end do
 
     end subroutine face_push_JBelem_to_face
+
+!%
+!%==========================================================================         
+!%==========================================================================
+!%   
+    subroutine face_push_all_adjacent_CCelem_to_JB_face ()  
+        !%------------------------------------------------------------------
+        !% Description
+        !% Pushes all the adjacent CC element data to the faceR(:,fr_...Adjacent_to_JB)
+        !% array. Here, if a CC is downstream of a junction the push is to the upstream face
+        !%  and vice versa
+        !% Note that because a parallel subsystem split must occur within a link
+        !% we are guaranteed that no shared faces will be involved.
+        !% The true/false calse below are for the upstream and downstream JB.
+        !%------------------------------------------------------------------
+
+        call face_push_elemdata_to_face (ep_CC_DownstreamOfJunction, fr_Head_Adjacent_to_JB,   er_Head,   elemR, .true.)
+        call face_push_elemdata_to_face (ep_CC_UpstreamOfJunction,   fr_Head_Adjacent_to_JB,   er_Head,   elemR, .false.)
+
+        call face_push_elemdata_to_face (ep_CC_DownstreamOfJunction, fr_EnergyHead_Adjacent_to_JB,   er_EnergyHead,   elemR, .true.)
+        call face_push_elemdata_to_face (ep_CC_UpstreamOfJunction,   fr_EnergyHead_Adjacent_to_JB,   er_EnergyHead,   elemR, .false.)
+
+        call face_push_elemdata_to_face (ep_CC_DownstreamOfJunction, fr_Flowrate_Adjacent_to_JB,   er_Flowrate,   elemR, .true.)
+        call face_push_elemdata_to_face (ep_CC_UpstreamOfJunction,   fr_Flowrate_Adjacent_to_JB,   er_Flowrate,   elemR, .false.)
+
+        call face_push_elemdata_to_face (ep_CC_DownstreamOfJunction, fr_Topwidth_Adjacent_to_JB, er_Topwidth, elemR, .true.)
+        call face_push_elemdata_to_face (ep_CC_UpstreamOfJunction,   fr_Topwidth_Adjacent_to_JB, er_Topwidth, elemR, .false.)
+        
+        call face_push_elemdata_to_face (ep_CC_DownstreamOfJunction, fr_Length_Adjacent_to_JB,   er_Length,   elemR, .true.)
+        call face_push_elemdata_to_face (ep_CC_UpstreamOfJunction,   fr_Length_Adjacent_to_JB,   er_Length,   elemR, .false.)
+
+        call face_push_elemdata_to_face (ep_CC_DownstreamOfJunction, fr_dQdH_Adjacent_to_JB,   esr_JB_dQdHjm,   elemSR, .true.)
+        call face_push_elemdata_to_face (ep_CC_UpstreamOfJunction,   fr_dQdH_Adjacent_to_JB,   esr_JB_dQdHjm,   elemSR, .false.)
+
+        call face_push_elemdata_to_face (ep_CC_DownstreamOfJunction, fr_Velocity_Adjacent_to_JB,   er_Velocity,   elemR, .true.)
+        call face_push_elemdata_to_face (ep_CC_UpstreamOfJunction,   fr_Velocity_Adjacent_to_JB,   er_Velocity,   elemR, .false.)
+
+        call face_push_elemdata_to_face (ep_CC_DownstreamOfJunction, fr_Froude_Adjacent_to_JB,   er_FroudeNumber,   elemR, .true.)
+        call face_push_elemdata_to_face (ep_CC_UpstreamOfJunction,   fr_Froude_Adjacent_to_JB,   er_FroudeNumber,   elemR, .false.)
+
+        call face_push_elemdata_to_face (ep_CC_DownstreamOfJunction, fr_Depth_Adjacent_to_JB,   er_Depth,   elemR, .true.)
+        call face_push_elemdata_to_face (ep_CC_UpstreamOfJunction,   fr_Depth_Adjacent_to_JB,   er_Depth,   elemR, .false.)
+
+    end subroutine face_push_all_adjacent_CCelem_to_JB_face
+!%
+!%==========================================================================         
+!%==========================================================================
+!%   
+    subroutine face_push_all_adjacent_DiagElem_to_JB_face ()
+        !%------------------------------------------------------------------
+        !% Description
+        !% Pushes all the adjacent Diagnostic element data to the faceR(:,fr_...Adjacent_to_JB)
+        !% array. Here, if a Diag is downstream of a junction the push is to the upstream face
+        !%  and vice versa
+        !% Note that because a parallel subsystem split must occur within a link
+        !% we are guaranteed that no shared faces will be involved.
+        !% The true/false calse below are for the upstream and downstream JB.
+        !%------------------------------------------------------------------
+
+        call face_push_elemdata_to_face (ep_Diag_DownstreamOfJunction, fr_Head_Adjacent_to_JB,   er_Head,   elemR, .true.)
+        call face_push_elemdata_to_face (ep_Diag_UpstreamOfJunction,   fr_Head_Adjacent_to_JB,   er_Head,   elemR, .false.)
+
+        call face_push_elemdata_to_face (ep_CC_DownstreamOfJunction, fr_EnergyHead_Adjacent_to_JB,   er_EnergyHead,   elemR, .true.)
+        call face_push_elemdata_to_face (ep_CC_UpstreamOfJunction,   fr_EnergyHead_Adjacent_to_JB,   er_EnergyHead,   elemR, .false.)
+
+        call face_push_elemdata_to_face (ep_Diag_DownstreamOfJunction, fr_Flowrate_Adjacent_to_JB,   er_Flowrate,   elemR, .true.)
+        call face_push_elemdata_to_face (ep_Diag_UpstreamOfJunction,   fr_Flowrate_Adjacent_to_JB,   er_Flowrate,   elemR, .false.)
+
+        call face_push_elemdata_to_face (ep_CC_DownstreamOfJunction, fr_Topwidth_Adjacent_to_JB, er_Topwidth, elemR, .true.)
+        call face_push_elemdata_to_face (ep_CC_UpstreamOfJunction,   fr_Topwidth_Adjacent_to_JB, er_Topwidth, elemR, .false.)
+        
+        call face_push_elemdata_to_face (ep_Diag_DownstreamOfJunction, fr_Length_Adjacent_to_JB,   er_Length,   elemR, .true.)
+        call face_push_elemdata_to_face (ep_Diag_UpstreamOfJunction,   fr_Length_Adjacent_to_JB,   er_Length,   elemR, .false.)
+
+        call face_push_elemdata_to_face (ep_Diag_DownstreamOfJunction, fr_dQdH_Adjacent_to_JB,   esr_JB_dQdHjm,   elemSR, .true.)
+        call face_push_elemdata_to_face (ep_Diag_UpstreamOfJunction,   fr_dQdH_Adjacent_to_JB,   esr_JB_dQdHjm,   elemSR, .false.)
+
+        call face_push_elemdata_to_face (ep_Diag_DownstreamOfJunction, fr_Velocity_Adjacent_to_JB,   er_Velocity,   elemR, .true.)
+        call face_push_elemdata_to_face (ep_Diag_UpstreamOfJunction,   fr_Velocity_Adjacent_to_JB,   er_Velocity,   elemR, .false.)
+
+        call face_push_elemdata_to_face (ep_Diag_DownstreamOfJunction, fr_Froude_Adjacent_to_JB,   er_FroudeNumber,   elemR, .true.)
+        call face_push_elemdata_to_face (ep_Diag_UpstreamOfJunction,   fr_Froude_Adjacent_to_JB,   er_FroudeNumber,   elemR, .false.)
+
+        call face_push_elemdata_to_face (ep_Diag_DownstreamOfJunction, fr_Depth_Adjacent_to_JB,   er_Depth,   elemR, .true.)
+        call face_push_elemdata_to_face (ep_Diag_UpstreamOfJunction,   fr_Depth_Adjacent_to_JB,   er_Depth,   elemR, .false.)
+        
+    end subroutine face_push_all_adjacent_DiagElem_to_JB_face
+!%
+!%==========================================================================         
+!%==========================================================================
+!%   
+    ! subroutine face_push_all_adjacent_elem_to_JB_face()
+    !     !%------------------------------------------------------------------
+    !     !% Description
+    !     !% Pushes all the adjacent element data to the faceR(:,fr_...Adjacent_to_JB)
+    !     !% array.
+    !     !% Note that because a parallel subsystem split must occur within a link
+    !     !% we are guaranteed that no shared faces will be involved.
+    !     !% The true/false calse below are for the upstream and downstream JB.
+    !     !%------------------------------------------------------------------
+    !     !% Declarations:
+    !         integer, pointer    :: Npack
+    !     !%------------------------------------------------------------------
+    !     !% Preliminaries
+    !         Npack => npack_elemP(thisColJM)
+    !         if (Npack < 1) return
+    !     !%------------------------------------------------------------------
+
+    !     call face_push_elemdata_to_face (ep_CCJB, fr_Head_Adjacent_to_JB,   er_Head,   elemR, .true.)
+    !     call face_push_elemdata_to_face (, fr_Head_Adjacent_to_JB,   er_Head,   elemR, .false.)
+
+    !     call face_push_elemdata_to_face (thisColJM, fr_EnergyHead_Adjacent_to_JB,   er_EnergyHead,   elemR, .true.)
+    !     call face_push_elemdata_to_face (thisColJM, fr_EnergyHead_Adjacent_to_JB,   er_EnergyHead,   elemR, .false.)
+
+    !     call face_push_elemdata_to_face (thisColJM, fr_Flowrate_Adjacent_to_JB,   er_Flowrate,   elemR, .true.)
+    !     call face_push_elemdata_to_face (thisColJM, fr_Flowrate_Adjacent_to_JB,   er_Flowrate,   elemR, .false.)
+
+    !     call face_push_elemdata_to_face (thisColJM, fr_Topwidth_Adjacent_to_JB, er_Topwidth, elemR, .true.)
+    !     call face_push_elemdata_to_face (thisColJM, fr_Topwidth_Adjacent_to_JB, er_Topwidth, elemR, .false.)
+        
+    !     call face_push_elemdata_to_face (thisColJM, fr_Length_Adjacent_to_JB,   er_Length,   elemR, .true.)
+    !     call face_push_elemdata_to_face (thisColJM, fr_Length_Adjacent_to_JB,   er_Length,   elemR, .false.)
+
+    !     call face_push_elemdata_to_face (thisColJM, fr_dQdH_Adjacent_to_JB,   er_dQdH,   elemR, .true.)
+    !     call face_push_elemdata_to_face (thisColJM, fr_dQdH_Adjacent_to_JB,   er_dQdH,   elemR, .false.)
+
+    !     call face_push_elemdata_to_face (thisColJM, fr_Velocity_Adjacent_to_JB,   er_Velocity,   elemR, .true.)
+    !     call face_push_elemdata_to_face (thisColJM, fr_Velocity_Adjacent_to_JB,   er_Velocity,   elemR, .false.)
+
+    !     call face_push_elemdata_to_face (thisColJM, fr_Froude_Adjacent_to_JB,   er_FroudeNumber,   elemR, .true.)
+    !     call face_push_elemdata_to_face (thisColJM, fr_Froude_Adjacent_to_JB,   er_FroudeNumber,   elemR, .false.)
+
+    !     call face_push_elemdata_to_face (thisColJM, fr_Depth_Adjacent_to_JB,   er_Depth,   elemR, .true.)
+    !     call face_push_elemdata_to_face (thisColJM, fr_Depth_Adjacent_to_JB,   er_Depth,   elemR, .false.)
+
+    !     !% --- only if adjacent is diagnostic
+        
+    !     call face_push_elemdata_to_face (thisColJM, fr_Zcrest_Adjacent_to_JB,   er_Zcrest,   elemSR, .true.)
+    !     call face_push_elemdata_to_face (thisColJM, fr_Zcrest_Adjacent_to_JB,   er_Zcrest,   elemSR, .false.)
+
+    
+    ! end subroutine face_push_all_adjacent_elem_to_JB_face   
 !%
 !%==========================================================================
 !%==========================================================================
@@ -994,6 +1225,12 @@ module face
                 (fHeadSetD, fHeadSetU, facePackCol, Npack)
         end if
 
+        ! print *, ' '
+        ! print *, 'in face interp '
+        ! print *, elemR(3,er_Flowrate), elemR(12,er_Flowrate)
+        ! print *, elemR(3,er_InterpWeight_dQ), elemR(12,er_InterpWeight_dQ)
+        ! print *, faceR(2,fr_Flowrate)
+
         if (Qyn) then
             fFlowSet = [fr_Flowrate, fr_Preissmann_Number]
             eFlowSet = [er_Flowrate, er_Preissmann_Number]
@@ -1001,15 +1238,25 @@ module face
             call face_interp_interior_set &
                 (fFlowSet, eFlowSet, er_InterpWeight_dQ, er_InterpWeight_uQ, facePackCol, Npack)
 
+                ! print *, 'Q after interp '
+                ! print *, faceR(2,fr_Flowrate)
+
             if (setting%Limiter%Flowrate%UseLocalVolumeYN) then
                 !% --- compute volume-based limits on flowrate
                 call face_flowrate_limits_interior (facePackCol)
             end if
 
+            ! print *, 'Q after limiter '
+            ! print *, faceR(2,fr_Flowrate)
+
             !% --- calculate the velocity in faces and put limiter
             call face_velocities (facePackCol, .true.)
              
         end if
+
+        !print *, 'in face interp after' elemR()
+
+        
 
         !% --- reset all the hydraulic jump interior faces
         if (.not. skipJump) then
@@ -1589,8 +1836,8 @@ module face
         !%------------------------------------------------------------------
         !% Declarations:
             integer, intent(in) :: facePackCol
-            integer, pointer :: Npack
-            integer, pointer :: thisF(:), eup(:), edn(:)
+            integer, pointer :: Npack, npackD
+            integer, pointer :: thisF(:), thisDiag(:), eup(:), edn(:)
             integer, pointer :: idx_fBCdn(:), idx_fBCup(:)
             real(8), pointer :: dt, eVolume(:), eFlowLat(:), fFlow(:)
             real(8), pointer :: LocalVolumeFactor
@@ -1619,11 +1866,25 @@ module face
         faceR(thisF,fr_FlowrateMaxDownstream) = LocalVolumeFactor * (eFlowLat(eup(thisF)) + eVolume(eup(thisF)) / dt)
         faceR(thisF,fr_FlowrateMaxUpstream)   = LocalVolumeFactor * (eFlowLat(edn(thisF)) + eVolume(edn(thisF)) / dt)
 
+        ! print *, 'in face limit'
+        ! print *, 'max down ', faceR(2,fr_FlowrateMaxDownstream)
+        ! print *, 'max up   ',faceR(2,fr_FlowrateMaxUpstream) 
+
         !% --- set downstream BC to allow any level of inflow
-        faceR(idx_fBCdn,fr_FlowrateMaxUpstream)  = nullvalueR
+        faceR(idx_fBCdn,fr_FlowrateMaxUpstream)  = abs(nullvalueR)
 
         !% --- set upstream BC face to allow any level of inflow
-        faceR(idx_fBCup,fr_FlowrateMaxDownstream) = nullvalueR
+        faceR(idx_fBCup,fr_FlowrateMaxDownstream) = abs(nullvalueR)
+
+        !% --- set Diagnostic and JB-adjacent faces to max so that the
+        !%     limiter does not apply.
+        npackD => npack_faceP(fp_JB_Diag_IorS)
+        if (npackD > 0) then
+            thisDiag   => faceP(1:npackD,fp_JB_Diag_IorS)
+            faceR(thisDiag,fr_FlowrateMaxUpstream)   = abs(nullvalueR)
+            faceR(thisDiag,fr_FlowrateMaxDownstream) = abs(nullvalueR)
+        end if
+
 
         !% --- limit the flowrates
         where (fFlow(thisF) > faceR(thisF,fr_FlowrateMaxDownstream))
@@ -1703,27 +1964,27 @@ module face
 !%==========================================================================  
 !%==========================================================================
 !%   
-    subroutine face_pull_facevalue_to_JB (frCol, erCol, fiIdx, JMidx, kstart)
-        !%------------------------------------------------------------------
-        !% Description:
-        !% Forces the face value onto the JB element for all JB of a JM
-        !% with k=1 applying to upstream JB and k=2 for downstream.
-        !%------------------------------------------------------------------
-        integer, intent(in) :: frCol  !% column in faceR array for output
-        integer, intent(in) :: erCol  !% column in elemR array for input
-        integer, intent(in) :: fiIdx  !% face index column for up/dn map
-        integer, intent(in) :: JMidx  !% junction main index
-        integer, intent(in) :: kstart !% =1 for upstream, 2 for downstream
-        integer :: kk
-        !%------------------------------------------------------------------
-        !%------------------------------------------------------------------
+    ! subroutine face_pull_facevalue_to_JB (frCol, erCol, elemXR, fiIdx, JBidx)
+    !     !%------------------------------------------------------------------
+    !     !% Description:
+    !     !% Forces the face value onto the JB element for all JB of a JM
+    !     !% with k=1 applying to upstream JB and k=2 for downstream.
+    !     !%------------------------------------------------------------------
+    !     real(8), intent(inout) :: elemXR(:,:) !% either elemR, or elemSR array
+    !     integer, intent(in) :: frCol  !% column in faceR array for output
+    !     integer, intent(in) :: erCol  !% column in elemXR array for input
+    !     integer, intent(in) :: fiIdx  !% face index column for up/dn map
+    !     integer, intent(in) :: JBidx  !% junction main index
+    !     !%------------------------------------------------------------------
+    !     !%------------------------------------------------------------------
 
-        do kk=kstart,max_branch_per_node,2
-            if (elemSI(JMidx+kk,esi_JB_Exists).ne. oneI) cycle
-            elemR(JMidx+kk,erCol) = faceR(elemI(JMidx+kk,fiIdx),frCol)
-        end do
+    !     ! do kk=kstart,max_branch_per_node,2
+    !     !     if (elemSI(JMidx+kk,esi_JB_Exists).ne. oneI) cycle
+    !     !     elemXR(JMidx+kk,erCol) = faceR(elemI(JMidx+kk,fiIdx),frCol)
+    !     ! end do
+    !     elemXR(JBidx,erCol) = faceR(elemI(JBidx,fiIdx),frCol)
 
-    end subroutine face_pull_facevalue_to_JB
+    ! end subroutine face_pull_facevalue_to_JB
 !%
 !%==========================================================================
 !%==========================================================================
@@ -1961,6 +2222,7 @@ module face
         !% --- For JB
         !%  facePcol must be one of fp_JB_downstream_is_zero_IorS,
         !%  fp_JB_upstream_is_zero_IorS, fp_JB_bothsides_are_zero_IorS
+        !% --- DOES NOT APPLY TO JB ADJACENT TO DIAG ELEMENT BASED ON packed arrays
         !% -----------------------------------------------------------------
         !% Declarations
             integer, intent(in) :: facePcol

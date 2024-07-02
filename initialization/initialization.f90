@@ -30,7 +30,7 @@ module initialization
     use network_define
     use partitioning
     use culvert_elements, only: culvert_parameter_values
-    use utility
+    use utility !
     use utility_allocate
     use utility_array
     use utility_datetime
@@ -65,9 +65,89 @@ contains
             character(64)        :: subroutine_name = 'initialize_toplevel'
         !%-------------------------------------------------------------------
         !% Preliminaries
-            if (setting%Debug%File%initialization) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
         !%-------------------------------------------------------------------  
+      
+        call init_preliminaries ()
+
+        !% --- get the SWMM input file data and store in link-node-subcatch arrays
+        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin init SWMM input data"
+        call init_SWMM_input_data ()
+
+        !%==========================================================================
+        !%                      BEGIN PARTITIONING FOR PARALLEL                            
+        !%      AFTER THIS POINT WE HAVE INSERTED NEW NODES AND SPLINT LINKS    
+        !%==========================================================================
+    
+        !% --- break the link-node system into partitions for multi-processor operation
+        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin link-node partitioning"
+        call init_partitioning()
+        call util_crashstop(5297)
+
+        !%==========================================================================
+        !%                NETWORK DEFINITION ON EACH PROCESSOR IMAGE
+        !%==========================================================================
+      
+        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin FV network"
+        call init_FV_network ()
+        call util_crashstop(20574)
+
+        !%==========================================================================
+        !%                               AIR ENTRAPMENT INIT
+        !%==========================================================================
+
+        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin airtrapping"
+        call init_airtrapping ()
+        call util_crashstop(71087)
+
+        !%==========================================================================
+        !%                                   OUTPUT SETUP
+        !%==========================================================================
+        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin initializing output report"
+        call init_report()
+
+        !%==========================================================================
+        !%                     SETUP INITIAL CONDITIONS ON ELEMENTS
+        !%==========================================================================
+        !% --- initial conditions (in separater module)
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin init IC_toplevel"
+        call IC_toplevel ()       
+        call util_crashstop(4429873)
+
+        !% --- setup the multi-level finite-volume output
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin init FV output"
+        call init_FV_output ()
+        call util_crashstop(103897)
+
+        !% --- wait for all processors before exiting to the time loop
+        sync all
+        
+        if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin init_finish"
+        call init_finish()
+        call util_crashstop(440987)
+        
+        !%------------------------------------------------------------------- 
+        !% Closing
+            if ((setting%Output%Verbose) .and. (this_image() == 1)) then 
+                 print *, 'finished initialization'
+                 print *, ' '
+            end if
+
+     end subroutine initialize_toplevel
+!%
+!%==========================================================================
+!% PRIVATE
+!%==========================================================================
+!% 
+    subroutine init_preliminaries ()
+        !%------------------------------------------------------------------
+        !% Description
+        !% preliminary initialization in setting up the input/outpt files and
+        !% the computer
+        !%------------------------------------------------------------------
+        !% Declarations
+            real(8)              :: arbitraryreal = 0.d0
+        !%------------------------------------------------------------------
+
         !% --- Set a small real based on machine precision
         !%     This produces a number that is significantly larger than machine
         !%     precision so that it can be a usable number, but small enough
@@ -80,6 +160,7 @@ contains
         !% --- define the reverse keys (used mainly for debugging)
         call define_keys_reverse()
         call define_apikeys_reverse()
+
         !% NOTES:
         !%    reverseKey(ii) gives you the text name of the ii key
         !%    there are also two useful subroutines:
@@ -111,6 +192,9 @@ contains
             call util_file_setup_input_paths_and_files()
         end if
 
+        !% --- initialize blowup limits
+        call util_crash_initialize
+
         !% --- create duplicate input files
         !%     this is required because each image needs its own copy of the input files
         !%     HACK -- for large files we will need a better approach, but this is 
@@ -132,8 +216,8 @@ contains
 
         !% --- print program header
         if ((setting%Output%Verbose) .and. (this_image() == 1)) &
-             call util_print_programheader ()    
-
+             call util_print_programheader ()  
+             
         !% --- set up the profiler
         if (setting%Profile%useYN) then
             call util_allocate_profiler ()
@@ -155,9 +239,52 @@ contains
         call interface_init ()
         call util_crashstop(43974)
 
-        !% --- set up and store the SWMM-C link-node arrays in equivalent Fortran arrays
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin link-node processing"
-        call init_linknode_arrays ()
+                !% --- Allocate storage for link  tables
+        call util_allocate_link()
+        !% --- Allocate storage for node tables
+        call util_allocate_node()
+        !% --- Allocate storage for subcatchment
+        if (setting%Simulation%useHydrology) then 
+            call util_allocate_subcatch()
+        else    
+            !% --- continue without hydrology    
+        end if
+
+        !% --- Set default for all link  keys
+        call util_key_default_link ()
+
+        !% --- Set default for all node keys
+        call util_key_default_node()
+
+    end subroutine init_preliminaries
+!%
+!%==========================================================================
+!%========================================================================== 
+!%
+    subroutine init_SWMM_input_data ()
+        !%------------------------------------------------------------------
+        !% Description
+        !% stores the EPA SWMM input data into SWMM5+ arrays
+        !%------------------------------------------------------------------
+
+          !% --- Store the Link/Node names 
+        call interface_update_linknode_names()
+
+        !% --- set up and store the SWMM-C link arrays in equivalent Fortran arrays
+        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin link processing"
+        call init_link_arrays ()
+
+        !% --- identify the small links for special handling
+        !%     At this point, small links designiated for equivalent orifices
+        !%     will still store their original geometry.
+        call init_small_link_handling ()
+
+        !% --- set up and store the SWMM-C node arrays in equivalent Fortran arrays
+        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin node processing"
+        call init_node_arrays ()
+
+        !% --- set up arrays for subcatchments
+        call init_subcatchment_arrays ()
         call util_crashstop(31973)
 
         !% --- initialize ForceMain settings (determines if FM is used)
@@ -165,6 +292,7 @@ contains
         call init_ForceMain_setting ()
 
         !% --- initialize Adjustments from EPA SWMM input file
+        !%     these are the temperature, evaporation, rainfall, and conductivity values
         ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin get adjustments"
         call interface_get_adjustments ()
 
@@ -199,26 +327,6 @@ contains
         ! if (setting%Output%Verbose) print *, "begin initializing link inflow volumefraction"
         call init_link_inflow_volumefraction ()
 
-        !%==========================================================================
-        !%                      BEGIN PARTITIONING FOR PARALLEL                            
-        !%      AFTER THIS POINT WE HAVE INSERTED NEW NODES AND SPLINT LINKS    
-        !%==========================================================================
-    
-        !% --- break the link-node system into partitions for multi-processor operation
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin link-node partitioning"
-        call init_partitioning()
-        call util_crashstop(5297)
-
-        !% --- HACK WORK NEEDED: we need to ensure that any phantom link defined in partitioning
-        !% is NOT a culvert.i.e., the original portion of the link from SWMM must be defined as
-        !% the culvert and the phantom must be upstream/downstream. 
-
-        !% --- initialize types to the undefined key number
-        elemI(:,ei_elementType)  = undefinedKey
-        elemI(:,ei_geometryType) = undefinedKey
-        elemI(:,ei_HeqType)      = undefinedKey
-        elemI(:,ei_QeqType)      = undefinedKey
-      
         !% --- error checking
         if (.not. setting%Simulation%useHydraulics) then 
             if (this_image() == 1) then
@@ -229,9 +337,92 @@ contains
         end if  
         call util_crashstop(1973)
 
-        !%==========================================================================
-        !%                NETWORK DEFINITION ON EACH PROCESSOR IMAGE
-        !%==========================================================================
+        
+    end subroutine init_SWMM_input_data
+!%
+!%==========================================================================
+!%==========================================================================
+!%    
+    subroutine init_partitioning()
+        !%------------------------------------------------------------------
+        !% Description:
+        !%   This subroutine calls the public subroutine from the utility module,
+        !%   partitioning.f08. It also calls a public subroutine from the temporary
+        !%   coarray_partition.f08 utility module that defines how big the coarrays
+        !%   must be.
+        !%
+        !%------------------------------------------------------------------
+            integer       :: ii
+            character(64) :: subroutine_name = 'init_partitioning'
+        !%------------------------------------------------------------------
+        !% Preliminaries
+            if (setting%Debug%File%initialization) &
+                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
+
+            !% if there are no links, the system cannot be partitioned
+            if (N_link == 0) then
+                if (this_image() == 1) then
+                    write(*,*) '******************************************************'
+                    write(*,*) '*          USER CONFIGURATION ERROR                  *'
+                    write(*,*) '* The SWMM input file does not include any links.    *'
+                    write(*,*) '* The SWMM5+ code requires at least one link to run. *'
+                    write(*,*) '* This run was stopped without any output.           *'
+                    write(*,*) '******************************************************'
+                end if
+                call util_crashpoint(970532)
+                return
+            end if 
+        
+            if (setting%Profile%useYN) call util_profiler_start (pfc_init_partitioning)
+        !%------------------------------------------------------------------
+
+        !% --- find the number of elements in a link based on nominal element length
+        do ii = 1, setting%SWMMinput%N_link
+            call discretization_nominal(ii)
+        end do
+
+        !% --- Set the network partitioning method used for multi-processor parallel computation
+        call partitioning_toplevel()
+        sync all
+
+        !% HOLD FOR FUTURE
+        !% --- Compute the amount of a conduit length that is added to a connected junction.
+        !%     This modifies the conduit length itself if setting%Discretization%AdjustLinkLengthForJunctionBranchYN
+        !%     is true. The junction itself is setup in network_nJm_branch_length()
+        !call init_discretization_adjustlinklength()
+
+        !% --- calculate the largest number of elements and faces to allocate the coarrays
+        call init_coarray_length()
+
+        !% --- allocate elem and face coarrays
+        call util_allocate_elemX_faceX()
+        call util_key_default_elemX()
+        call util_key_default_face()
+
+        !% --- allocate column indexes of elem and face arrays for pointer operation
+        call util_allocate_columns()
+
+            !% --- HACK WORK NEEDED: we need to ensure that any phantom link defined in partitioning
+        !% is NOT a culvert.i.e., the original portion of the link from SWMM must be defined as
+        !% the culvert and the phantom must be upstream/downstream. 
+
+
+        !%------------------------------------------------------------------
+        !% Closing
+            if (setting%Profile%useYN) call util_profiler_stop (pfc_init_partitioning)
+
+    end subroutine init_partitioning
+!%
+!%==========================================================================
+!%========================================================================== 
+!%
+    subroutine init_FV_network ()
+        !%------------------------------------------------------------------
+        !% Description
+        !% initializes the Finit-volume network of elem() and face() arrays
+        !%------------------------------------------------------------------
+        !%------------------------------------------------------------------
+
         !% --- translate the link-node system into a finite-volume network
         ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,"begin network define"
         call network_define_toplevel ()
@@ -261,7 +452,7 @@ contains
         if (setting%Simulation%useHydrology) then 
             if (setting%SWMMinput%N_subcatch > 0) then
                 ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin subcatchment initialization"
-                call init_subcatchment()
+                call init_subcatchment_elements()
             else 
                 if (this_image() == 1) then
                     write(*,'(A)') ' ... setting.Simulation.useHydrology requested, but no subcatchments found.'
@@ -273,12 +464,70 @@ contains
             !% continue without hydrology    
         end if
         call util_crashstop(320983)
+        
+    end subroutine init_FV_network 
+!%
+!%==========================================================================
+!%                               AIR ENTRAPMENT INIT
+!%==========================================================================
+!%
+    subroutine init_report()
+        !%------------------------------------------------------------------
+        !% Description:
+        !% initializes the output report time interval
+        !%------------------------------------------------------------------
 
-        !%==========================================================================
-        !%                               AIR ENTRAPMENT INIT
-        !%==========================================================================
+        !% --- if setting requires the SWMM input file values, then overwrite setting values
+        if (setting%Output%Report%useSWMMinpYN) then 
+            setting%Output%Report%StartTime    = util_datetime_epoch_to_secs(setting%SWMMinput%ReportStartTimeEpoch)
+            setting%Output%Report%TimeInterval = setting%SWMMinput%ReportTimeInterval
+            if ((setting%Output%Verbose) .and. (this_image() == 1)) then
+                write(*,"(A)") ' ... using report start time and time interval from SWMM input file (*.inp)'
+            end if
+        else 
+            if ((setting%Output%Verbose) .and. (this_image() == 1)) then
+                write(*,"(A)") '... using  report start time and time interval from *.json file'
+            end if
+        end if
 
-        !% firstly check if the network has any closed conduits
+        !% --- if selected report time is before the start time use the start time
+        if (setting%Output%Report%StartTime < setting%Time%Start) then 
+            setting%Output%Report%StartTime = setting%Time%Start
+        else 
+            !% continue
+        end if
+
+        if (setting%Output%Report%TimeInterval < zeroR) then 
+            if (this_image() == 1) then
+                write(*,*) '***************************************************************'
+                write(*,*) '** WARNING -- selected report time interval is zero or less, **'
+                write(*,*) '**          so all output will be suppressed              **'
+                write(*,*) '***************************************************************'
+            end if
+            setting%Output%Report%provideYN = .false.
+            setting%Output%Report%suppress_MultiLevel_Output = .true.
+            setting%Output%Report%ThisStep = 1
+        else 
+            !% --- Initialize the first report step
+            !%     Determine how many report steps have already been missed before
+            !%     the output reports are actually written
+            setting%Output%Report%ThisStep = int( &
+                        ( setting%Output%Report%StartTime - setting%Time%Start ) &
+                        / setting%Output%Report%TimeInterval )
+        end if
+
+    end subroutine init_report
+!%    
+!%==========================================================================
+!%========================================================================== 
+!%
+    subroutine init_airtrapping ()
+        !%------------------------------------------------------------------
+        !% Description
+        !% initializes storage etc for air trapping algorithm.
+        !%------------------------------------------------------------------
+
+         !% firstly check if the network has any closed conduits
         if ((setting%AirTracking%UseAirTrackingYN) .and. (N_conduit < 1)) then
 
             write(*,*) 'USER CONFIGURATION ERROR : The network does not contain any closed conduits'
@@ -319,45 +568,19 @@ contains
             call util_crashstop(85264)
         end if
 
-        !%==========================================================================
-        !%                                   OUTPUT SETUP
-        !%==========================================================================
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin initializing output report"
-        call init_report()
-
-        !%==========================================================================
-        !%                     SETUP INITIAL CONDITIONS ON ELEMENTS
-        !%==========================================================================
-        !% --- command line warning for long wait times
-        if ((setting%Output%Verbose) .and. (this_image() == 1)) then 
-            if ((N_link > 5000) .or. (N_node > 5000)) then
-                    write(*,"(A)") " ... setting initial conditions --this may take several minutes for big systems ..."
-                    write(*,"(A,i8,A,i8,A)") "      SWMM system has ", setting%SWMMinput%N_link, " links and ", setting%SWMMinput%N_node, " nodes"
-                    write(*,"(A,i8,A)")      "      FV system has   ", sum(N_elem(:)), " elements"
-            else 
-                    !% --- no need to warn for small systems
-            end if
-        else 
-            !% be silent    
-        end if    
-
-        !% --- initial conditions
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin init IC_toplevel"
-        call init_IC_toplevel ()       
-        call util_crashstop(4429873)
-
-        !%-----------------------------------------------------------------------
-        !%        NOTE: WE CAN CALL PACKED MAPS ep_... and fp_... AFTER THIS POINT
-        !%-----------------------------------------------------------------------
-
-        !% --- initialize blowup limits
-        call util_crash_initialize
-
-        !% --- allocate other temporary arrays (initialized to null)
-        call util_allocate_temporary_arrays()
-
-        !% --- initialize volume conservation storage for debugging
-        elemR(:,er_VolumeConservation) = zeroR    
+    end subroutine init_airtrapping 
+!%
+!%==========================================================================
+!%                                   OUTPUT SETUP
+!%========================================================================== 
+!%    
+    subroutine init_FV_output ()
+        !%------------------------------------------------------------------
+        !% Description:
+        !% initializes the multi-level finite-volume output
+        !%------------------------------------------------------------------
+        !%------------------------------------------------------------------
+  
 
         !% --- setup the multi-level finite-volume output
         !%        HACK -- Ideally, this should be a procedure accessed in the output module, 
@@ -383,47 +606,42 @@ contains
         else 
             !% continue without any output files                                      
         end if
-        call util_crashstop(103897)
 
-        !% --- wait for all processors before exiting to the time loop
-        sync all
- 
-        !%------------------------------------------------------------------- 
-        !% Closing
-            !if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin init_check_setup_conditions"
-            call init_check_setup_conditions()
-
-            !if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin init_timer_stop"
-            call init_timer_stop ()
-
-            if (setting%Simulation%stopAfterInitializationYN) then
-                if (this_image() == 1) then
-                    write(*,*) ' '
-                    write(*,*) '********************************************************'
-                    write(*,*) '** Stopping after initialization for review due to -R **'
-                    write(*,*) '** as command-line argument or due to setting the     **' 
-                    write(*,*) '** stopAfterInitializationYN = true in json file.     **'
-                    write(*,*) '** Remove the -R from the command line and/or change  **'
-                    write(*,*) '** the json file to run a full simulation.            **'
-                    write(*,*) '********************************************************'
-                end if
-                call util_crashpoint(333578)
-            end if
-            call util_crashstop(440987)
-
-            if ((setting%Output%Verbose) .and. (this_image() == 1)) then 
-                 print *, 'finished initialization'
-                 print *, ' '
-            end if
-
-            if (setting%Debug%File%initialization)  &
-                write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"   
-
-    end subroutine initialize_toplevel
+    end subroutine init_FV_output
 !%
 !%==========================================================================
-!% PRIVATE
+!%========================================================================== 
+!%
+    subroutine init_finish ()
+        !%------------------------------------------------------------------
+        !% Description
+        !% clean-up and checks after initialization
+        !%------------------------------------------------------------------
+        
+        !if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin init_check_setup_conditions"
+        call init_check_setup_conditions()
+
+        !if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin init_timer_stop"
+        call init_timer_stop ()
+
+        if (setting%Simulation%stopAfterInitializationYN) then
+            if (this_image() == 1) then
+                write(*,*) ' '
+                write(*,*) '********************************************************'
+                write(*,*) '** Stopping after initialization for review due to -R **'
+                write(*,*) '** as command-line argument or due to setting the     **' 
+                write(*,*) '** stopAfterInitializationYN = true in json file.     **'
+                write(*,*) '** Remove the -R from the command line and/or change  **'
+                write(*,*) '** the json file to run a full simulation.            **'
+                write(*,*) '********************************************************'
+            end if
+            call util_crashpoint(333578)
+        end if
+
+    end subroutine init_finish
+!%
 !%==========================================================================
+!%========================================================================== 
 !%
     subroutine init_model_timer()
         !%------------------------------------------------------------------
@@ -512,68 +730,44 @@ contains
         sync all
 
     end subroutine init_timestamp
-!!%
+!%
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine init_linknode_arrays()
+    subroutine init_link_arrays()
         !%------------------------------------------------------------------
         !% Description:
         !%   Retrieves data from EPA-SWMM interface and populates link and 
-        !%   and node tables
+        !%   tables
         !% Notes:
-        !% 1.The order in which link and nodes are populated coincides with
-        !%   the order in which links and nodes are allocated in EPA-SWMM 
+        !% 1.The order in which links are populated coincides with
+        !%   the order in which links are allocated in EPA-SWMM 
         !%   data structures. Keeping the same order is important to be able 
         !%   to locate node/link data by label and not by index, reusing 
         !%   EPA-SWMM functionalities.
-        !% 2.This is called before partitioning, so the links and nodes do
-        !%   not know their
+        !% 2.This is called before partitioning, so the links do
+        !%   not know their image location
         !%------------------------------------------------------------------
         !% Declarations   
             integer          :: ii, jj, total_n_links, link_idx
-            integer, pointer :: linkUp, linkDn,  nodeDn
-            real(8)          :: smallestLinkLength, deltaL
+            integer, pointer :: linkUp, linkDn
+            real(8)          :: deltaL
             logical          :: noerrorfound, linkErrorFound
-            character(64)    :: subroutine_name = 'init_linknode_arrays'
+            character(64)    :: subroutine_name = 'init_link_arrays'
         !%--------------------------------------------------------------------
         !% Preliminaries
-            if (setting%Debug%File%initialization) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-
             if (.not. api_is_initialized) then
                 print *, "CODE ERROR API is not initialized"
                 call util_crashpoint(39873)
             end if
 
-            smallestLinkLength = abs(nullvalueR)
+            !smallestLinkLength = abs(nullvalueR)
         !%-----------------------------------------------------------------------------
-        !% --- Allocate storage for link & node tables
-        call util_allocate_linknode()
-
-        !% --- Allocate subcatchment storage
-        if (setting%Simulation%useHydrology) then 
-            call util_allocate_subcatch()
-        else    
-            !% --- continue without hydrology    
-        end if
-
-        !% --- Set default for all link and node keys
-        call util_key_default_linknode()
-
         !% --- initialize number of links for each node to zero
         node%I(:,ni_N_link_u) = zeroI
         node%I(:,ni_N_link_d) = zeroI
-        !% --- set default for extra surcharge depth
-        !%     The InfiniteExtraDepthValue is used for SWMM5+ to identify junctions that
-        !%     never overflow (i.e., without a manhole) and thus can be represented
-        !%     as nJ2 faces between elements when there are only two connections.
-        !%     We default ALL junction overflow height to the Infinite value. This
-        !%     default is changed when link/node data is read in (further below)
-        node%R(:,nr_OverflowHeightAboveCrown) = setting%Junction%InfiniteExtraDepthValue 
 
-        !% --- Store the Link/Node names (moved here 20240307)
-        call interface_update_linknode_names()
+        link%YN(:,lYN_isEquivalentOrifice) = .false.
 
         !% -----------------------
         !% --- LINK DATA
@@ -653,16 +847,18 @@ contains
             !%     to have different depth types. However, this requires changes to the *.inp file or
             !%     development of a new auxiliary input file.
             link%I(ii,li_InitialDepthType)   = setting%Link%DefaultInitDepthType
+
+            !% --- retrieve link data from EPA SWMM
             link%R(ii,lr_Length)             = interface_get_linkf_attribute(ii, api_linkf_conduit_length,   .false.)
-            link%R(ii,lr_BreadthScale)       = interface_get_linkf_attribute(ii, api_linkf_xsect_wMax,       .false.)
+            link%R(ii,lr_wMax)               = interface_get_linkf_attribute(ii, api_linkf_xsect_wMax,       .false.)
             link%R(ii,lr_LeftSlope)          = interface_get_linkf_attribute(ii, api_linkf_left_slope,       .false.)
             link%R(ii,lr_RightSlope)         = interface_get_linkf_attribute(ii, api_linkf_right_slope,      .false.)
             link%R(ii,lr_Roughness)          = interface_get_linkf_attribute(ii, api_linkf_conduit_roughness,.false.)
             link%R(ii,lr_FullDepth)          = interface_get_linkf_attribute(ii, api_linkf_xsect_yFull,      .false.)
             link%R(ii,lr_FullArea)           = interface_get_linkf_attribute(ii, api_linkf_xsect_aFull,      .false.)
             link%R(ii,lr_FullHydRadius)      = interface_get_linkf_attribute(ii, api_linkf_xsect_rFull,      .false.)
-            link%R(ii,lr_BottomDepth)        = interface_get_linkf_attribute(ii, api_linkf_xsect_yBot,       .false.)
-            link%R(ii,lr_BottomRadius)       = interface_get_linkf_attribute(ii, api_linkf_xsect_rBot,       .false.)
+            link%R(ii,lr_yBot)               = interface_get_linkf_attribute(ii, api_linkf_xsect_yBot,       .false.)
+            link%R(ii,lr_rBot)               = interface_get_linkf_attribute(ii, api_linkf_xsect_rBot,       .false.)
             link%R(ii,lr_FlowrateInitial)    = interface_get_linkf_attribute(ii, api_linkf_q0,               .false.)
             link%R(ii,lr_FlowrateLimit)      = interface_get_linkf_attribute(ii, api_linkf_qlimit,           .false.)
             link%R(ii,lr_Kconduit_MinorLoss) = interface_get_linkf_attribute(ii, api_linkf_cLossAvg,         .false.)
@@ -671,7 +867,35 @@ contains
             link%R(ii,lr_SeepRate)           = interface_get_linkf_attribute(ii, api_linkf_seepRate,         .false.)
             link%R(ii,lr_ForceMain_Coef)     = interface_get_linkf_attribute(ii, api_linkf_forcemain_coef,   .false.)
             link%R(ii,lr_Setting)            = interface_get_linkf_attribute(ii, api_linkf_setting,          .false.)
-            link%R(ii,lr_TimeLastSet)        = interface_get_linkf_attribute(ii, api_linkf_timelastset,     .false.)
+            link%R(ii,lr_TimeLastSet)        = interface_get_linkf_attribute(ii, api_linkf_timelastset,      .false.)
+
+            ! if (link%I(ii,li_link_type) == lPump) then 
+            !     print *, ' '
+            !     print *, 'testing pump input'
+            !     print *,  link%R(ii,lr_Length) 
+            !     print *, link%R(ii,lr_wMax)
+            !     print *, link%R(ii,lr_LeftSlope)
+            !     print *, link%R(ii,lr_RightSlope) 
+            !     print *, link%R(ii,lr_Roughness) 
+            !     print *, link%R(ii,lr_FullDepth) 
+            !     print *, link%R(ii,lr_FullArea)
+            !     print *, link%R(ii,lr_FullHydRadius) 
+            !     print *, link%R(ii,lr_yBot) 
+            !     print *,  link%R(ii,lr_rBot) 
+            !     print *, link%R(ii,lr_FlowrateInitial)
+            !     print *,  link%R(ii,lr_FlowrateLimit)
+            !     print *, link%R(ii,lr_Kconduit_MinorLoss)
+            !     print *, link%R(ii,lr_Kconduit_MinorLoss)
+            !     print *, link%R(ii,lr_Kentry_MinorLoss)
+            !     print *, link%R(ii,lr_SeepRate)
+            !     print *, link%R(ii,lr_ForceMain_Coef)
+            !     print *, link%R(ii,lr_Setting)
+            !     print *, link%R(ii,lr_TimeLastSet)
+            !     print *, ' '
+            !     stop 59874
+            ! end if
+
+
 
             !% --- Note that link%R(ii,lr_Slope) and link%R(ii,lr_TopWidth) are defined in network_define.f08 
             !%     because SWMM5 reverses negative slope
@@ -743,8 +967,8 @@ contains
             ! !% for filled circular cross-sections, swmm always sets inlet and outlet offsets
             ! !% for the bottom filled elevation. For now, I am removing those for testing
             ! if (link%I(ii,li_geometry) ==  lFilled_circular) then
-            !     link%R(ii,lr_InletOffset)  = link%R(ii,lr_InletOffset)  - link%R(ii,lr_BottomDepth)
-            !     link%R(ii,lr_OutletOffset) = link%R(ii,lr_OutletOffset) - link%R(ii,lr_BottomDepth) 
+            !     link%R(ii,lr_InletOffset)  = link%R(ii,lr_InletOffset)  - link%R(ii,lr_yBot)
+            !     link%R(ii,lr_OutletOffset) = link%R(ii,lr_OutletOffset) - link%R(ii,lr_yBot) 
             ! end if
 
             !% --- Irregular cross-sections (TRANSECTS in SWMM input file)
@@ -755,105 +979,195 @@ contains
             !% --- set output links
             link%YN(ii,lYN_isOutput) = (interface_get_linkf_attribute(ii,api_linkf_rptFlag,.true.) == 1)
 
+
             !% --- Small link handling in pipes and channels
-            if ((link%I(ii,li_link_type) == lpipe) .or. (link%I(ii,li_link_type) == lchannel)) then
+            ! if ((link%I(ii,li_link_type) == lpipe) .or. (link%I(ii,li_link_type) == lchannel)) then
 
-                if (link%R(ii,lr_Length) < setting%Discretization%MinLinkLength) then
-                    !% --- small link found
+            !     if (link%R(ii,lr_Length) < setting%Discretization%MinLinkLength) then
+            !         !% --- small link found
 
-                    select case (setting%Discretization%SmallElementHandling)
+            !         select case (setting%Discretization%SmallElementHandling)
 
-                        case(EquivalentOrifice)
-                            !% --- make link an equivalent orifice
-                            !%     This is done before partitioning, so phantom links do not matter                          
-                            if (this_image() == 1) then
-                                write(*,*) 'WARNING: Converting link to equivalent orifice'
-                                write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
-                                write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
-                                write(*,*) 'which is smaller than minimum link length of ', setting%Discretization%MinLinkLength
-                                write(*,*) ' '
-                            end if                          
-                            !% --- set the sub orifice type as equivalent orifice
-                            if (link%I(ii,li_link_type) == lchannel) then 
-                                link%I(ii,li_link_sub_type) = lEquivalentOrificeChannel
-                            elseif  (link%I(ii,li_link_type) == lpipe) then 
-                                link%I(ii,li_link_sub_type) = lequivalentOrificePipe
-                            end if
-                            !% --- now reset the link type type as Orifice
-                            link%I(ii,li_link_type) = lOrifice
+            !             case(EquivalentOrifice)
+            !                 !% --- make link an equivalent orifice
+            !                 !%     This is done before partitioning, so phantom links do not matter                          
+            !                 if (this_image() == 1) then
+            !                     write(*,*) 'WARNING: Converting link to equivalent orifice'
+            !                     write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
+            !                     write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
+            !                     write(*,*) 'which is smaller than minimum link length of ', setting%Discretization%MinLinkLength
+            !                     write(*,*) ' '
+            !                 end if                          
+            !                 !% --- set the sub orifice type as equivalent orifice
+            !                 if (link%I(ii,li_link_type) == lchannel) then 
+            !                     link%I(ii,li_link_sub_type) = lEquivalentOrificeChannel
+            !                 elseif  (link%I(ii,li_link_type) == lpipe) then 
+            !                     link%I(ii,li_link_sub_type) = lequivalentOrificePipe
+            !                 end if
+            !                 !% --- now reset the link type type as Orifice
+            !                 link%I(ii,li_link_type) = lOrifice
    
-                            !% set a default discharge coefficient from settings
-                            link%R(ii,lr_DischargeCoeff1) = zeroR !setting%Discretization%EquivalentOrificeDischargeCoeff
-                            !% set orifice time to operate to zero
-                            link%R(ii,lr_DischargeCoeff2) = zeroR
+            !                 !% set a default discharge coefficient from settings
+            !                 link%R(ii,lr_DischargeCoeff1) = zeroR !setting%Discretization%EquivalentOrificeDischargeCoeff
+            !                 !% set orifice time to operate to zero
+            !                 link%R(ii,lr_DischargeCoeff2) = zeroR
 
-                            !% --- retain all the channel/conduit geometry that was loaded above
+            !                 !% --- retain all the channel/conduit geometry that was loaded above
 
-                            !% set the default geometry of the equivalent orifice as circular
-                            !link%I(ii,li_geometry) = lCircular
-                            !% reset the orifice opening from the original link full area
-                            !! link%R(ii,lr_FullDepth) = sqrt(fourR * link%R(ii,lr_FullArea) / setting%Constant%pi)
-                            !% reset the length of the element as minimum link length (will be reset later)
-                            !link%R(ii,lr_Length) = setting%Discretization%MinLinkLength
+            !                 !% set the default geometry of the equivalent orifice as circular
+            !                 !link%I(ii,li_geometry) = lCircular
+            !                 !% reset the orifice opening from the original link full area
+            !                 !! link%R(ii,lr_FullDepth) = sqrt(fourR * link%R(ii,lr_FullArea) / setting%Constant%pi)
+            !                 !% reset the length of the element as minimum link length (will be reset later)
+            !                 !link%R(ii,lr_Length) = setting%Discretization%MinLinkLength
 
-                        case (LengthenLink)
-                            !% --- lengthen small links and reduce roughness
-                            if (this_image() == 1) then
-                                write(*,*) 'WARNING: lengthening short link and reducing roughness'
-                                write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
-                                write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
-                                write(*,*) 'which is smaller than minimum link length of ', setting%Discretization%MinLinkLength
-                                write(*,*) ' '
-                            end if 
-                            deltaL = setting%Discretization%MinLinkLength - link%R(ii,lr_Length)
-                            !% --- roughess reduction based on preserving Q in chezy-manning equation for original
-                            !%     link and L+deltaL link length
-                            link%R(ii,lr_Roughness) = link%R(ii,lr_Roughness) &
-                                * sqrt( link%R(ii,lr_Length) / (link%R(ii,lr_Length)+deltaL) )
-                            link%R(ii,lr_Length) = setting%Discretization%MinLinkLength
+            !             case (LengthenLink)
+            !                 !% --- lengthen small links and reduce roughness
+            !                 if (this_image() == 1) then
+            !                     write(*,*) 'WARNING: lengthening short link and reducing roughness'
+            !                     write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
+            !                     write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
+            !                     write(*,*) 'which is smaller than minimum link length of ', setting%Discretization%MinLinkLength
+            !                     write(*,*) ' '
+            !                 end if 
+            !                 deltaL = setting%Discretization%MinLinkLength - link%R(ii,lr_Length)
+            !                 !% --- roughess reduction based on preserving Q in chezy-manning equation for original
+            !                 !%     link and L+deltaL link length
+            !                 link%R(ii,lr_Roughness) = link%R(ii,lr_Roughness) &
+            !                     * sqrt( link%R(ii,lr_Length) / (link%R(ii,lr_Length)+deltaL) )
+            !                 link%R(ii,lr_Length) = setting%Discretization%MinLinkLength
 
-                        case (FailLimiter)
-                            !% --- run fails if small link found
-                            if (this_image() == 1) then
-                                write(*,*) 'USER CONFIGURATION ERROR: Link is smaller than allowed'
-                                write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
-                                write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
-                                write(*,*) 'which is smaller than minimum link length of ', setting%Discretization%MinLinkLength
-                                write(*,*) 'User can set Discretization%SmallElementHandling as follows:'
-                                write(*,*) ' = AllowSmallLinks to accept small links (with small time step),'
-                                write(*,*) ' = EquivalentOrifice to replace small links with an equivalent orifice,'
-                                write(*,*) ' = LengthenLink to replace small links with longer link at reduced roughness'
-                                write(*,*) ' '
-                                linkErrorFound = .true.
-                            end if
+            !             case (FailLimiter)
+            !                 !% --- run fails if small link found
+            !                 if (this_image() == 1) then
+            !                     write(*,*) 'USER CONFIGURATION ERROR: Link is smaller than allowed'
+            !                     write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
+            !                     write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
+            !                     write(*,*) 'which is smaller than minimum link length of ', setting%Discretization%MinLinkLength
+            !                     write(*,*) 'User can set Discretization%SmallElementHandling as follows:'
+            !                     write(*,*) ' = AllowSmallLinks to accept small links (with small time step),'
+            !                     write(*,*) ' = EquivalentOrifice to replace small links with an equivalent orifice,'
+            !                     write(*,*) ' = LengthenLink to replace small links with longer link at reduced roughness'
+            !                     write(*,*) ' '
+            !                     linkErrorFound = .true.
+            !                 end if
 
-                        case (AllowSmallLinks)
-                            !% --- continue, small links are allowed
-                            if (this_image() == 1) then
-                                write(*,*) 'WARNING: small link has been found, but is allowed because'
-                                write(*,*) 'Discretization%SmallElementHandling = AllowSmallLinks'
-                                write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
-                                write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
-                                write(*,*) 'which is smaller than desired minimum link length of ', setting%Discretization%MinLinkLength
-                                write(*,*) ' '
-                            end if 
+            !             case (AllowSmallLinks)
+            !                 !% --- continue, small links are allowed
+            !                 if (this_image() == 1) then
+            !                     write(*,*) 'WARNING: small link has been found, but is allowed because'
+            !                     write(*,*) 'Discretization%SmallElementHandling = AllowSmallLinks'
+            !                     write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
+            !                     write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
+            !                     write(*,*) 'which is smaller than desired minimum link length of ', setting%Discretization%MinLinkLength
+            !                     write(*,*) ' '
+            !                 end if 
 
-                    end select
-                else 
-                    !% --- continue, link is not small
-                end if
-                !% --- store the smallest link for debugging output
-                smallestLinkLength = min(smallestLinkLength,link%R(ii,lr_Length))
-            else 
-                !% --- link length irrelevant for special elements
-            end if
+            !         end select
+            !     else 
+            !         !% --- continue, link is not small
+            !     end if
+            !     !% --- store the smallest link for debugging output
+            !     smallestLinkLength = min(smallestLinkLength,link%R(ii,lr_Length))
+            ! else 
+            !     !% --- link length irrelevant for special elements
+            ! end if
+            
+            
+            ! !% --- Small link handling in pipes and channels
+            ! if ((link%I(ii,li_link_type) == lpipe) .or. (link%I(ii,li_link_type) == lchannel)) then
+
+            !     if (link%R(ii,lr_Length) < setting%Discretization%MinLinkLength) then
+            !         !% --- small link found
+
+            !         select case (setting%Discretization%SmallElementHandling)
+
+            !             case(EquivalentOrifice)
+            !                 !% --- make link an equivalent orifice
+            !                 !%     This is done before partitioning, so phantom links do not matter                          
+            !                 if (this_image() == 1) then
+            !                     write(*,*) 'WARNING: Converting link to equivalent orifice'
+            !                     write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
+            !                     write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
+            !                     write(*,*) 'which is smaller than minimum link length of ', setting%Discretization%MinLinkLength
+            !                     write(*,*) ' '
+            !                 end if                          
+            !                 !% --- set the sub orifice type as equivalent orifice
+            !                 if (link%I(ii,li_link_type) == lchannel) then 
+            !                     link%I(ii,li_link_sub_type) = lEquivalentOrificeChannel
+            !                 elseif  (link%I(ii,li_link_type) == lpipe) then 
+            !                     link%I(ii,li_link_sub_type) = lequivalentOrificePipe
+            !                 end if
+            !                 !% --- now reset the link type type as Orifice
+            !                 link%I(ii,li_link_type) = lOrifice
+   
+            !                 !% set a default discharge coefficient from settings
+            !                 link%R(ii,lr_DischargeCoeff1) = zeroR !setting%Discretization%EquivalentOrificeDischargeCoeff
+            !                 !% set orifice time to operate to zero
+            !                 link%R(ii,lr_DischargeCoeff2) = zeroR
+
+            !                 !% --- retain all the channel/conduit geometry that was loaded above
+
+            !                 !% set the default geometry of the equivalent orifice as circular
+            !                 !link%I(ii,li_geometry) = lCircular
+            !                 !% reset the orifice opening from the original link full area
+            !                 !! link%R(ii,lr_FullDepth) = sqrt(fourR * link%R(ii,lr_FullArea) / setting%Constant%pi)
+            !                 !% reset the length of the element as minimum link length (will be reset later)
+            !                 !link%R(ii,lr_Length) = setting%Discretization%MinLinkLength
+
+            !             case (LengthenLink)
+            !                 !% --- lengthen small links and reduce roughness
+            !                 if (this_image() == 1) then
+            !                     write(*,*) 'WARNING: lengthening short link and reducing roughness'
+            !                     write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
+            !                     write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
+            !                     write(*,*) 'which is smaller than minimum link length of ', setting%Discretization%MinLinkLength
+            !                     write(*,*) ' '
+            !                 end if 
+            !                 deltaL = setting%Discretization%MinLinkLength - link%R(ii,lr_Length)
+            !                 !% --- roughess reduction based on preserving Q in chezy-manning equation for original
+            !                 !%     link and L+deltaL link length
+            !                 link%R(ii,lr_Roughness) = link%R(ii,lr_Roughness) &
+            !                     * sqrt( link%R(ii,lr_Length) / (link%R(ii,lr_Length)+deltaL) )
+            !                 link%R(ii,lr_Length) = setting%Discretization%MinLinkLength
+
+            !             case (FailLimiter)
+            !                 !% --- run fails if small link found
+            !                 if (this_image() == 1) then
+            !                     write(*,*) 'USER CONFIGURATION ERROR: Link is smaller than allowed'
+            !                     write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
+            !                     write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
+            !                     write(*,*) 'which is smaller than minimum link length of ', setting%Discretization%MinLinkLength
+            !                     write(*,*) 'User can set Discretization%SmallElementHandling as follows:'
+            !                     write(*,*) ' = AllowSmallLinks to accept small links (with small time step),'
+            !                     write(*,*) ' = EquivalentOrifice to replace small links with an equivalent orifice,'
+            !                     write(*,*) ' = LengthenLink to replace small links with longer link at reduced roughness'
+            !                     write(*,*) ' '
+            !                     linkErrorFound = .true.
+            !                 end if
+
+            !             case (AllowSmallLinks)
+            !                 !% --- continue, small links are allowed
+            !                 if (this_image() == 1) then
+            !                     write(*,*) 'WARNING: small link has been found, but is allowed because'
+            !                     write(*,*) 'Discretization%SmallElementHandling = AllowSmallLinks'
+            !                     write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
+            !                     write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
+            !                     write(*,*) 'which is smaller than desired minimum link length of ', setting%Discretization%MinLinkLength
+            !                     write(*,*) ' '
+            !                 end if 
+
+            !         end select
+            !     else 
+            !         !% --- continue, link is not small
+            !     end if
+            !     !% --- store the smallest link for debugging output
+            !     smallestLinkLength = min(smallestLinkLength,link%R(ii,lr_Length))
+            ! else 
+            !     !% --- link length irrelevant for special elements
+            ! end if
             
         end do
-
-        write(*,*) ' '
-        write(*,*) 'Smallest link found is ', smallestLinkLength
-        write(*,*) 'Recommended minimum is ', setting%Discretization%MinLinkLength
-        write(*,*) ' '
 
         if (linkErrorFound) then
             write(*,*)
@@ -864,54 +1178,132 @@ contains
         !% --- count the number of conduits in the network
         N_conduit = count(link%I(:,li_link_type) == lPipe)
 
-        !% --- ERROR CHECK for number of connections
-        do ii = 1,N_node
-            if (node%I(ii, ni_N_link_u) > max_up_branch_per_node) then
-                if (this_image() == 1) then
-                    write(*,*) 'USER CONFIGURATION ERROR for node connections'
-                    write(*,"(A,i4,A)") 'One or more nodes have more than ',max_up_branch_per_node,' upstream connections'
-                    write(*,*) 'Unfortunately, this connection limit is a hard-coded limit of SWMM5+ an cannot be exceeded.'
-                    write(*,*) 'First error found at node ',ii
-                    write(*,*) 'Node name ',trim(node%Names(ii)%str)
+        
+    end subroutine init_link_arrays
+!%
+!%==========================================================================
+!%==========================================================================
+!%  
+    subroutine init_small_link_handling ()
+        !% -----------------------------------------------------------------
+        !% Description
+        !% identifies the small elements and their handling 
+        !% -----------------------------------------------------------------
+        !% Declarations 
+            integer, pointer :: linkType(:)
+            real(8), pointer :: linkLength(:), smallestLink
+            integer          :: nEquivOrifice, ii
+        !% -----------------------------------------------------------------
+        !% Aliases
+            linkType   => link%I(:,li_link_type)
+            linkLength => link%R(:,lr_Length)
+            smallestLink => setting%Discretization%MinLinkLength
+        !% -----------------------------------------------------------------
+
+        select case (setting%Discretization%SmallElementHandling)
+            case (AllowSmallLinks)
+                !% --- no action
+
+            case (EquivalentOrifice, FailLimiter)  
+
+                ! print *, 'here in init_small_link_handling', smallestLink
+
+                ! do ii=1,N_link
+                !     print *, 'link length ',ii, linkLength(ii)
+                ! end do
+
+                ! print *, 'smallest allowable link ',smallestLink
+
+                where ((linkLength < smallestLink) &
+                    .and.  &
+                    ((linkType == lPipe) .or. (linkType == lChannel)) )
+                    link%YN(:,lYN_isEquivalentOrifice) = .true.     
+                    !% --- note, we do not change the linktype here so
+                    !%     that geometry processing isn't yet affected
+                    !%     This approach is required for JB processing.
+                endwhere
+
+                nEquivOrifice = count(link%YN(:,lYN_isEquivalentOrifice))
+
+                if (nEquivOrifice > 0) then 
+                    setting%Discretization%EquivalentOrificesFound = .true.
+
+                    if (setting%Discretization%SmallElementHandling == FailLimiter)  then 
+                        print *, 'USER CONFIGURATION ERROR:'
+                        print *, 'Small links found, which causes code to stop due to'
+                        print *, 'setting.Discretization.SmallElementHandling = FailLimiter'
+                        print *, 'Either switch to AllowSmallLinks or EquivalentOrifices.'
+                        print *, 'Alternatively, you could alter the small link lengths'
+                        print *, 'in the input file or decrease the nominal element size.'
+                        print *, 'In the present setup, the minimum link length is ',smallestLink
+                        print *, ' '
+                        do ii=1,N_link 
+                            if ((linkLength(ii) < smallestLink) .and. &
+                                ((linkType(ii) == lPipe) .or. (linkType(ii) == lChannel)) ) then 
+                                print *, ii, ' ',trim(Link%Names(ii)%str), ' ',linkLength(ii)
+                                print *, ' '
+                            end if
+                        end do
+                        call util_crashpoint(240987)
+                    end if 
                 end if
-                call util_crashpoint(387666)
+                
+
+                ! print *, 'found? ',setting%Discretization%EquivalentOrificesFound
+                ! print *, 'number EqOr ',nEquivOrifice
+
+                ! stop 509875
+
+            case default 
+                print *, 'USER CONFIGURATION ERROR'
+                print *, 'For setting.Discretization.SmallElementHandling'
+                print *, 'the only valid values are AllowSmallLinks and EquivalentOrifice.'
+                print *, 'A value of ',setting%Discretization%SmallElementHandling, ' was found,'
+                print *, 'which has the key ',trim(reverseKey(setting%Discretization%SmallElementHandling))
+                call util_crashpoint(709872)
+        end select
+
+
+    end subroutine init_small_link_handling   
+!%
+!%==========================================================================
+!%==========================================================================
+!%
+    subroutine init_node_arrays ()   
+        !%------------------------------------------------------------------
+        !% Description:
+        !%   Retrieves data from EPA-SWMM interface and populates  
+        !%    node tables
+        !% Notes:
+        !% 1.The order in which nodes are populated coincides with
+        !%   the order in which nodes are allocated in EPA-SWMM 
+        !%   data structures. Keeping the same order is important to be able 
+        !%   to locate node/link data by label and not by index, reusing 
+        !%   EPA-SWMM functionalities.
+        !% 2.This is called before partitioning, so the  nodes do
+        !%   not know their image location
+        !%------------------------------------------------------------------
+        !% Declarations   
+        integer          :: ii, total_n_links
+        integer, pointer :: nodeDn
+        logical          :: noerrorfound
+        character(64)    :: subroutine_name = 'init_node_arrays'
+        !%--------------------------------------------------------------------
+        !% Preliminaries
+            if (.not. api_is_initialized) then
+                print *, "CODE ERROR API is not initialized"
+                call util_crashpoint(39873)
             end if
+        !%------------------------------------------------------------------
 
-            if (node%I(ii, ni_N_link_d) > max_dn_branch_per_node) then
-                if (this_image() == 1) then
-                    write(*,*) 'USER CONFIGURATION ERROR for node connections'
-                    write(*,"(A,i4,A)") 'One or more nodes have more than ',max_dn_branch_per_node,' downstream connections'
-                    write(*,*) 'Unfortunately, this connection limit is a hard-coded limit of SWMM5+ an cannot be exceeded.'
-                    write(*,*) 'First error found at at node ',ii
-                    write(*,*) 'Node name ',trim(node%Names(ii)%str)
-                end if
-                call util_crashpoint(86752)
-            end if
-        end do
+        !% --- set default for extra surcharge depth
+        !%     The InfiniteExtraDepthValue is used for SWMM5+ to identify junctions that
+        !%     never overflow (i.e., without a manhole) and thus can be represented
+        !%     as nJ2 faces between elements when there are only two connections.
+        !%     We default ALL junction overflow height to the Infinite value. This
+        !%     default is changed when link/node data is read in (further below)
+        node%R(:,nr_OverflowHeightAboveCrown) = setting%Junction%InfiniteExtraDepthValue 
 
-        !% --- Store the Link/Node names (moved here 20221216)
-        ! MOVED 20240307 brh call interface_update_linknode_names()
-
-        !% -----------------------
-        !% --- SUBCATCHMENT -- see also init_subcatchment
-        !% -----------------------
-        node%I(:,ni_routeFrom) = nullvalueI !% initialization 
-        if (setting%Simulation%useHydrology) then
-            do ii=1,setting%SWMMinput%N_subcatch
-                !% --- Subtract 1 from the SWMM5+ subcatchment index to get the 
-                !%     EPA SWMM subcatchment index; Add 1 to the EPA SWMM node index
-                !%     for the SWMM5+ node index
-                subcatchI(ii,si_runoff_nodeIdx) = interface_get_subcatch_runoff_nodeIdx(ii-1)+oneI
-                if (subcatchI(ii,si_runoff_nodeIdx) < oneI) then !% not a runoff node (EPA SWMM flag)
-                    subcatchYN(ii,sYN_hasRunoff) = .false.
-                    subcatchI(ii,si_runoff_nodeIdx) = nullvalueI
-                else
-                    subcatchYN(ii,sYN_hasRunoff) = .true.
-                    node%I(subcatchI(ii,si_runoff_nodeIdx),ni_routeFrom) = ii
-                end if  
-            end do
-        end if
-    
         !% -----------------------
         !% --- NODE DATA
         !% -----------------------
@@ -1021,7 +1413,6 @@ contains
             !% --- set if node is designiated for output
             node%YN(ii,nYN_isOutput)  = (interface_get_nodef_attribute(ii, api_nodef_rptFlag) == 1)
 
-            !%
             !% --- Assign required node types nJm, nJ1, nJ2, nBCdn,
             !%     Note that defined storage is ALWAYS nJM
             !%     The goal is to identify nodes that have only two connections and could
@@ -1046,9 +1437,9 @@ contains
                 if (node%I(ii,ni_routeTo) == -oneI) then
                     node%I(ii,ni_routeTo) = nullvalueI
                 elseif ( (node%I(ii,ni_routeTo) > zeroI)                           &
-                     .and.                                                         &
-                         (node%I(ii,ni_routeTo) .le. setting%SWMMinput%N_subcatch) &
-                     ) then
+                        .and.                                                         &
+                            (node%I(ii,ni_routeTo) .le. setting%SWMMinput%N_subcatch) &
+                        ) then
                     !% correct value found
                 else
                     print *, 'CODE ERROR unexpected value for ni_routeTo'
@@ -1081,277 +1472,6 @@ contains
             !% --- select nJM nodes that can be represented as element faces (nJ2)
             call init_node_nJ2_nJM (ii)
             
-            ! !% --- nJ2 strictly:
-            ! !%     a) has one upstream and one downstream link and
-            ! !%     b) cannot be a subcatchment outlet  
-            ! !%     c) cannot have two upstream and no downstream links or vice versa
-            ! !%     d) cannot required a node inflow and have an upstream conduit
-            ! if (node%I(ii,ni_node_type)  ==  nJ2) then
-            !     if ((node%I(ii,ni_N_link_u)   >   oneI)         &
-            !          .or.                                       &
-            !          (node%I(ii,ni_N_link_d)   >   oneI)        &
-            !          .or.                                       &
-            !          (node%I(ii,ni_routeFrom) .ne. nullvalueI)  &
-            !         )  then
-            !         !% ... switching to a 2 link nJm junction type'
-            !         node%I(ii, ni_node_type) = nJm
-            !     else
-            !         !% --- no action
-            !     end if
-
-            !     !% --- case where upstream pipe has nodal flows must be nJM
-            !     linkUp => node%I(ii,ni_Mlink_u1)
-            !     if (linkUp .ne. nullvalueI) then
-            !         if ( (link%I(linkUp,li_geometry) == lPipe)      &
-            !             .and.                                       &
-            !                 (node%YN(ii,nYN_has_extInflow)          &
-            !                 .or.                                    &
-            !                  node%YN(ii,nYN_has_dwfInflow)          &
-            !                 )                                       &
-            !             ) then 
-            !             node%I(ii, ni_node_type) = nJm
-            !         else 
-            !             !% --- no action
-            !         end if
-            !     else 
-            !         !% --- no action
-            !     end if
-            ! else 
-            !     !% --- no action 
-            ! end if
-
-            ! !% ==========================================================================
-            ! !% --- Further discrimination between 2-element junctions that are nJ2
-            ! !%     and those that are classed nJm. Note that all defined STORAGE 
-            ! !%     junctions are already set to nJm, so this only applies to junctions 
-            ! !%     defined in SWMM input file without explicit storage
-            ! !%  
-            ! !%     The following "or" conditions must be met for an nJ2:
-            ! !%     1. at least one connected element is open-channel AND ponding_Area = 0 AND
-            ! !%        the OverflowDepth = 0
-            ! !%     2. both elements are NOT open channel AND the junction extra
-            ! !%        surcharge depth == Junction.InfiniteExtraDepthValue 
-            ! !%        (i.e., no possible overflow or ponding)
-            ! !%     3. Downstream link may NOT be a Type1 Pump
-            ! !%     In addition, the offsets of connected links must be zero, unless
-            ! !%     the connected link is a weir or orifice (their offset has a different
-            ! !%     meaning.)
-            ! !%     Key point is that nJ2 cannot have overflow or ponding, so if
-            ! !%     at least one side is open channel and ponding area = 0 and the
-            ! !%     surcharge extra depth = 0 it is treated as open channel 
-            ! !%     (i.e., overflow occurs in the adjacent channel element) so
-            ! !%     it can be nJ2.  If both sides are closed types (conduit, weir,
-            ! !%     i.e., not open channel) then the junction must also be
-            ! !%     be closed; thus if a value (other than InfiniteExtraDepthValue)
-            ! !%     is provided for the extra surcharge, then the junction must be treated
-            ! !%     as an nJm rather than nJ2. That is, setting the Surcharge Extra Depth
-            ! !%     to the InfiniteExtraDepthValue implies a non-vented connection that
-            ! !%     can be treated as a face.
-            ! !%     In general, existence of non-zero offsets require an nJm unless 
-            ! !%     the offset is associated with a weir or orifice
-
-            ! if (node%I(ii, ni_node_type) == nJ2) then
-            !     !% --- local aliases for the upstream and downstream links. These should
-            !     !%     be guaranteed to be in the u1 and d1 positions
-            !     linkUp => node%I(ii,ni_Mlink_u1)
-            !     linkDn => node%I(ii,ni_Mlink_d1)
-                    
-            !     !% --- phantom nodes will always be a nJ2
-            !     if  (node%YN(ii,nYN_is_phantom_node)) then
-            !         !% --- no action: retain nJ2
-
-            !     !% --- special channels and conduits that allow nJ2
-            !     !%     note the "meters_per_ft" conditional is to allow an input file
-            !     !%     in CFS to use the infinite depth value in the settings to be
-            !     !%     interpreted as feet.
-            !     elseif  ( ( (link%I(linkUp,li_link_type) .eq. lChannel)                     &
-            !                 .or.                                                            &
-            !                 (link%I(linkDn,li_link_type) .eq. lChannel)                     &
-            !               )                                                                 &
-            !               .and.                                                             &
-            !               (node%R(ii,nr_PondedArea) == zeroR)                               &
-            !               .and.                                                             &
-            !               (  (node%R(ii,nr_OverflowHeightAboveCrown) == zeroR)              & 
-            !                   .or.                                                          &
-            !                  (node%R(ii,nr_OverflowHeightAboveCrown)                        &
-            !                    == setting%Junction%InfiniteExtraDepthValue)                 &
-            !                  .or.                                                           &
-            !                  ( (node%R(ii,nr_OverflowHeightAboveCrown)                              &
-            !                       < setting%Junction%InfiniteExtraDepthValue*meters_per_ft + 0.01d0) &
-            !                   .and.                                                                 &
-            !                   (node%R(ii,nr_OverflowHeightAboveCrown)                               &
-            !                       > setting%Junction%InfiniteExtraDepthValue*meters_per_ft - 0.01d0) &
-            !                  )                                                                      & 
-            !               )                                                                         &
-            !             ) then
-            !             !% retain nJ2 OPEN CHANNEL FACE
-            !             !% --- if either link is an open channel AND the ponded area
-            !             !%     is zero then the junction is an nJ2 face where any
-            !             !%     overflow is handled by adjacent channel (i.e. lost). Otherwise 
-            !             !%     reverts to nJm element with its own overflow/ponding. 
-            !             !%     Note that if ponding is OFF but the ponded area
-            !             !%     is defined, then the element is treated as nJm with
-            !             !%     overflow above the Surcharge Extra Depth
-            !             !% --- no action: retain nJ2
-
-            !     elseif ( (link%I(linkUp,li_link_type) .ne. lChannel)         &
-            !              .and.                                               &
-            !              (link%I(linkDn,li_link_type) .ne. lChannel)         &
-            !              .and.                                               &
-            !              (( (node%R(ii,nr_OverflowHeightAboveCrown)                              &
-            !                     < setting%Junction%InfiniteExtraDepthValue + 0.01d0)             &
-            !                 .and.                                                                &
-            !                 (node%R(ii,nr_OverflowHeightAboveCrown)                              &
-            !                     > setting%Junction%InfiniteExtraDepthValue - 0.01d0)             &
-            !                 )                                                                    &   
-            !                .or.                                              &
-            !                ( (node%R(ii,nr_OverflowHeightAboveCrown)                               &
-            !                     < setting%Junction%InfiniteExtraDepthValue*meters_per_ft + 0.01d0) &
-            !                 .and.                                                                  &
-            !                 (node%R(ii,nr_OverflowHeightAboveCrown)                                &
-            !                     > setting%Junction%InfiniteExtraDepthValue*meters_per_ft - 0.01d0) &
-            !                 )                                                                      & 
-            !               )                                                                        &
-            !               ) then
-            !             !% nJ2 CLOSED CONDUIT FACE
-            !             !% --- if both links are NOT open channel AND the OverflowDepth
-            !             !%     is equal to the InfiniteExtraDepthValue, then this is retained 
-            !             !%     as an nJ2 (unvented)  face. Otherwise switched to a vented nJM element.
-            !             !%     HACK -- if 1000 ft is put in a CFS input file or 1000 m in an SI
-            !             !%     input file this is treated as infinite depth.
-            !             !%  
-                        
-            !             !% --- no action: retain nJ2
-
-            !     elseif  (( (link%I(linkUp,li_link_type) .eq. lWeir)         &
-            !               .or.                                              &
-            !                (link%I(linkDn,li_link_type) .eq. lWeir)         &
-            !              )                                                  &
-            !             .and. (.not. setting%Weir%ForceWeirNodesToJM)       &
-            !             ) then          
-            !             !% nJ2 Weir face 
-            !             !% --- an nJ2 weir face is retained without as long as
-            !             !%     the force is not in place. Note that nodes with
-            !             !%     storage already have nJM, so this does not affect
-            !             !%     them 
-                        
-            !             !% no action: retain nJ2
-
-            !     elseif  (( (link%I(linkUp,li_link_type) .eq. lOrifice)         &
-            !                 .or.                                               &
-            !                (link%I(linkDn,li_link_type) .eq. lOrifice)         &
-            !                )                                                   &
-            !               .and. (.not. setting%Orifice%ForceOrificeNodesToJM)  &
-            !              ) then    
-            !             !% nJ2 Orifice face 
-            !             !% --- an nJ2 orifice face is retained without as long as
-            !             !%     the force is not in place. Note that nodes with
-            !             !%     storage already have nJM, so this does not affect
-            !             !%     them 
-                        
-            !             !% no action: retain nJ2
- 
-            !     else
-            !         !% --- switch to nJm
-
-            !         node%I(ii, ni_node_type) = nJm
-
-            !         ! write(*,*) '...NOTE: ',trim(node%Names(ii)%str),' is held as nJM node rather than nJ2 (faces).'
-            !         ! write(*,*) '   This occurs because the input SurchargeDepth is less than the InfiniteDepthValue'
-            !         ! write(*,*) '   Input SurcharegeDepth is ',node%R(ii,nr_OverflowHeightAboveCrown)
-            !         ! write(*,*) '   InfiniteDepthValue is    ',setting%Junction%InfiniteExtraDepthValue
-            !     end if
-
-            !     !% --- regardless of the above, if either link up or down is a
-            !     !%     multi-barrel link, then the node must be an nJm node
-            !     if  (  (link%I(linkUp,li_barrels) > oneI)     &
-            !             .or.                                  &
-            !             (link%I(linkDn,li_barrels) > oneI)    &
-            !         ) then       
-            !         node%I(ii, ni_node_type) = nJm   
-                    
-            !     end if
-
-            !     !% --- regardless of the above, if the downstream link is
-            !     !%     at type 1 pump, then the node must be nJm
-            !     if (  (link%I(linkDn,li_link_type) .eq. lPump)      &
-            !            .and.                                        &
-            !           (link%I(linkDn,li_link_sub_type)  .eq. lType1Pump) &
-            !         ) then
-            !         node%I(ii, ni_node_type) = nJm 
-            !     end if
-
-            !     !% --- regardless of the above, if either link up or down
-            !     !%     is a culvert then the node must be nJm
-            !     if (    (link%I(linkUp,li_culvertCode) > 0)      &
-            !             .or.                                     &
-            !             (link%I(linkDn,li_culvertCode) > 0)      &
-            !         ) then
-            !         node%I(ii, ni_node_type) = nJm             
-            !     end if   
-
-            
-            !     !% --- further check on offsets for any nJ2 that passed the prior
-            !     !%     restrictions. In general, we have an nJm if there are 
-            !     !%     any offsets, except if the offset is a weir or orifice.
-            !     if (link%R(linkUp,lr_OutletOffset) .ne. zeroR) then
-            !         !% --- offsets are OK for upstream weir or orifice links  
-            !         if (  (link%I(linkUp,li_link_type) .eq. lWeir)       &
-            !             .or.                                          &
-            !             (link%I(linkUp,li_link_type) .eq. lOrifice)    &
-            !             ) then    
-            !             !% --- retain nJ2
-            !         else
-            !             !% --- switch to nJm
-            !             node%I(ii, ni_node_type) = nJm
-            !         end if
-            !     end if
-
-
-            !     if (link%R(linkDn,lr_InletOffset) .ne. zeroR) then
-            !         !% --- offsets are OK for downstream weir or orifice links  
-            !         if (  (link%I(linkDn,li_link_type) .eq. lWeir)       &
-            !             .or.                                          &
-            !             (link%I(linkDn,li_link_type) .eq. lOrifice)    &
-            !             ) then    
-            !             !% --- retain nJ2
-            !         else
-            !             !% --- switch to nJm
-            !             node%I(ii, ni_node_type) = nJm
-            !         end if
-            !     end if 
-
-            !     !% --- force some or all of the nJ2 to nJm (used for debugging)
-            !     !% --- global forcing of all nodes
-            !     if (setting%Junction%ForceNodesJM ) then
-            !         !% --- switch to nJm 
-            !         node%I(ii, ni_node_type) = nJm
-            !     else
-            !         !% -- forcing of weir-adjacent nodes, only
-            !         if ( ((link%I(linkDn,li_link_type) .eq. lWeir) &
-            !               .or.                                     &
-            !               (link%I(linkUp,li_link_type) .eq. lWeir) &
-            !              ) .and.                                   &
-            !              (setting%Weir%ForceWeirNodesToJM)         &
-            !             ) then 
-            !             node%I(ii,ni_node_type) = nJm
-            !         end if
-            !         !% -- forcing of orifice-adjacent nodes, only
-            !         if ( ((link%I(linkDn,li_link_type) .eq. lOrifice)  &
-            !               .or.                                         &
-            !               (link%I(linkUp,li_link_type) .eq. lOrifice)  &
-            !              ) .and.                                       &
-            !              (setting%Orifice%ForceOrificeNodesToJM)      &
-            !             ) then 
-            !             node%I(ii,ni_node_type) = nJm
-            !         end if
-            !     end if
-
-            ! end if
-
-            !% --- end nJ2, nJm processing
-            !% ==========================================================================
-
             !% --- inflows (must be initialized after nJ1, nJ2 are set)
             if (node%YN(ii, nYN_has_extInflow) .or. node%YN(ii, nYN_has_dwfInflow)) then
                 !% set inflow to true for any node type
@@ -1425,47 +1545,6 @@ contains
 
         end do
 
-        !% MOVED TO init_link_inflow_volumefraction
-        !% --- find the volume fraction metric for channel links to distribute lateral inflows
-        !%     FUTURE: development of input file that directs inflow to a link will require
-        !%     the LinkVolumeFraction to be 1.0.
-        ! do ii = 1, setting%SWMMinput%N_link
-        !     !% --- initialize so that links not meeting the case criteria are not included
-        !     !%     in lateral flow distribution.
-        !     link%R(ii,lr_InflowVolumeFraction) = zeroR
-        !     !% --- downstream node processing 
-        !     !%     FUTURE: handle an upstream node, downstream link distribution -- requires significant rewrite
-        !     nodeDn => link%I(ii,li_Mnode_d)
-        !     select case (node%I(nodeDn,ni_node_type))
-        !         case (nJ2)
-        !             !% --- nJ2 should always have an uplink volume
-        !             if (node%R(nodeDn,nr_UpLinksFullVolume) > zeroR) then 
-        !                 link%R(ii,lr_InflowVolumeFraction) = link%R(ii,lr_FullArea) * link%R(ii,lr_Length) &
-        !                                                  / node%R(nodeDn,nr_UpLinksFullVolume)
-        !             else 
-        !                 print *, 'CODE ERROR: unexpected zero UpLinksFullVolume for an nJ2'
-        !                 call util_crashpoint(2098744)
-        !             end if
-        !         case (nJm)
-        !             !% --- nJm only gets link info if the UseLinkDistributionTF is true
-        !             if (setting%BC%InflowBC%UseLinkDistributionTF) then
-        !                 if (node%R(nodeDn,nr_UpLinksFullVolume) > zeroR) then 
-        !                     link%R(ii,lr_InflowVolumeFraction) = link%R(ii,lr_FullArea) * link%R(ii,lr_Length) &
-        !                                                      / node%R(nodeDn,nr_UpLinksFullVolume)
-        !                 else 
-        !                     ! --- if volume fraction is zero then no lateral inflow occurs
-        !                 end if
-        !             else
-        !                 !% --- no action if UseLinkDistributionTF is false
-        !             end if
-        !         case (nBCup, nBCdn)
-        !             !% --- inflow on face, not through link
-        !         case default
-        !             print *, 'CODE ERROR: unexpected case default'
-        !             call util_crashpoint(4929833)
-        !     end select
-        ! end do
-
         !% --- error checking for disconnected nodes
         noerrorfound = .true.
         do ii = 1,N_node
@@ -1480,7 +1559,7 @@ contains
         if (.not. noerrorfound) then
             call util_crashpoint(72813)
         endif
-     
+        
         !% --- ERROR CHECK connections for outfalls
         do ii = 1,N_node
             if (interface_get_nodef_attribute(ii, api_nodef_type) == API_OUTFALL) then
@@ -1501,47 +1580,935 @@ contains
             end if
         end do
 
-        !% Check for small links while using nominal element length discretization 
-        if (setting%Discretization%Method .ne. AllowSmallLinks) then
-            do ii = 1, N_link
-                if ( (link%I(ii,li_link_type) == lChannel) .or. (link%I(ii,li_link_type) == lPipe) ) then
-                    if (link%R(ii,lr_Length) < ( (real(setting%Discretization%MinElementPerLink,8) - onehalfR) * setting%Discretization%NominalElemLength)) then
-                        print *, 'SWMM input file links too small for selected NominalElemLength and MinElementPerLink'
-                        print *, 'Found link length of ',link%R(ii,lr_Length)
-                        print *, 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
-                        print *, 'setting.Discretization.NominalElemLength is ',setting%Discretization%NominalElemLength
-                        print *, 'setting.Discretization.MinElementPerLink is ',setting%Discretization%MinElementPerLink
-                        print *, 'Decrease nominal element length to less than', link%R(ii,lr_Length)/ real(setting%Discretization%MinElementPerLink,8)
-                        print *, 'or modify link length in SWMM input file'
-                        print *, 'NOTE: SWMM5+ requires MinElementPerLink of 3 or greater'
-                        call util_crashpoint(447298)
-                    end if
-                end if
-            end do
-        end if
-
-        if (setting%Debug%File%initialization) then
-            !%-----------------------------------------------------------------------------
-            print *, 'idx,    nodeType,    linkU,    linkD,   curveID, patternRes'
-            do ii=1,N_node
-                write(*,"(10i8)") node%I(ii,ni_idx), node%I(ii,ni_node_type), node%I(ii,ni_N_link_u), node%I(ii,ni_N_link_d) &
-                , node%I(ii,ni_curve_ID), node%I(ii,ni_pattern_resolution)
-            end do
-
-            print *, 'idx,    LinkType,  nodeU,   nodeD, curveId'
-            do ii=1,N_Link
-                write(*,"(10i8)") link%I(ii,li_idx), link%I(ii,li_link_type), link%I(ii,li_Mnode_u), link%I(ii,li_Mnode_d) &
-                , link%I(ii,li_curve_id) 
-            end do
-        end if 
-
-        if (setting%Debug%File%initialization)  &
-            write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-
-
-    end subroutine init_linknode_arrays
+    end subroutine init_node_arrays
 !%
 !%==========================================================================
+!%==========================================================================
+!%
+    subroutine init_subcatchment_arrays ()
+        !% -----------------------------------------------------------------
+        !% Description
+        !% initiation of subcatchment arrays from SWMM input file
+        !% see init_subcatchment_elements for network connections
+        !% -----------------------------------------------------------------
+        !% Declarations
+            integer :: ii
+        !% -----------------------------------------------------------------
+        !% Preliminaries
+            if (.not. setting%Simulation%useHydrology) return
+            node%I(:,ni_routeFrom) = nullvalueI !% initialization 
+        !% -----------------------------------------------------------------
+
+        do ii=1,setting%SWMMinput%N_subcatch
+            !% --- Subtract 1 from the SWMM5+ subcatchment index to get the 
+            !%     EPA SWMM subcatchment index; Add 1 to the EPA SWMM node index
+            !%     for the SWMM5+ node index
+            subcatchI(ii,si_runoff_nodeIdx) = interface_get_subcatch_runoff_nodeIdx(ii-1)+oneI
+            if (subcatchI(ii,si_runoff_nodeIdx) < oneI) then !% not a runoff node (EPA SWMM flag)
+                subcatchYN(ii,sYN_hasRunoff) = .false.
+                subcatchI(ii,si_runoff_nodeIdx) = nullvalueI
+            else
+                subcatchYN(ii,sYN_hasRunoff) = .true.
+                node%I(subcatchI(ii,si_runoff_nodeIdx),ni_routeFrom) = ii
+            end if  
+        end do
+
+    end subroutine init_subcatchment_arrays
+!%
+!%==========================================================================
+!%==========================================================================
+!%  
+    ! subroutine init_link_diagnostic_geometry ()
+    !     !% -----------------------------------------------------------------
+    !     !% Description
+    !     !% ensures that diagnostic (special element) links in EPA SWMM
+    !     !% have background geometry suitable for setting JB branch
+    !     !% values in SWMM5+ FV discretization. For example, a pump should
+    !     !% have a background circular pipe size that can be used to set the
+    !     !% JB geometry when it is adjacent to a junction
+    !     !% -----------------------------------------------------------------
+    !     !% Declarations
+    !         integer :: ii, adjLink
+    !     !% -----------------------------------------------------------------
+
+    !     do ii = 1, setting%SWMMinput%N_link
+
+    !         select case (link%I(ii,li_link_type))
+    !             case (lChannel,lPipe)
+    !                 !% --- no action
+    !             case (lWeir, lOrifice, lPump, lOutlet)
+    !                 !% ---
+    !                 print *, 'in link_diagnostic_geometry Weir'
+    !                 print *,  'geometry type ', link%I(ii,li_geometry)
+    !                 !adjLink = init_get_adjacent_pipe_or_channel_link (ii)
+    !                 !call init_transfer_adjacent_geometry(ii,adjLink)
+    !                 stop 508974
+    !             case default
+    !                 print *, 'CODE ERROR: unexpecated case default'
+    !                 call util_crashpoint(6098732)
+    !         end select
+
+    !     end do
+
+    ! end subroutine init_link_diagnostic_geometry
+!%
+!%==========================================================================
+!%==========================================================================
+!%     
+    ! subroutine init_link_smallhandling ()
+    !     !% -----------------------------------------------------------------
+    !     !% Description
+    !     !% changes short conduits/channels into equivalent orifices or
+    !     !% other small-link handling approach
+    !     !% -----------------------------------------------------------------
+    !     !% Declarations
+    !         integer :: ii
+    !         real(8) :: deltaL, smallestLinkLength
+    !         logical :: linkErrorFound
+    !     !% -----------------------------------------------------------------
+    !     !% Preliminaries
+    !         smallestLinkLength = abs(nullvalueR)
+    !     !% -----------------------------------------------------------------
+        
+    !     do ii = 1, setting%SWMMinput%N_link
+
+    !         !% --- Small link handling is only for pipes and channels
+    !         if ((link%I(ii,li_link_type) == lpipe) .or. (link%I(ii,li_link_type) == lchannel)) then
+
+    !             if (link%R(ii,lr_Length) < setting%Discretization%MinLinkLength) then
+    !                 !% --- small link found
+
+    !                 select case (setting%Discretization%SmallElementHandling)
+
+    !                     case(EquivalentOrifice)
+    !                         !% --- make link an equivalent orifice
+    !                         !%     This is done before partitioning, so phantom links do not matter                          
+    !                         if (this_image() == 1) then
+    !                             write(*,*) 'WARNING: Converting link to equivalent orifice'
+    !                             write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
+    !                             write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
+    !                             write(*,*) 'which is smaller than minimum link length of ', setting%Discretization%MinLinkLength
+    !                             write(*,*) ' '
+    !                         end if                          
+    !                         !% --- set the sub orifice type as equivalent orifice
+    !                         if (link%I(ii,li_link_type) == lchannel) then 
+    !                             link%I(ii,li_link_sub_type) = lEquivalentOrificeChannel
+    !                         elseif  (link%I(ii,li_link_type) == lpipe) then 
+    !                             link%I(ii,li_link_sub_type) = lEquivalentOrificePipe
+    !                         end if
+    !                         !% --- now reset the link type type as Orifice
+    !                         link%I(ii,li_link_type) = lOrifice
+   
+    !                         !% set a default discharge coefficient from settings
+    !                         link%R(ii,lr_DischargeCoeff1) = zeroR !setting%Discretization%EquivalentOrificeDischargeCoeff
+    !                         !% set orifice time to operate to zero
+    !                         link%R(ii,lr_DischargeCoeff2) = zeroR
+
+    !                         !% --- retain all the channel/conduit geometry that was loaded above
+
+    !                         !% set the default geometry of the equivalent orifice as circular
+    !                         !link%I(ii,li_geometry) = lCircular
+    !                         !% reset the orifice opening from the original link full area
+    !                         !! link%R(ii,lr_FullDepth) = sqrt(fourR * link%R(ii,lr_FullArea) / setting%Constant%pi)
+    !                         !% reset the length of the element as minimum link length (will be reset later)
+    !                         !link%R(ii,lr_Length) = setting%Discretization%MinLinkLength
+
+    !                     case (LengthenLink)
+    !                         !% --- lengthen small links and reduce roughness
+    !                         if (this_image() == 1) then
+    !                             write(*,*) 'WARNING: lengthening short link and reducing roughness'
+    !                             write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
+    !                             write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
+    !                             write(*,*) 'which is smaller than minimum link length of ', setting%Discretization%MinLinkLength
+    !                             write(*,*) ' '
+    !                         end if 
+    !                         deltaL = setting%Discretization%MinLinkLength - link%R(ii,lr_Length)
+    !                         !% --- roughess reduction based on preserving Q in chezy-manning equation for original
+    !                         !%     link and L+deltaL link length
+    !                         link%R(ii,lr_Roughness) = link%R(ii,lr_Roughness) &
+    !                             * sqrt( link%R(ii,lr_Length) / (link%R(ii,lr_Length)+deltaL) )
+    !                         link%R(ii,lr_Length) = setting%Discretization%MinLinkLength
+
+    !                         print *, 'setting%Discretization%SmallElementHandling of LengthenLinks not tested'
+    !                         call util_crashpoint(722973)
+
+    !                     case (FailLimiter)
+    !                         !% --- run fails if small link found
+    !                         if (this_image() == 1) then
+    !                             write(*,*) 'USER CONFIGURATION ERROR: Link is smaller than allowed'
+    !                             write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
+    !                             write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
+    !                             write(*,*) 'which is smaller than minimum link length of ', setting%Discretization%MinLinkLength
+    !                             write(*,*) 'User can set Discretization%SmallElementHandling as follows:'
+    !                             write(*,*) ' = AllowSmallLinks to accept small links (with small time step),'
+    !                             write(*,*) ' = EquivalentOrifice to replace small links with an equivalent orifice,'
+    !                             write(*,*) ' = LengthenLink to replace small links with longer link at reduced roughness'
+    !                             write(*,*) ' '
+    !                             linkErrorFound = .true.
+    !                         end if
+
+    !                     case (AllowSmallLinks)
+    !                         !% --- continue, small links are allowed
+    !                         if (this_image() == 1) then
+    !                             write(*,*) 'WARNING: small link has been found, but is allowed because'
+    !                             write(*,*) 'Discretization%SmallElementHandling = AllowSmallLinks'
+    !                             write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
+    !                             write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
+    !                             write(*,*) 'which is smaller than desired minimum link length of ', setting%Discretization%MinLinkLength
+    !                             write(*,*) ' '
+    !                         end if 
+
+    !                 end select
+    !             else 
+    !                 !% --- continue, link is not small
+    !             end if
+    !             !% --- store the smallest link for debugging output
+    !             smallestLinkLength = min(smallestLinkLength,link%R(ii,lr_Length))
+    !         else 
+    !             !% --- link length irrelevant for special elements
+    !         end if
+
+
+    !     end do
+
+    !     write(*,*) ' '
+    !     write(*,*) 'Smallest link found is ', smallestLinkLength
+    !     write(*,*) 'Recommended minimum is ', setting%Discretization%MinLinkLength
+    !     write(*,*) ' '
+
+
+    !     if (linkErrorFound) then
+    !         write(*,*)
+    !         write(*,*) 'One or more link errors found, see notes above'
+    !         call util_crashpoint(7298722)
+    !     end if
+
+        
+    ! end subroutine init_link_smallhandling
+!%
+!%==========================================================================
+!%==========================================================================
+!%
+    ! subroutine init_linknode_arrays()
+    !     !% OBSOLETE 20240528
+    !     !%------------------------------------------------------------------
+    !     !% Description:
+    !     !%   Retrieves data from EPA-SWMM interface and populates link and 
+    !     !%   and node tables
+    !     !% Notes:
+    !     !% 1.The order in which link and nodes are populated coincides with
+    !     !%   the order in which links and nodes are allocated in EPA-SWMM 
+    !     !%   data structures. Keeping the same order is important to be able 
+    !     !%   to locate node/link data by label and not by index, reusing 
+    !     !%   EPA-SWMM functionalities.
+    !     !% 2.This is called before partitioning, so the links and nodes do
+    !     !%   not know their
+    !     !%------------------------------------------------------------------
+    !     !% Declarations   
+    !         integer          :: ii, jj, total_n_links, link_idx
+    !         integer, pointer :: linkUp, linkDn,  nodeDn
+    !         real(8)          :: smallestLinkLength, deltaL
+    !         logical          :: noerrorfound, linkErrorFound
+    !         character(64)    :: subroutine_name = 'init_linknode_arrays'
+    !     !%--------------------------------------------------------------------
+    !     !% Preliminaries
+    !         if (setting%Debug%File%initialization) &
+    !             write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
+
+    !         if (.not. api_is_initialized) then
+    !             print *, "CODE ERROR API is not initialized"
+    !             call util_crashpoint(39873)
+    !         end if
+
+    !         smallestLinkLength = abs(nullvalueR)
+    !     !%-----------------------------------------------------------------------------
+
+    !         stop 6098743
+    !     !% --- Allocate storage for link & node tables
+    !     !call util_allocate_linknode()
+
+    !     !% --- Allocate subcatchment storage
+    !     if (setting%Simulation%useHydrology) then 
+    !         call util_allocate_subcatch()
+    !     else    
+    !         !% --- continue without hydrology    
+    !     end if
+
+    !     !% --- Set default for all link and node keys
+    !     !call util_key_default_linknode()
+
+    !     !% --- initialize number of links for each node to zero
+    !     node%I(:,ni_N_link_u) = zeroI
+    !     node%I(:,ni_N_link_d) = zeroI
+    !     !% --- set default for extra surcharge depth
+    !     !%     The InfiniteExtraDepthValue is used for SWMM5+ to identify junctions that
+    !     !%     never overflow (i.e., without a manhole) and thus can be represented
+    !     !%     as nJ2 faces between elements when there are only two connections.
+    !     !%     We default ALL junction overflow height to the Infinite value. This
+    !     !%     default is changed when link/node data is read in (further below)
+    !     node%R(:,nr_OverflowHeightAboveCrown) = setting%Junction%InfiniteExtraDepthValue 
+
+    !     !% --- Store the Link/Node names (moved here 20240307)
+    !     call interface_update_linknode_names()
+
+    !     !% -----------------------
+    !     !% --- LINK DATA
+    !     !% -----------------------
+    !     !% --- cycle through links using do loop as the API between EPA SWMM and SWMM5+ 
+    !     !%     is designed for individual links, not for array processing.
+    !     linkErrorFound = .false.
+    !     do ii = 1, setting%SWMMinput%N_link
+
+    !         !% --- store the basic link data
+    !         link%I(ii,li_idx) = ii
+    !         link%I(ii,li_link_direction) = interface_get_linkf_attribute(ii, api_linkf_direction,.true.)
+    !         link%I(ii,li_link_type)      = interface_get_linkf_attribute(ii, api_linkf_type,     .true.)
+    !         link%I(ii,li_link_sub_type)  = interface_get_linkf_attribute(ii, api_linkf_sub_type, .true.)
+    !         link%I(ii,li_geometry)       = interface_get_linkf_attribute(ii, api_linkf_geometry, .true.)
+    !         link%I(ii,li_barrels)        = interface_get_linkf_attribute(ii, api_linkf_conduit_barrels, .true.)
+    !         link%I(ii,li_culvertCode)    = interface_get_linkf_attribute(ii, api_linkf_culvertCode, .true.)
+                
+    !         !% --- identify the upstream and downstream node indexes
+    !         if (link%I(ii,li_link_direction) == oneI) then
+    !             !% --- for standard channel/conduits where upstream is 
+    !             !%     higher bottom elevation than downstream
+    !             link%I(ii,li_Mnode_u) = interface_get_linkf_attribute(ii, api_linkf_node1,.true.) + oneI ! node1 in C starts from 0
+    !             link%I(ii,li_Mnode_d) = interface_get_linkf_attribute(ii, api_linkf_node2,.true.) + oneI ! node2 in C starts from 0
+
+    !             !% offset 1 is upstream for link with positive slope
+    !             link%R(ii,lr_InletOffset)        = interface_get_linkf_attribute(ii, api_linkf_offset1,.false.)
+
+    !             !% offset 2 is downstream for link with positive slope
+    !             link%R(ii,lr_OutletOffset)       = interface_get_linkf_attribute(ii, api_linkf_offset2,.false.)
+
+    !         else if (link%I(ii,li_link_direction) == -oneI) then
+    !             !% --- when upstream has lower bottom elevation than downstream,
+    !             !%     EPA-SWMM swaps the connection to prevent a negative slope. 
+    !             !%     SWMM5+ can handle a negative slope in FV method, so switch the 
+    !             !%     nodes back to their correct orientation
+    !             link%I(ii,li_Mnode_u) = interface_get_linkf_attribute(ii, api_linkf_node2,.true.) + oneI ! node2 in C starts from 0
+    !             link%I(ii,li_Mnode_d) = interface_get_linkf_attribute(ii, api_linkf_node1,.true.) + oneI ! node1 in C starts from 0
+
+    !             !% offset 2 is upstream for link with negative/zero slope
+    !             link%R(ii,lr_InletOffset)        = interface_get_linkf_attribute(ii, api_linkf_offset2, .false.)
+
+    !             !% offset 1 is downstream for link with positive slope
+    !             link%R(ii,lr_OutletOffset)       = interface_get_linkf_attribute(ii, api_linkf_offset1, .false.)
+
+    !         else
+    !             linkErrorFound = .true.
+    !             if (this_image() == 1) then
+    !                 write(*,*)         'USER CONFIGURATION ERROR: link direction should be 1 or -1'
+    !                 write(*,"(A,i4)")  'Link # ',ii
+    !                 write(*,"(A,i4)")  'Link Direction  ', link%I(ii,li_link_direction)
+    !                 write(*,*)         'Link name       ', trim(link%Names(ii)%str)
+    !             end if
+    !         end if 
+
+    !         !% --- the "parent" link is the input EPA-SWMM link, 
+    !         !%     which may be broken up (later) into 2 SWMM5+ links by partitioning
+    !         link%I(ii,li_parent_link) = ii
+
+    !         !% --- increment the connection counter for the node downstream
+    !         node%I(link%I(ii,li_Mnode_d), ni_N_link_u) = node%I(link%I(ii,li_Mnode_d), ni_N_link_u) + oneI
+
+    !         !% --- set the maps for the downstream node to upstream link (ni_Mlink_u#)
+    !         !%     NOTE: this makes use of the ordering of the ni_Mlink_u# in define_indexes
+    !         node%I(link%I(ii,li_Mnode_d), ni_idx_base1 + node%I(link%I(ii,li_Mnode_d), ni_N_link_u)) = ii
+
+    !         !% --- increment the connection counter for the node upstream
+    !         node%I(link%I(ii,li_Mnode_u), ni_N_link_d) = node%I(link%I(ii,li_Mnode_u), ni_N_link_d) + oneI
+
+    !         !% --- set the maps for the upstream node to the downstream link (ni_Mlink_d#)
+    !         !%     NOTE: this makes use of the ordering of the ni_Mlink_d# in define_indexes
+    !         node%I(link%I(ii,li_Mnode_u), ni_idx_base2 + node%I(link%I(ii,li_Mnode_u), ni_N_link_d)) = ii
+
+    !         !% --- set the approach used for computing the initial depth
+    !         !%     HACK -- At this time, all links have the same initial depth type which is 
+    !         !%     the default stored in setting. A better approach would be to allow different links
+    !         !%     to have different depth types. However, this requires changes to the *.inp file or
+    !         !%     development of a new auxiliary input file.
+    !         link%I(ii,li_InitialDepthType)   = setting%Link%DefaultInitDepthType
+
+    !         !% --- read basic data from EPA SWMM
+    !         link%R(ii,lr_Length)             = interface_get_linkf_attribute(ii, api_linkf_conduit_length,   .false.)
+    !         link%R(ii,lr_wMax)       = interface_get_linkf_attribute(ii, api_linkf_xsect_wMax,       .false.)
+    !         link%R(ii,lr_LeftSlope)          = interface_get_linkf_attribute(ii, api_linkf_left_slope,       .false.)
+    !         link%R(ii,lr_RightSlope)         = interface_get_linkf_attribute(ii, api_linkf_right_slope,      .false.)
+    !         link%R(ii,lr_Roughness)          = interface_get_linkf_attribute(ii, api_linkf_conduit_roughness,.false.)
+    !         link%R(ii,lr_FullDepth)          = interface_get_linkf_attribute(ii, api_linkf_xsect_yFull,      .false.)
+    !         link%R(ii,lr_FullArea)           = interface_get_linkf_attribute(ii, api_linkf_xsect_aFull,      .false.)
+    !         link%R(ii,lr_FullHydRadius)      = interface_get_linkf_attribute(ii, api_linkf_xsect_rFull,      .false.)
+    !         link%R(ii,lr_yBot)               = interface_get_linkf_attribute(ii, api_linkf_xsect_yBot,       .false.)
+    !         link%R(ii,lr_rBot)               = interface_get_linkf_attribute(ii, api_linkf_xsect_rBot,       .false.)
+    !         link%R(ii,lr_FlowrateInitial)    = interface_get_linkf_attribute(ii, api_linkf_q0,               .false.)
+    !         link%R(ii,lr_FlowrateLimit)      = interface_get_linkf_attribute(ii, api_linkf_qlimit,           .false.)
+    !         link%R(ii,lr_Kconduit_MinorLoss) = interface_get_linkf_attribute(ii, api_linkf_cLossAvg,         .false.)
+    !         link%R(ii,lr_Kentry_MinorLoss)   = interface_get_linkf_attribute(ii, api_linkf_cLossInlet,       .false.)
+    !         link%R(ii,lr_Kexit_MinorLoss)    = interface_get_linkf_attribute(ii, api_linkf_cLossOutlet,      .false.)
+    !         link%R(ii,lr_SeepRate)           = interface_get_linkf_attribute(ii, api_linkf_seepRate,         .false.)
+    !         link%R(ii,lr_ForceMain_Coef)     = interface_get_linkf_attribute(ii, api_linkf_forcemain_coef,   .false.)
+    !         link%R(ii,lr_Setting)            = interface_get_linkf_attribute(ii, api_linkf_setting,          .false.)
+    !         link%R(ii,lr_TimeLastSet)        = interface_get_linkf_attribute(ii, api_linkf_timelastset,     .false.)
+
+    !         !% --- Note that link%R(ii,lr_Slope) and link%R(ii,lr_TopWidth) are defined in network_define.f08 
+    !         !%     because SWMM5 reverses negative slope
+
+    !         !% --- Note, link depths are NOT initialized here because these are determined by node attributes
+            
+    !         !% --- special element attributes
+    !         link%I(ii,li_weir_EndContractions) = interface_get_linkf_attribute(ii, api_linkf_weir_end_contractions,.true.)
+    !         link%I(ii,li_RoadSurface)          = interface_get_linkf_attribute(ii, api_linkf_weir_road_surface,    .true.)
+    !         link%I(ii,li_curve_id)             = interface_get_linkf_attribute(ii, api_linkf_curveid,              .true.)
+    !         link%R(ii,lr_DischargeCoeff1)      = interface_get_linkf_attribute(ii, api_linkf_discharge_coeff1,     .false.)
+    !         link%R(ii,lr_DischargeCoeff2)      = interface_get_linkf_attribute(ii, api_linkf_discharge_coeff2,     .false.)
+    !         link%R(ii,lr_initSetting)          = interface_get_linkf_attribute(ii, api_linkf_initSetting,          .false.)
+    !         link%R(ii,lr_yOn)                  = interface_get_linkf_attribute(ii, api_linkf_yOn,                  .false.)
+    !         link%R(ii,lr_yOff)                 = interface_get_linkf_attribute(ii, api_linkf_yOff,                 .false.)
+    !         link%R(ii,lr_SideSlope)            = interface_get_linkf_attribute(ii, api_linkf_weir_side_slope,      .false.)
+    !         link%R(ii,lr_RoadWidth)            = interface_get_linkf_attribute(ii, api_linkf_weir_road_width,      .false.)
+
+    !         if (interface_get_linkf_attribute(ii, api_linkf_hasFlapGate,.true.) == oneI) then
+    !             link%YN(ii,lYN_hasFlapGate)   = .true.
+    !         else
+    !             link%YN(ii,lYN_hasFlapGate)   = .false.
+    !         end if
+
+    !         !% --- EPA SWMM5 does not distinguish between open channels and closed conduits
+    !         !%     however SWMM5+ needs that distinction to set up the initial conditions
+    !         !%     So we look for EPA SWMM conduits (given lPipe, above) and convert to lChannel
+    !         if ( (link%I(ii,li_link_type) == lPipe)          .and. &
+    !              ( &
+    !                 (link%I(ii,li_geometry) == lRectangular)    .or. &
+    !                 (link%I(ii,li_geometry) == lTrapezoidal)    .or. &
+    !                 (link%I(ii,li_geometry) == lTriangular)     .or. &
+    !                 (link%I(ii,li_geometry) == lParabolic)      .or. &
+    !                 (link%I(ii,li_geometry) == lPower_function) .or. &
+    !                 (link%I(ii,li_geometry) == lIrregular)           &
+    !               )  &
+    !             ) then
+
+    !             link%I(ii,li_link_type) = lChannel
+    !         end if
+
+    !         !% --- check if a weir can surcharge
+    !         !%     returns false if not a weir
+    !         link%YN(ii,lYN_weir_CanSurcharge) = (interface_get_linkf_attribute(ii,api_linkf_weir_can_surcharge,.true.) == oneI)
+
+    !         if (link%I(ii,li_link_type) == lWeir) then
+    !             !% --- set road surface types
+    !             if (link%I(ii,li_RoadSurface) == API_NOSURFACE) then
+    !                 link%I(ii,li_RoadSurface) = NoRoadSurface
+    !             else if (link%I(ii,li_RoadSurface) == API_PAVED) then
+    !                 link%I(ii,li_RoadSurface) = Paved
+    !             else if (link%I(ii,li_RoadSurface) == API_GRAVEL) then
+    !                 link%I(ii,li_RoadSurface) = Gravel
+    !             else
+    !                 if (this_image() == 1) then
+    !                     write(*,*) 'USER CONFIGURATION ERROR for roadway weir'
+    !                     write(*,"(A)") 'A roadway weir does not have an allowed road surface type'
+    !                     write(*,"(A)")      'Allowed types are NOSURFACE, PAVED, GRAVEL'
+    !                     write(*,"(A,i4)")   'Failure at link ',link%I(ii,li_idx)
+    !                     write(*,"(A)")      'link name '//trim(link%Names(ii)%str)
+    !                 end if
+    !                 linkErrorFound = .true.
+    !             end if
+    !         else
+    !             link%I(ii,li_RoadSurface) = nullValueI
+    !         end if
+            
+    !         ! !% HACK CODE FOR TESTING:
+    !         ! !% for filled circular cross-sections, swmm always sets inlet and outlet offsets
+    !         ! !% for the bottom filled elevation. For now, I am removing those for testing
+    !         ! if (link%I(ii,li_geometry) ==  lFilled_circular) then
+    !         !     link%R(ii,lr_InletOffset)  = link%R(ii,lr_InletOffset)  - link%R(ii,lr_yBot)
+    !         !     link%R(ii,lr_OutletOffset) = link%R(ii,lr_OutletOffset) - link%R(ii,lr_yBot) 
+    !         ! end if
+
+    !         !% --- Irregular cross-sections (TRANSECTS in SWMM input file)
+    !         if (link%I(ii,li_geometry) == lIrregular) then
+    !            link%I(ii,li_transect_idx) = interface_get_linkf_attribute(ii, api_linkf_transectidx,.true.)
+    !         end if
+
+    !         !% --- set output links
+    !         link%YN(ii,lYN_isOutput) = (interface_get_linkf_attribute(ii,api_linkf_rptFlag,.true.) == 1)
+
+    !         !% --- Small link handling in pipes and channels
+    !         if ((link%I(ii,li_link_type) == lpipe) .or. (link%I(ii,li_link_type) == lchannel)) then
+
+    !             if (link%R(ii,lr_Length) < setting%Discretization%MinLinkLength) then
+    !                 !% --- small link found
+
+    !                 select case (setting%Discretization%SmallElementHandling)
+
+    !                     case(EquivalentOrifice)
+    !                         !% --- make link an equivalent orifice
+    !                         !%     This is done before partitioning, so phantom links do not matter                          
+    !                         if (this_image() == 1) then
+    !                             write(*,*) 'WARNING: Converting link to equivalent orifice'
+    !                             write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
+    !                             write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
+    !                             write(*,*) 'which is smaller than minimum link length of ', setting%Discretization%MinLinkLength
+    !                             write(*,*) ' '
+    !                         end if                          
+    !                         !% --- set the sub orifice type as equivalent orifice
+    !                         if (link%I(ii,li_link_type) == lchannel) then 
+    !                             link%I(ii,li_link_sub_type) = lEquivalentOrificeChannel
+    !                         elseif  (link%I(ii,li_link_type) == lpipe) then 
+    !                             link%I(ii,li_link_sub_type) = lEquivalentOrificePipe
+    !                         end if
+    !                         !% --- now reset the link type type as Orifice
+    !                         link%I(ii,li_link_type) = lOrifice
+   
+    !                         !% set a default discharge coefficient from settings
+    !                         link%R(ii,lr_DischargeCoeff1) = zeroR !setting%Discretization%EquivalentOrificeDischargeCoeff
+    !                         !% set orifice time to operate to zero
+    !                         link%R(ii,lr_DischargeCoeff2) = zeroR
+
+    !                         !% --- retain all the channel/conduit geometry that was loaded above
+
+    !                         !% set the default geometry of the equivalent orifice as circular
+    !                         !link%I(ii,li_geometry) = lCircular
+    !                         !% reset the orifice opening from the original link full area
+    !                         !! link%R(ii,lr_FullDepth) = sqrt(fourR * link%R(ii,lr_FullArea) / setting%Constant%pi)
+    !                         !% reset the length of the element as minimum link length (will be reset later)
+    !                         !link%R(ii,lr_Length) = setting%Discretization%MinLinkLength
+
+    !                     case (LengthenLink)
+    !                         !% --- lengthen small links and reduce roughness
+    !                         if (this_image() == 1) then
+    !                             write(*,*) 'WARNING: lengthening short link and reducing roughness'
+    !                             write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
+    !                             write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
+    !                             write(*,*) 'which is smaller than minimum link length of ', setting%Discretization%MinLinkLength
+    !                             write(*,*) ' '
+    !                         end if 
+    !                         deltaL = setting%Discretization%MinLinkLength - link%R(ii,lr_Length)
+    !                         !% --- roughess reduction based on preserving Q in chezy-manning equation for original
+    !                         !%     link and L+deltaL link length
+    !                         link%R(ii,lr_Roughness) = link%R(ii,lr_Roughness) &
+    !                             * sqrt( link%R(ii,lr_Length) / (link%R(ii,lr_Length)+deltaL) )
+    !                         link%R(ii,lr_Length) = setting%Discretization%MinLinkLength
+
+    !                     case (FailLimiter)
+    !                         !% --- run fails if small link found
+    !                         if (this_image() == 1) then
+    !                             write(*,*) 'USER CONFIGURATION ERROR: Link is smaller than allowed'
+    !                             write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
+    !                             write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
+    !                             write(*,*) 'which is smaller than minimum link length of ', setting%Discretization%MinLinkLength
+    !                             write(*,*) 'User can set Discretization%SmallElementHandling as follows:'
+    !                             write(*,*) ' = AllowSmallLinks to accept small links (with small time step),'
+    !                             write(*,*) ' = EquivalentOrifice to replace small links with an equivalent orifice,'
+    !                             write(*,*) ' = LengthenLink to replace small links with longer link at reduced roughness'
+    !                             write(*,*) ' '
+    !                             linkErrorFound = .true.
+    !                         end if
+
+    !                     case (AllowSmallLinks)
+    !                         !% --- continue, small links are allowed
+    !                         if (this_image() == 1) then
+    !                             write(*,*) 'WARNING: small link has been found, but is allowed because'
+    !                             write(*,*) 'Discretization%SmallElementHandling = AllowSmallLinks'
+    !                             write(*,*) 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
+    !                             write(*,*) 'Link has length of ', link%R(ii,lr_Length) 
+    !                             write(*,*) 'which is smaller than desired minimum link length of ', setting%Discretization%MinLinkLength
+    !                             write(*,*) ' '
+    !                         end if 
+
+    !                 end select
+    !             else 
+    !                 !% --- continue, link is not small
+    !             end if
+    !             !% --- store the smallest link for debugging output
+    !             smallestLinkLength = min(smallestLinkLength,link%R(ii,lr_Length))
+    !         else 
+    !             !% --- link length irrelevant for special elements
+    !         end if
+            
+    !     end do
+
+    !     write(*,*) ' '
+    !     write(*,*) 'Smallest link found is ', smallestLinkLength
+    !     write(*,*) 'Recommended minimum is ', setting%Discretization%MinLinkLength
+    !     write(*,*) ' '
+
+    !     if (linkErrorFound) then
+    !         write(*,*)
+    !         write(*,*) 'One or more link errors found, see notes above'
+    !         call util_crashpoint(7298734)
+    !     end if
+
+    !     !% --- count the number of conduits in the network
+    !     N_conduit = count(link%I(:,li_link_type) == lPipe)
+
+    !     !% --- ERROR CHECK for number of connections
+    !     do ii = 1,N_node
+    !         if (node%I(ii, ni_N_link_u) > max_up_branch_per_node) then
+    !             if (this_image() == 1) then
+    !                 write(*,*) 'USER CONFIGURATION ERROR for node connections'
+    !                 write(*,"(A,i4,A)") 'One or more nodes have more than ',max_up_branch_per_node,' upstream connections'
+    !                 write(*,*) 'Unfortunately, this connection limit is a hard-coded limit of SWMM5+ an cannot be exceeded.'
+    !                 write(*,*) 'First error found at node ',ii
+    !                 write(*,*) 'Node name ',trim(node%Names(ii)%str)
+    !             end if
+    !             call util_crashpoint(387666)
+    !         end if
+
+    !         if (node%I(ii, ni_N_link_d) > max_dn_branch_per_node) then
+    !             if (this_image() == 1) then
+    !                 write(*,*) 'USER CONFIGURATION ERROR for node connections'
+    !                 write(*,"(A,i4,A)") 'One or more nodes have more than ',max_dn_branch_per_node,' downstream connections'
+    !                 write(*,*) 'Unfortunately, this connection limit is a hard-coded limit of SWMM5+ an cannot be exceeded.'
+    !                 write(*,*) 'First error found at at node ',ii
+    !                 write(*,*) 'Node name ',trim(node%Names(ii)%str)
+    !             end if
+    !             call util_crashpoint(86752)
+    !         end if
+    !     end do
+
+    !     !% --- Store the Link/Node names (moved here 20221216)
+    !     ! MOVED 20240307 brh call interface_update_linknode_names()
+
+    !     !% -----------------------
+    !     !% --- SUBCATCHMENT -- see also init_subcatchment
+    !     !% -----------------------
+    !     node%I(:,ni_routeFrom) = nullvalueI !% initialization 
+    !     if (setting%Simulation%useHydrology) then
+    !         do ii=1,setting%SWMMinput%N_subcatch
+    !             !% --- Subtract 1 from the SWMM5+ subcatchment index to get the 
+    !             !%     EPA SWMM subcatchment index; Add 1 to the EPA SWMM node index
+    !             !%     for the SWMM5+ node index
+    !             subcatchI(ii,si_runoff_nodeIdx) = interface_get_subcatch_runoff_nodeIdx(ii-1)+oneI
+    !             if (subcatchI(ii,si_runoff_nodeIdx) < oneI) then !% not a runoff node (EPA SWMM flag)
+    !                 subcatchYN(ii,sYN_hasRunoff) = .false.
+    !                 subcatchI(ii,si_runoff_nodeIdx) = nullvalueI
+    !             else
+    !                 subcatchYN(ii,sYN_hasRunoff) = .true.
+    !                 node%I(subcatchI(ii,si_runoff_nodeIdx),ni_routeFrom) = ii
+    !             end if  
+    !         end do
+    !     end if
+    
+    !     !% -----------------------
+    !     !% --- NODE DATA
+    !     !% -----------------------
+    !     do ii = 1, N_node
+
+    !         !% --- get the total number of links connected to this node by
+    !         !%     adding upstream and downstream
+    !         total_n_links = node%I(ii,ni_N_link_u) + node%I(ii,ni_N_link_d)
+    !         node%I(ii, ni_idx) = ii
+
+    !         !% --- defaults
+    !         node%YN(ii,nYN_has_inflow)      = .false.
+    !         node%YN(ii,nYN_has_extInflow)   = .false.
+    !         node%YN(ii,nYN_has_dwfInflow)   = .false.
+    !         node%YN(ii,nYN_has_storage)     = .false.
+    !         node%YN(ii,nYN_isOutput)        = .false.
+    !         node%YN(ii,nYN_is_phantom_node) = .false.
+    !         node%YN(ii,nYN_hasFlapGate)     = .false.
+    !         node%YN(ii,nYN_isLinkFlow)      = .false.
+            
+    !         !% --- check for node inflows
+    !         node%YN(ii, nYN_has_extInflow) = (interface_get_nodef_attribute(ii, api_nodef_has_extInflow) == 1)
+    !         node%YN(ii, nYN_has_dwfInflow) = (interface_get_nodef_attribute(ii, api_nodef_has_dwfInflow) == 1)
+
+    !         !% --- get initial depths
+    !         node%R(ii,nr_InitialDepth)      = interface_get_nodef_attribute(ii, api_nodef_initDepth)
+
+    !         !% error check
+    !         if (node%R(ii,nr_InitialDepth) < zeroR) then
+    !             print *, 'USER CONFIGURATION ERROR OR CODE ERROR for node depth and invert'
+    !             print *, 'The initial depth at a node is less than the invert elevation'
+    !             print *, 'This may occur if the user provided an input of depth at an '
+    !             print *, 'outfall rather than stage elevation.  Otherwise, this is'
+    !             print *, 'possibly a bug in the code'
+    !             print *, 'Node # ',ii
+    !             print *, 'Node Name ', trim(node%Names(ii)%str)
+    !             print *, 'initial depth ',node%R(ii,nr_InitialDepth) 
+    !             call util_crashpoint(77987232)
+    !         end if
+
+    !         !% --- node geometry
+    !         node%R(ii,nr_Zbottom)           = interface_get_nodef_attribute(ii, api_nodef_invertElev)
+    !         node%R(ii,nr_FullDepth)         = interface_get_nodef_attribute(ii, api_nodef_fullDepth)
+
+    !         !% --- Total pressure head above max depth allowed for surcharge
+    !         !%     If 0 then node cannot surcharge, so exceeding depth means water either ponds or is lost
+    !         node%R(ii,nr_OverflowHeightAboveCrown) = interface_get_nodef_attribute(ii, api_nodef_surDepth)
+
+    !         !% --- error checking for infinite depth value and input surcharge depth
+    !         !print *, ii, node%R(ii,nr_OverflowHeightAboveCrown), setting%Junction%InfiniteExtraDepthValue
+    !         if (node%R(ii,nr_OverflowHeightAboveCrown) > setting%Junction%InfiniteExtraDepthValue ) then 
+    !             !% --- reset for small difference
+    !             if (node%R(ii,nr_OverflowHeightAboveCrown) .le. 1.001d0*setting%Junction%InfiniteExtraDepthValue) then
+    !                 node%R(ii,nr_OverflowHeightAboveCrown) = setting%Junction%InfiniteExtraDepthValue
+    !             else
+    !                 print *, ' '
+    !                 print *, 'USER CONFIGURATION ERROR:'
+    !                 print *, 'Inconsistent surcharge depth and setting.Junction.InfiniteExtraDepthValue'
+    !                 print *, 'Surcharge Depth from input is          ',node%R(ii,nr_OverflowHeightAboveCrown)
+    !                 print *, 'Setting for InfiniteExtraDepthValue is ',setting%Junction%InfiniteExtraDepthValue
+    !                 print *, 'The Infinite...Value must be greater than any surcharge depth provided in'
+    !                 print *, 'the input file. '
+    !                 print *, 'Stopping processing at node ',trim(node%Names(ii)%str)
+    !                 print *, 'Note that other nodes may have the same problem.'
+    !                 print *, ' '
+    !                 print *, 'HINT: this happens when the *.json file and the *.inp file have '
+    !                 print *, 'inconsistent values for infinite depths. Some modelers like to use'
+    !                 print *, '999 in the input file for SurDepth, others like to use 1000. The json '
+    !                 print *, 'file should be changed so that setting.Junction.InfiniteExtraDepthValue ' 
+    !                 print *, 'matches the value in the *.inp file, e.g., if 1000 is used in the input'
+    !                 print *, 'file, then the json file needs:'
+    !                 print *, '},'
+    !                 print *, ' "Junction" : {'
+    !                 print *, '      "InfiniteExtraDepthValue" : 1000.0'
+    !                 print *, ' }'
+    !                 print *, ' '
+    !                 print *, 'NOTE: using large surcharge depth is NOT functionally the same as using an '
+    !                 print *, 'infinite extra depth value. A large surcharge depth is presumed able to'
+    !                 print *, 'eventually overflow so the node must be an nJM node (i.e., it must be  '
+    !                 print *, 'a manhole). However, setting the surcharge depth to the Infinite...Value'
+    !                 print *, 'means that the node CANNOT overflow and (if it has no inflows and has'
+    !                 print *, 'only 2 connections) it is replaced with an nJ2 face (i.e., there will be '
+    !                 print *, 'no manhole area). The nJ2 approach is generally preferred if a manhole'
+    !                 print *, 'does not actually exist at the node location. If a manhole exists at this'
+    !                 print *, 'location, make sure the Infinite...Value is larger than the surcharge'
+    !                 print *, 'depth in the input file.'
+    !                 print *, ' '
+    !                 call util_crashpoint(709873)
+    !             end if
+    !         end if 
+
+    !         !% --- storage equations
+    !         !%     Note that Storage is converted to SI units in api.c/api_get_nodef_attribute
+    !         node%R(ii,nr_StorageConstant)   = interface_get_nodef_attribute(ii, api_nodef_StorageConstant)
+    !         node%R(ii,nr_StorageExponent)   = interface_get_nodef_attribute(ii, api_nodef_StorageExponent)
+    !         node%R(ii,nr_StorageCoeff)      = interface_get_nodef_attribute(ii, api_nodef_StorageCoeff)
+    !         node%I(ii,ni_curve_ID)          = interface_get_nodef_attribute(ii, api_nodef_StorageCurveID)
+    !         node%R(ii,nr_StorageFevap)      = interface_get_nodef_attribute(ii, api_nodef_StorageFevap)
+
+    !         !% --- ponded area
+    !         if (setting%SWMMinput%AllowPonding) then
+    !             node%R(ii,nr_PondedArea) = interface_get_nodef_attribute(ii, api_nodef_PondedArea)
+    !         else
+    !             node%R(ii,nr_PondedArea) = zeroR
+    !         end if
+
+    !         !% --- set if node is designiated for output
+    !         node%YN(ii,nYN_isOutput)  = (interface_get_nodef_attribute(ii, api_nodef_rptFlag) == 1)
+
+    !         !%
+    !         !% --- Assign required node types nJm, nJ1, nJ2, nBCdn,
+    !         !%     Note that defined storage is ALWAYS nJM
+    !         !%     The goal is to identify nodes that have only two connections and could
+    !         !%     be represented by a face (nJ2) between two elements in the SWMM5+ FV system rather 
+    !         !%     than requiring the more complicated junction (nJm) solution.
+    !         if (interface_get_nodef_attribute(ii, api_nodef_type) == API_OUTFALL) then
+    !             !% --- OUTFALL NODES
+    !             node%I(ii, ni_node_type) = nBCdn
+
+    !             !% --- get the SWMMoutfall index (i.e. the 'k' in Outfall[k].vRouted in EPASWMM)
+    !             node%I(ii,ni_SWMMoutfallIdx) = interface_get_nodef_attribute(ii,api_nodef_outfall_idx)
+
+    !             !% --- check for a flap gate on an outfall
+    !             if (interface_get_nodef_attribute(ii, api_nodef_hasFlapGate) == oneI) then
+    !                 node%YN(ii, nYN_hasFlapGate) = .true.
+    !             else
+    !                 node%YN(ii, nYN_hasFlapGate) = .false.
+    !             end if
+
+    !             !% --- check for routeTo subcatchment
+    !             node%I(ii,ni_routeTo) = interface_get_nodef_attribute(ii,api_nodef_RouteTo)
+    !             if (node%I(ii,ni_routeTo) == -oneI) then
+    !                 node%I(ii,ni_routeTo) = nullvalueI
+    !             elseif ( (node%I(ii,ni_routeTo) > zeroI)                           &
+    !                  .and.                                                         &
+    !                      (node%I(ii,ni_routeTo) .le. setting%SWMMinput%N_subcatch) &
+    !                  ) then
+    !                 !% correct value found
+    !             else
+    !                 print *, 'CODE ERROR unexpected value for ni_routeTo'
+    !                 print *, 'value obtained is ',node%I(ii,ni_routeTo)
+    !                 print *, 'allowable values are -1 or > 0 but less than number of subcatchments'
+    !                 print *, 'number of subcatchments is ',setting%SWMMinput%N_subcatch
+    !                 print *, 'Node index ',ii
+    !                 print *, 'Node name  ',trim(node%Names(ii)%str)
+    !                 call util_crashpoint(69873)
+    !             end if
+
+    !         else if (interface_get_nodef_attribute(ii, api_nodef_type) == API_STORAGE) then
+    !             !% --- STORAGE NODES (always nJm)
+    !             node%I(ii, ni_node_type)     = nJm
+    !             node%YN(ii, nYN_has_storage) = .true.
+
+    !         else 
+    !             !% --- OTHER NODES
+    !             !%     classify by number of links connected
+    !             select case (total_n_links)
+    !                 case (oneI)
+    !                     node%I(ii, ni_node_type) = nJ1
+    !                 case (twoI)      
+    !                     node%I(ii, ni_node_type) = nJ2
+    !                 case default 
+    !                     node%I(ii, ni_node_type) = nJm
+    !             end select
+    !         end if 
+
+    !         !% --- select nJM nodes that can be represented as element faces (nJ2)
+    !         call init_node_nJ2_nJM (ii)
+            
+    !         !% --- inflows (must be initialized after nJ1, nJ2 are set)
+    !         if (node%YN(ii, nYN_has_extInflow) .or. node%YN(ii, nYN_has_dwfInflow)) then
+    !             !% set inflow to true for any node type
+    !             node%YN(ii, nYN_has_inflow) = .true.
+    !             !% change the node type of an nJ1 with inflow to nBCup
+    !             if (node%I(ii, ni_node_type) == nJ1) node%I(ii, ni_node_type) = nBCup
+    !         end if
+
+    !         !% --- calculate the total full volumes of the links upstream of a node
+    !         !%     computed this ONLY where the inflow will be distributed across a link
+    !         !%     this volume will be used later the distribute lateral inflows across links
+    !         !% ARCHIVE 20240216 -- we are distributing only over a single link at this time (BRH)
+    !         ! node%R(ii,nr_UpLinksFullVolume) = zeroR
+
+    !         ! if (node%YN(ii,nYN_has_inflow)) then
+    !         !     select case (node%I(ii,ni_node_type))
+    !         !         case (nJ2)
+    !         !             !% --- nJ2 can have only one link
+    !         !             !%     which is added to the volume regardless of whether conduit or channel
+    !         !             link_idx = node%I(ii,ni_Mlink_u1)
+    !         !             node%R(ii,nr_UpLinksFullVolume) = link%R(link_idx,lr_FullArea) * link%R(link_idx,lr_Length) 
+    !         !         case (nJm)
+    !         !             !% --- nJm only gets link info if the UseLinkDistributionTF is true
+    !         !             if (setting%BC%InflowBC%UseLinkDistributionTF) then
+    !         !                 !% --- cycle through the upstream links of the node
+    !         !                 do jj = 1,node%I(ii,ni_N_link_u)
+    !         !                     !% --- identify the link
+    !         !                     link_idx = node%I(ii,ni_idx_base1 + jj) 
+    !         !                     !% --- nJm can have inflow distributed along multiple links, so we add volumes
+    !         !                     select case (setting%BC%InflowBC%LinkDistributionMethod)
+    !         !                         case (BC_AllUpstreamOpenChannels)
+    !         !                             !% --- only calculate the volumes of only open channels upstream
+    !         !                             if (link%I(link_idx,li_link_type) == lchannel) then
+    !         !                                 !% --- add the the volume of the open channel upstream links
+    !         !                                 node%R(ii,nr_UpLinksFullVolume) = node%R(ii,nr_UpLinksFullVolume) &
+    !         !                                     + link%R(link_idx,lr_FullArea) * link%R(link_idx,lr_Length)  
+    !         !                             end if
+    !         !                         case (BC_AllUpstreamElements)
+    !         !                             !%---  compute the volume ofthe upstream links
+    !         !                             node%R(ii,nr_UpLinksFullVolume) = node%R(ii,nr_UpLinksFullVolume) &
+    !         !                                 + link%R(link_idx,lr_FullArea) * link%R(link_idx,lr_Length)   
+    !         !                         case (BC_AllLinks)
+    !         !                             !% --- not implemented
+    !         !                             print *, 'CODE ERROR: case BC_AllLinks not implemented'
+    !         !                             call util_crashpoint(799872)
+    !         !                         case default
+    !         !                             print *, 'CODE ERROR: unknown case default'
+    !         !                             call util_crashpoint(799873)
+    !         !                     end select
+    !         !                 end do
+    !         !             else 
+    !         !                 !% the uplinks full volume remains zero if UseLinkDistributionTF is false
+    !         !             end if
+    !         !         case (nBCup, nBCdn)
+    !         !             !% --- inflow on face, not through link
+    !         !         case default
+    !         !             print *, 'CODE ERROR: unexpected case default'
+    !         !             call util_crashpoint(4929827)
+    !         !     end select
+                
+    !         ! end if
+
+    !         !% --- note pattern initialization MUST be called after inflows are set
+    !         node%I(ii,ni_pattern_resolution) = interface_get_BC_resolution(ii)
+
+    !         !% --- identify links that are connected my nJ2 junctions
+    !         if (node%I(ii,ni_node_type) == nJ2) then
+    !             link%YN(node%I(ii,ni_Mlink_u1), lYN_is_nj2_connection) = .true.
+    !             link%YN(node%I(ii,ni_Mlink_d1), lYN_is_nj2_connection) = .true.
+    !         end if
+
+    !     end do
+
+    !     !% --- error checking for disconnected nodes
+    !     noerrorfound = .true.
+    !     do ii = 1,N_node
+    !         if (node%I(ii,ni_N_link_u) + node%I(ii,ni_N_link_d) == zeroI) then
+    !             noerrorfound = .false.
+    !             print *, 'USER CONFIGURATION ERROR disconnected node.'
+    !             print *, 'A node has been found that does not connect to any links.'
+    !             print *, 'It must be commented out in the input file.'
+    !             print *, 'Node name is ',trim(node%Names(ii)%str)
+    !         end if
+    !     end do
+    !     if (.not. noerrorfound) then
+    !         call util_crashpoint(72813)
+    !     endif
+     
+    !     !% --- ERROR CHECK connections for outfalls
+    !     do ii = 1,N_node
+    !         if (interface_get_nodef_attribute(ii, api_nodef_type) == API_OUTFALL) then
+    !             !% --- check if outfall has more than one upstream connection
+    !             if( node%I(ii, ni_N_link_u) > 1) then
+    !                 write(*,*) 'USER CONFIGURATION ERROR for outfall'
+    !                 write(*,*) 'Outfall has more than 1 upstream link, which is not supported by SWMM5+'
+    !                 write(*,"(A,A)") 'Node name in file is ',trim(node%Names(ii)%str)
+    !                 call util_crashpoint(99374)
+    !             endif
+    !             !% --- check if outfall has a downstream connection
+    !             if ( node%I(ii, ni_N_link_d) > 0) then
+    !                 write(*,*) 'USER CONFIGURATION ERROR for outfall'
+    !                 write(*,*) 'Outfall has a downstream connection, which is not supported by SWMM5+'
+    !                 write(*,"(A,A)") 'Node name iin file is ',trim(node%Names(ii)%str)
+    !                 call util_crashpoint(847822)
+    !             end if
+    !         end if
+    !     end do
+
+    !     !% Check for small links while using nominal element length discretization 
+    !     if (setting%Discretization%Method .ne. AllowSmallLinks) then
+    !         do ii = 1, N_link
+    !             if ( (link%I(ii,li_link_type) == lChannel) .or. (link%I(ii,li_link_type) == lPipe) ) then
+    !                 if (link%R(ii,lr_Length) < ( (real(setting%Discretization%MinElementPerLink,8) - onehalfR) * setting%Discretization%NominalElemLength)) then
+    !                     print *, 'SWMM input file links too small for selected NominalElemLength and MinElementPerLink'
+    !                     print *, 'Found link length of ',link%R(ii,lr_Length)
+    !                     print *, 'Link index is ',ii,' link name is ',  trim(link%Names(ii)%str)
+    !                     print *, 'setting.Discretization.NominalElemLength is ',setting%Discretization%NominalElemLength
+    !                     print *, 'setting.Discretization.MinElementPerLink is ',setting%Discretization%MinElementPerLink
+    !                     print *, 'Decrease nominal element length to less than', link%R(ii,lr_Length)/ real(setting%Discretization%MinElementPerLink,8)
+    !                     print *, 'or modify link length in SWMM input file'
+    !                     print *, 'NOTE: SWMM5+ requires MinElementPerLink of 3 or greater'
+    !                     call util_crashpoint(447298)
+    !                 end if
+    !             end if
+    !         end do
+    !     end if
+
+    !     if (setting%Debug%File%initialization) then
+    !         !%-----------------------------------------------------------------------------
+    !         print *, 'idx,    nodeType,    linkU,    linkD,   curveID, patternRes'
+    !         do ii=1,N_node
+    !             write(*,"(10i8)") node%I(ii,ni_idx), node%I(ii,ni_node_type), node%I(ii,ni_N_link_u), node%I(ii,ni_N_link_d) &
+    !             , node%I(ii,ni_curve_ID), node%I(ii,ni_pattern_resolution)
+    !         end do
+
+    !         print *, 'idx,    LinkType,  nodeU,   nodeD, curveId'
+    !         do ii=1,N_Link
+    !             write(*,"(10i8)") link%I(ii,li_idx), link%I(ii,li_link_type), link%I(ii,li_Mnode_u), link%I(ii,li_Mnode_d) &
+    !             , link%I(ii,li_curve_id) 
+    !         end do
+    !     end if 
+
+    !     if (setting%Debug%File%initialization)  &
+    !         write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
+
+
+    ! end subroutine init_linknode_arrays
+!%
+!%==========================================================================
+
 !%==========================================================================
 !%  
     subroutine init_node_nJ2_nJM (ii)
@@ -1609,6 +2576,17 @@ contains
         !%     on either side.
         if  (node%YN(ii,nYN_is_phantom_node)) then
             !% --- no action: retain nJ2
+            !% --- cannot allow equivalent orifice on both sides of a phantom node
+            !%     so the longer is converted back to a regular link
+            if (link%YN(linkUp,lYN_isEquivalentOrifice)) then
+                print *, 'CODE ERROR: Equivalent orifice found at phantom node. This should not occur'
+                call util_crashpoint(60982732)
+            end if
+
+            if (link%YN(linkDn,lYN_isEquivalentOrifice)) then 
+                print *, 'CODE ERROR: Equivalent orifice found at phantom node. This should not occur'
+                call util_crashpoint(60982734)
+            end if
             return
         else
             !% --- continue
@@ -1618,9 +2596,8 @@ contains
         !% --- global forcing of all nodes
         if (setting%Junction%ForceNodesJM ) then
             node%I(ii, ni_node_type) = nJm
-            return
 
-            print *, 'switch A',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+           ! print *, 'switch A',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
 
             return
         else
@@ -1631,7 +2608,7 @@ contains
         if (node%I(ii,ni_routeFrom) .ne. nullvalueI) then
             node%I(ii, ni_node_type) = nJm
 
-            print *, 'switch B',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+            ! print *, 'switch B',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
 
             return !% finished with this junction
         else 
@@ -1647,7 +2624,7 @@ contains
             !% --- switching to a nJm junction type'
             node%I(ii, ni_node_type) = nJm
 
-            print *, 'switch C',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+            ! print *, 'switch C',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
 
             return !% finished with this junction
         else
@@ -1666,7 +2643,7 @@ contains
             ) then 
             node%I(ii, ni_node_type) = nJm
 
-            print *, 'switch D',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+            ! print *, 'switch D',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
 
             return  !% finished with this junction
         else 
@@ -1684,7 +2661,7 @@ contains
             )) then 
             node%I(ii, ni_node_type) = nJm
 
-            print *, 'switch E',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+            ! print *, 'switch E',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
 
             return  !% finished with this junction
         else
@@ -1699,7 +2676,7 @@ contains
             ) then       
             node%I(ii, ni_node_type) = nJm   
 
-            print *, 'switch F',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+            ! print *, 'switch F',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
 
             return
         else
@@ -1714,7 +2691,7 @@ contains
             ) then
             node%I(ii, ni_node_type) = nJm   
 
-            print *, 'switch G',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+            ! print *, 'switch G',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
 
             return 
         else
@@ -1729,7 +2706,7 @@ contains
             ) then
             node%I(ii, ni_node_type) = nJm 
 
-            print *, 'switch H',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+            ! print *, 'switch H',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
 
             return
         else
@@ -1753,21 +2730,21 @@ contains
                    > setting%Junction%InfiniteExtraDepthValue*meters_per_ft - 0.01d0) &
             ) ) then 
 
-                print *, 'no overflow ',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+               ! print *, 'no overflow ',ii, trim(reverseKey(node%I(ii, ni_node_type)))
 
             !% --- continue, junction cannot overflow
         else
             !% --- junction can overflow, must be nJM
             node%I(ii, ni_node_type) = nJm
 
-            print *, 'switch I',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+            ! print *, 'nJM required, switch I',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
 
 
 
             return
         end if
 
-        !% --- only nJ2 junction that cannot overflw reaches here
+        !% --- only nJ2 junction that cannot overflow reaches here
 
         !% --- further check on offsets for any nJ2 that passed the prior
         !%     restrictions. In general, we have an nJm if there are 
@@ -1781,13 +2758,13 @@ contains
                 (link%I(linkUp,li_link_type) .eq. lOrifice)    &
                 ) then    
 
-                    print *, 'weir/orifice up with offset ',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+                   ! print *, 'weir/orifice up with offset ',ii, trim(reverseKey(node%I(ii, ni_node_type)))
                 !% --- continue
             else
                 !% --- switch to nJm
                 node%I(ii, ni_node_type) = nJm
 
-                print *, 'switch J',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+                ! print *, 'switch J',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
 
                 return
             end if
@@ -1801,18 +2778,34 @@ contains
                 ) then    
                 !% --- continue
 
-                print *, 'weir/orifice dn with offset',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+              !  print *, 'weir/orifice dn with offset',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
 
             else
                 !% --- switch to nJm
                 node%I(ii, ni_node_type) = nJm
 
-                print *, 'switch K',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+                ! print *, 'switch K',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
 
                 return
             end if
         end if 
-  
+
+        if (link%YN(linkUp,lYN_isEquivalentOrifice)) then 
+            select case (link%I(linkDn,li_link_type))
+                case (lPipe,lChannel)
+                    !% --- nJ2 is allowed
+                case (lOrifice,lWeir,lOutlet)
+                    !% --- swith to nJM  
+                    node%I(ii, ni_node_type) = nJm
+
+                    ! print *, 'switch L',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
+                    
+                    return
+                case default 
+                    print *, 'CODE ERROR: unexepected case default'
+            end select
+        end if
+        
         !% --- two channels can be connected by nJ2
         !% --- if either link is an open channel AND node cannot overflow
         !%     (i.e., code reaches here)
@@ -1827,7 +2820,7 @@ contains
              (link%I(linkDn,li_link_type) .eq. lChannel)                     &
             ) then 
 
-            print *, 'channel ',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+            ! print *, 'channel ',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
 
             return !% retain nJ2 
         else
@@ -1845,7 +2838,7 @@ contains
             (link%I(linkDn,li_link_type)  .ne. lChannel)        &
             ) then
 
-            print *, 'closed conduit ',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+            ! print *, 'closed conduit ',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
 
             return !% retain nJ2
         else
@@ -1857,7 +2850,7 @@ contains
         node%I(ii, ni_node_type) = nJm
         
 
-        ! print *, 'at end ',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+        ! print *, 'at end ',ii, trim(reverseKey(node%I(ii, ni_node_type))) , ' ',trim(node%Names(ii)%str)
 
 
     end subroutine init_node_nJ2_nJM
@@ -2830,9 +3823,10 @@ contains
             do mm = 1,Number_of_links_per_profile(pp)
                 if (any(output_profile_node_names(pp,:) .eq. trim(output_profile_link_names(pp,mm)))) then 
                     print *, 'USER CONFIGURATION ERROR found link and node with identical names'
-                    print *, 'To prevent confusion, SWMM5+ requires links and nodes to have '
+                    print *, 'To prevent confusion, SWMM5+ profiles require links and nodes to have '
                     print *, 'unique names in profiles. Problem found with '
                     print *, 'link and node named:', trim(output_profile_link_names(pp,mm))
+                    print *, 'Note that links NOT in a profile can have identical names to nodes.'
                     call util_crashpoint(5109873)
                     return
                 end if
@@ -2843,79 +3837,8 @@ contains
 !%
 !%==========================================================================
 !%==========================================================================
-!%    
-    subroutine init_partitioning()
-        !%------------------------------------------------------------------
-        !% Description:
-        !%   This subroutine calls the public subroutine from the utility module,
-        !%   partitioning.f08. It also calls a public subroutine from the temporary
-        !%   coarray_partition.f08 utility module that defines how big the coarrays
-        !%   must be.
-        !%
-        !%------------------------------------------------------------------
-            integer       :: ii
-            character(64) :: subroutine_name = 'init_partitioning'
-        !%------------------------------------------------------------------
-        !% Preliminaries
-            if (setting%Debug%File%initialization) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-
-            !% if there are no links, the system cannot be partitioned
-            if (N_link == 0) then
-                if (this_image() == 1) then
-                    write(*,*) '******************************************************'
-                    write(*,*) '*          USER CONFIGURATION ERROR                  *'
-                    write(*,*) '* The SWMM input file does not include any links.    *'
-                    write(*,*) '* The SWMM5+ code requires at least one link to run. *'
-                    write(*,*) '* This run was stopped without any output.           *'
-                    write(*,*) '******************************************************'
-                end if
-                call util_crashpoint(970532)
-                return
-            end if 
-        
-            if (setting%Profile%useYN) call util_profiler_start (pfc_init_partitioning)
-        !%------------------------------------------------------------------
-
-        !% --- find the number of elements in a link based on nominal element length
-        do ii = 1, setting%SWMMinput%N_link
-            call init_discretization_nominal(ii)
-        end do
-
-        !% --- Set the network partitioning method used for multi-processor parallel computation
-        call partitioning_toplevel()
-        sync all
-
-        !% HOLD FOR FUTURE
-        !% --- Compute the amount of a conduit length that is added to a connected junction.
-        !%     This modifies the conduit length itself if setting%Discretization%AdjustLinkLengthForJunctionBranchYN
-        !%     is true. The junction itself is setup in init_network_nJm_branch_length()
-        !call init_discretization_adjustlinklength()
-
-        !% --- calculate the largest number of elements and faces to allocate the coarrays
-        call init_coarray_length()
-
-        !% --- allocate elem and face coarrays
-        call util_allocate_elemX_faceX()
-        call util_key_default_elemX()
-        call util_key_default_face()
-
-        !% --- allocate column indexes of elem and face arrays for pointer operation
-        call util_allocate_columns()
-
-        !%------------------------------------------------------------------
-        !% Closing
-            if (setting%Profile%useYN) call util_profiler_stop (pfc_init_partitioning)
-
-            if (setting%Debug%File%initialization)  &
-                write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-
-    end subroutine init_partitioning
 !%
-!%==========================================================================
-!%==========================================================================
-!%
-    subroutine init_subcatchment()
+    subroutine init_subcatchment_elements()
         !%------------------------------------------------------------------
         !% Description:
         !% sets the connection between the subcatchments of SWMM-c and the
@@ -3139,7 +4062,7 @@ contains
         !% Closing
             if (setting%Debug%File%initialization)  &
                 write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-    end subroutine init_subcatchment
+    end subroutine init_subcatchment_elements
 !%
 !%==========================================================================
 !%==========================================================================
@@ -3202,56 +4125,6 @@ contains
         !%------------------------------------------------------------------
         !% Closing
     end subroutine init_time
-!%    
-!%==========================================================================
-!%==========================================================================
-!%
-    subroutine init_report()
-        !%------------------------------------------------------------------
-        !% Description:
-        !% initializes the output report time interval
-        !%------------------------------------------------------------------
-
-        !% --- if setting requires the SWMM input file values, then overwrite setting values
-        if (setting%Output%Report%useSWMMinpYN) then 
-            setting%Output%Report%StartTime    = util_datetime_epoch_to_secs(setting%SWMMinput%ReportStartTimeEpoch)
-            setting%Output%Report%TimeInterval = setting%SWMMinput%ReportTimeInterval
-            if ((setting%Output%Verbose) .and. (this_image() == 1)) then
-                write(*,"(A)") ' ... using report start time and time interval from SWMM input file (*.inp)'
-            end if
-        else 
-            if ((setting%Output%Verbose) .and. (this_image() == 1)) then
-                write(*,"(A)") '... using  report start time and time interval from *.json file'
-            end if
-        end if
-
-        !% --- if selected report time is before the start time use the start time
-        if (setting%Output%Report%StartTime < setting%Time%Start) then 
-            setting%Output%Report%StartTime = setting%Time%Start
-        else 
-            !% continue
-        end if
-
-        if (setting%Output%Report%TimeInterval < zeroR) then 
-            if (this_image() == 1) then
-                write(*,*) '***************************************************************'
-                write(*,*) '** WARNING -- selected report time interval is zero or less, **'
-                write(*,*) '**          so all output will be suppressed              **'
-                write(*,*) '***************************************************************'
-            end if
-            setting%Output%Report%provideYN = .false.
-            setting%Output%Report%suppress_MultiLevel_Output = .true.
-            setting%Output%Report%ThisStep = 1
-        else 
-            !% --- Initialize the first report step
-            !%     Determine how many report steps have already been missed before
-            !%     the output reports are actually written
-            setting%Output%Report%ThisStep = int( &
-                        ( setting%Output%Report%StartTime - setting%Time%Start ) &
-                        / setting%Output%Report%TimeInterval )
-        end if
-
-    end subroutine init_report
 !%    
 !%==========================================================================
 !%==========================================================================
@@ -4157,6 +5030,200 @@ contains
 
     end subroutine init_link_inflow_volumefraction
 !%  
+!%==========================================================================
+!%==========================================================================
+!%
+    ! integer function init_get_adjacent_pipe_or_channel_link &
+    !      (thisLink, checkUpstream) result(outvalue)
+    !     !%------------------------------------------------------------------
+    !     !% Description
+    !     !% gets an adjacent pipe or channel link geometry for a diagnostic
+    !     !% element. If only single upstream and downstream links (on other
+    !     !% side of node) then the upstream link will be used if it is a
+    !     !% channel or conduit. If their are multiple upstream links then 
+    !     !%------------------------------------------------------------------
+    !     !% Declarations
+    !         integer, intent(in) :: thisLink 
+    !         logical, intent(in) :: checkUpstream
+    !         integer, pointer    :: aNode, nLink
+    !         integer             :: ii,jj, kk, iPipeCounter, iChannelCounter 
+    !         integer             :: thisIdx(1)
+    !         integer, dimension(max_branch_per_node) :: aLink, pipeLink, channelLink
+    !     !%------------------------------------------------------------------
+
+    !     do ii=1,2  !% --- cycle through up and down nodes of thisLink
+    !         aLink(:)        = 0
+    !         iPipeCounter    = 0
+    !         iChannelCounter = 0
+    !         if (ii==1) then !% --- upstream node from thisLink
+    !             !% --- adjacent node index upstream
+    !             aNode => link%I(thisLink,li_Mnode_u)
+    !         else 
+    !             !% --- adjacent node index downstream
+    !             aNode => link%I(thisLink,li_Mnode_d)
+    !         end if
+
+    !         !% --- for an upstream node (ii=1), we will first check the
+    !         !%     upstream link (jstart=1) then the downstream links
+    !         if (ii==1) then 
+    !             jstart = 1 
+    !             jend   = 2
+    !             jinc   = 1 
+    !         else
+    !             !% --- for a downstream node (ii=2), we will first chekc
+    !             !%     the downstream links (jstart =2) then the upstream links
+    !             jstart = 2
+    !             jend   = 1
+    !             jinc   = -1 
+    !         end if
+    !         do jj=jstart,jend,jinc  !% --- cycle through up and down links of this node
+    !             !% --- get adjacent link indexes
+    !             if (jj==1) then !% --- upstream links from this node
+    !                 nLink => node%I(aNode,ni_N_link_u)
+    !                 do kk=1,nLink
+    !                     aLink(kk) = node%I(aNode,ni_Mlink_u1+(kk-1))
+    !                 end do
+    !             else !% --- downstream links from this node
+    !                 nLink => node%I(aNode,ni_N_link_d)
+    !                 do kk=1,nLink
+    !                     aLink(kk) = node%I(aNode,ni_Mlink_d1+(kk-1))
+    !                 end do
+    !             end if
+
+    !             !% --- cycle through to find candidates
+    !             do kk=1,nLink
+    !                 if (aLink(kk) == thisLink) cycle !% -- ignore self link
+    !                 select case (link%I(aLink(kk),li_link_type))
+    !                     case (lPipe)
+    !                         iPipeCounter = iPipeCounter + 1
+    !                         pipeLink(iPipeCounter) = aLink(kk)
+    !                     case (lChannel)
+    !                         iChannelCounter = iChannelCounter +1 
+    !                         channelLink(iChannelCounter) = aLink(kk)
+    !                     case (lOrifice,lWeir,lPump,lOutlet)
+    !                         !% --- no action
+    !                         print *, 'CODE ERROR: NEED TO DETERMINE WHAT TO DO HERE'
+    !                         stop 6098723
+    !                     case default
+    !                         print *, 'CODE ERROR: unexepected case default'
+    !                 end select 
+    !             end do
+
+    !             !% --- set adjacent to available pipe, if found
+    !             select case (iPipeCounter)
+    !                 case (0)
+    !                     !% --- no candidate pipe found
+    !                 case (1)
+    !                     !% --- use the one candidate
+    !                     outvalue = pipeLink(1)
+    !                     return
+    !                 case default
+    !                     !% --- use pipe with maximum area
+    !                     thisIdx = maxloc(link%R(pipeLink(1:iPipeCounter),lr_FullArea))
+    !                     outvalue = pipeLink(thisIdx(1))
+    !                     return
+    !             end select
+
+    !             !% --- if no pipe, then set to adjacent channel, if found
+    !             select case (iChannelCounter)
+    !             case (0)
+    !                 !% --- no candidate channel found
+    !             case (1)
+    !                 !% --- use the one candidate
+    !                 outvalue = channelLink(1)
+    !                 return
+    !             case default
+    !                 !% --- use channel with minimum full depth
+    !                 thisIdx = minloc(link%R(channelLink(1:iChannelCounter),lr_FullDepth))
+    !                 outvalue = pipeLink(thisIdx(1))
+    !                 return
+    !             end select
+
+    !             !% --- if reaches here on jj=jstart, then no pipe/channel found
+    !             !%     for the first direction link search of the node, so continue
+    !             !%     on jend for downstream links of the node
+    !         end do
+
+    !         !% --- if code reaches here on ii=1, then no pipe/channel found
+    !         !%     for the upstream node of thisLink, so continue on ii=2
+    !         !%     for the downtream node of thisLink
+    !     end do
+
+    !     !% --- no adjacent pipe or channel link found
+    !     outvalue = 0
+    
+
+    ! end function init_get_adjacent_pipe_or_channel_link
+!%  
+!%==========================================================================
+!%==========================================================================
+!%
+    ! subroutine init_transfer_adjacent_geometry (thisLink, adjLink)
+    !     !%------------------------------------------------------------------
+    !     !% Description
+    !     !% Transfers the geometry of adjLink to thisLink
+    !     !% This is used to fill in geometry of special elements (e.g., weir
+    !     !% pump, orifice) so that a JB adjacent to the special element can 
+    !     !% get the appropriate geometry for the junction
+    !     !%------------------------------------------------------------------
+    !     !% Declarations
+    !         integer, intent(in) :: thisLink, adjLink
+    !     !%------------------------------------------------------------------
+    !     !%------------------------------------------------------------------
+
+    !     if (adjLink  > 0) then 
+    !         link%I(thisLink,li_geometry_background) = link%I(adjLink,li_geometry)
+            
+    !         select case (link%I(thisLink,li_geometry_background))
+
+    !             case (lIrregular,lParabolic,lPower_function,lRectangular,lTrapezoidall,Triangular)
+
+    !                 !% --- for open channels use a rectangular open channel
+    !                 link%I(thisLink,li_geometry_background) = lRectangular 
+    !                 !% --- store a rectangular width scale
+    !                 link%I(thisLink,lr_BackgroundScale1) = link%R(adjLink,FullArea) &
+    !                                                     / link%R(adjLink,FullDepth)
+    !                 !% --- store a background depth scale                                      
+    !                 link%I(thisLink,lr_BackgroundScale2) = link%R(adjLink,FullDepth)
+
+    !             case (lArch,lBasktet_handle,lCatenary,lCircular,lForceMain,lCustom, &
+    !                 lEggshaped,lFilled_circular,lGothic,lHoriz_ellipse,lHorseshoe,  &
+    !                 lMod_basket,lRectangular_closed,lRect_round,lRect_triang,       &
+    !                 lSemi_circular,lSemi_elliptical,lVert_ellipse)
+
+    !                 !% --- For closed conduits use a circular conduit based on area
+    !                 link%I(thisLink,li_geometry_background) = lCircular
+    !                 link%I(thisLink,lr_BackgroundScale1) =  &
+    !                     sqrt(fourR * link%R(adjLink,FullArea) / setting%Constant%pi)
+    !                 link%I(thisLink,lr_BackgroundScale2) = nullvalueR
+
+    !             case default
+    !                 print *, 'CODE ERROR: unexpected case default'
+    !                 call util_crashpoint(809873)
+    !         end select
+        
+    !     else
+    !         !% failure condition
+    !         print *, 'CODE ERROR'
+    !         print *, 'Unexpected configuration of diagnostic elements '
+    !         print *, 'upstream/downstream conduit/channel not detected.'
+    !         print *, 'SWMM5+ cannot handle this configuration'
+    !         print *, 'Link ',thisLink 
+    !         print *, 'link name ',trim(link%Names(ii)%Str)
+    !         call util_crashpoint(2209875)
+    !         ! link%I(thisLink_li_geometry) = lCircular
+    !         ! link%R(thisLink,li_FullArea) = 
+    !         ! link%R(thisLink,li_FullHydRadius) = 
+    !         ! link%R(thisLink,li_)
+    !     end if
+
+    ! end subroutine init_transfer_adjacent_geometry
+!%  
+!%==========================================================================
+!%==========================================================================
+!%
+
+!%
 !%==========================================================================
 !% END OF MODULE
 !%==========================================================================

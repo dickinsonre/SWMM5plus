@@ -627,11 +627,11 @@ module preissmann_slot
                 end where
 
                 !% --- not changing preissmann number at diagnostic adjacent elements
-                where (faceYN(fUP(thisP),fYN_isDiag_adjacent_all))
+                where (faceYN(fUP(thisP),fYN_isDiag_adjacent_any))
                     isfSlot(fUp(thisP)) = .false.
                 end where
 
-                where (faceYN(fDn(thisP),fYN_isDiag_adjacent_all))
+                where (faceYN(fDn(thisP),fYN_isDiag_adjacent_any))
                     isfSlot(fDn(thisP)) = .false.
                 end where
 

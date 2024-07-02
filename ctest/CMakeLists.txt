@@ -19,7 +19,7 @@ enable_testing()
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
-# add_test(NAME Weir_test_JM
+# add_test(NAME Weir_test_forceJM
 # COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/release_tests/all_weir_test.inp -s ./ctest/internal_testing/release_tests/settings_dx10_forceJM.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
@@ -29,13 +29,30 @@ enable_testing()
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
-add_test(NAME Orifice_test 
-COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/release_tests/all_orifice_test.inp -s ./ctest/internal_testing/release_tests/settings_dx10_forceJM.json -o ./ctest/output/
-WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-)
+# add_test(NAME Orifice_test_forceJM 
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/release_tests/all_orifice_test.inp -s ./ctest/internal_testing/release_tests/settings_dx10_forceJM.json -o ./ctest/output/
+# WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+# )
 
-# add_test(NAME Storage_Unit_test 
+# add_test(NAME Storage_Emptying_test 
 # COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/release_tests/all_storage_emptying_test.inp -s ./ctest/internal_testing/release_tests/settings_dx10.json -o ./ctest/output/
+# WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+# )
+
+
+# add_test(NAME Storage_Emptying_test_forceJM 
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/release_tests/all_storage_emptying_test.inp -s ./ctest/internal_testing/release_tests/settings_dx10_forceJM.json -o ./ctest/output/
+# WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+# )
+
+
+# add_test(NAME Storage_Filling_test 
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/release_tests/all_storage_filling_test.inp -s ./ctest/internal_testing/release_tests/settings_dx10.json -o ./ctest/output/
+# WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+# )
+
+# add_test(NAME Storage_Filling_test_forceJM 
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/release_tests/all_storage_filling_test.inp -s ./ctest/internal_testing/release_tests/settings_dx10_forceJM.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
@@ -43,82 +60,89 @@ WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # ## Saz dissertation test cases 20240022
 # ##########################################################################################
 # add_test(NAME EXTRAN_1 
-# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran1.inp -s ./ctest/internal_testing/release_tests/settings_dx5.json -o ./ctest/output/
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran1.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
 # add_test(NAME EXTRAN_2 
-# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran2.inp -s ./ctest/internal_testing/release_tests/settings_dx5.json -o ./ctest/output/
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran2.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
 # add_test(NAME EXTRAN_3 
-# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran3_bottom_orifice.inp -s ./ctest/internal_testing/release_tests/settings_dx5.json -o ./ctest/output/
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran3_bottom_orifice.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
 # add_test(NAME EXTRAN_4 
-# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran4.inp -s ./ctest/internal_testing/release_tests/settings_dx5.json -o ./ctest/output/
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran4.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
 # add_test(NAME EXTRAN_5 
-# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran5.inp -s ./ctest/internal_testing/release_tests/settings_dx5.json -o ./ctest/output/
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran5.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
 # add_test(NAME EXTRAN_6 
-# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran6.inp -s ./ctest/internal_testing/release_tests/settings_dx5.json -o ./ctest/output/
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran6.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
 # add_test(NAME EXTRAN_7 
-# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran7.inp -s ./ctest/internal_testing/release_tests/settings_dx5.json -o ./ctest/output/
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran7.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
 # add_test(NAME TEST_1 
-# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/test1.inp -s ./ctest/internal_testing/release_tests/settings_dx5.json -o ./ctest/output/
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/test1.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
 # add_test(NAME TEST_2 
-# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/test2.inp -s ./ctest/internal_testing/release_tests/settings_dx5.json -o ./ctest/output/
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/test2.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
 # add_test(NAME TEST_3 
-# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/test3.inp -s ./ctest/internal_testing/release_tests/settings_dx5.json -o ./ctest/output/
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/test3.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
 # add_test(NAME TEST_4 
-# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/test4.inp -s ./ctest/internal_testing/release_tests/settings_dx5.json -o ./ctest/output/
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/test4.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
 # add_test(NAME TEST_5 
-# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/test5.inp -s ./ctest/internal_testing/release_tests/settings_dx5.json -o ./ctest/output/
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/test5.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
 # add_test(NAME USER_1 
-# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/user1.inp -s ./ctest/internal_testing/release_tests/settings_dx5.json -o ./ctest/output/
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/user1.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
 # add_test(NAME USER_3 
-# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/user3.inp -s ./ctest/internal_testing/release_tests/settings_dx5.json -o ./ctest/output/
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/user3.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
+
+add_test(NAME USER_3_tallManholes
+COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/user3_tallManholes.inp -s ./ctest/internal_testing/saz_disseration_tests/user3_settings.json -o ./ctest/output/
+WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+
 # add_test(NAME USER_4 
-# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/user4.inp -s ./ctest/internal_testing/release_tests/settings_dx5.json -o ./ctest/output/
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/user4.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
 # add_test(NAME USER_5 
-# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/user5_a.inp -s ./ctest/internal_testing/release_tests/settings_dx5.json -o ./ctest/output/
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/user5_a.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
