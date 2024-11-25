@@ -30,12 +30,12 @@ module preissmann_slot
     public :: slot_JB_computation
     public :: slot_Vshaped_adjust
 
-    integer :: printJM = 135
-    integer :: printJB1 = 136
-    integer :: printJB2 = 137
-    integer :: printUp = 134
-    integer :: printDn = 146
-    integer :: stepCut = 57000
+    integer :: printJM = 101
+    integer :: printJB1 = 102
+    integer :: printJB2 = 103
+    integer :: printUp = 100
+    integer :: printDn = 113
+    integer :: stepCut = 9057745
 
 
     contains
@@ -70,8 +70,6 @@ module preissmann_slot
     end subroutine slot_initialize
 !%
 !%==========================================================================
-
-
 !%==========================================================================
 !%
     subroutine slot_CC_adjustments (thisP)
@@ -85,7 +83,7 @@ module preissmann_slot
         real(8), pointer    :: volume(:), SlotArea(:) !, ell(:)
         real(8), pointer    :: SlotDepth_N0(:), SlotWidth(:)
         real(8), pointer    :: head(:),  fullDepth(:)
-        real(8), pointer    :: Overflow(:), zbottom(:)
+        real(8), pointer    :: zbottom(:)
         logical, pointer    :: isSlot(:)
 
         character(64) :: subroutine_name = 'geo_CC_slot_adjustments'
@@ -208,6 +206,10 @@ module preissmann_slot
             SlotMethod => setting%Solver%PreissmannSlot%Method
         !%------------------------------------------------------------------
 
+            ! if (setting%Time%Step > stepcut) then 
+            ! print *, 'in slot ', SlotMethod,' ',trim(reverseKey(SlotMethod))
+            ! end if
+
         select case (SlotMethod)
             case (StaticSlot)
                 where (isSlot(thisP)) 
@@ -223,6 +225,13 @@ module preissmann_slot
                 elsewhere
                     SlotDepth(thisP)  = zeroR
                 end where 
+
+                ! if (setting%Time%Step > stepcut) then 
+                !     print *, SlotDepth_N0(printJM), dSlotDepth(printJM)
+                !     print *, SlotDepth(printUp), SlotDepth(printJB1), SlotDepth(printJM)
+                !     print *, Head(printUp), Head(printJB1), Head(printJM)
+                !     print *, ' '
+                ! end if
 
                 !% --- NOTE: for the dynamic slot the Slot width is updated in slot_CC,
                 !%     but for the split slot it must be delayed until the slot depth
@@ -448,7 +457,7 @@ module preissmann_slot
 !% PRIVATE
 !%==========================================================================
 !%    
-    subroutine slot_CC (thisP, isSingularYN)
+    subroutine slot_CC (thisP)
         !%------------------------------------------------------------------
         !% Description:
         !% Compute Preissmann slot for conduits in ETM methods
@@ -459,7 +468,7 @@ module preissmann_slot
         !% Declarations
             !integer, intent(in) :: thisCol, Npack
             integer, intent(in) :: thisP(:)
-            logical, intent(in) :: isSingularYN
+            !logical, intent(in) :: isSingularYN
             integer, pointer    :: SlotMethod, fUp(:), fDn(:)
             real(8), pointer    :: fullarea(:), PNumberOld(:) !, ellMax(:)
             real(8), pointer    :: fullVolume(:), length(:), PNumber(:), PCelerity(:) 
@@ -673,8 +682,8 @@ module preissmann_slot
             real(8), pointer    :: SlotWidth(:), SlotDepth(:), SlotDepth_N0(:), SlotArea(:)
             real(8), pointer    :: dSlotArea(:), dSlotDepth(:), eHead(:) 
             real(8), pointer    :: PnumberInitial(:),  zCrown(:)
-            real(8), pointer    :: TargetPCelerity, grav, Dt
-            logical, pointer    :: isSurcharge(:), isfSlot(:), isJBup(:), isJBdn(:)
+            real(8), pointer    :: TargetPCelerity, grav
+            logical, pointer    :: isSurcharge(:), isfSlot(:)
             character(64) :: subroutine_name = "slot_CC"
         !%------------------------------------------------------------------
         !% Preliminaries
@@ -781,12 +790,14 @@ module preissmann_slot
             !real(8), pointer    :: maxSlotDepth(:)
             real(8), pointer    :: SlotVolN0(:),  SlotDepthN0(:), PnumberInitial(:)
             !real(8), pointer    :: VolumeExtra(:), VolumePonded(:), VolumeOverflow(:)
-            real(8), pointer    :: TargetPCelerity, cfl, grav, Dt, DecayRate ! , Alpha
+            real(8), pointer    :: TargetPCelerity, cfl, grav, Dt, DecayRate!, Alpha
             logical, pointer    :: isSlot(:), isSurcharge(:), canSurcharge(:)
+
             integer ::  kk, mm, JMidx, bcount 
             real(8) :: PNadd
+            !logical :: isSlotJM
 
-            character(64) :: subroutine_name = 'slot_JM'
+            ! character(64) :: subroutine_name = 'slot_JM'
         !%-----------------------------------------------------------------
         !% Preliminaries
             if (Npack < 1) return
@@ -868,9 +879,18 @@ module preissmann_slot
                 if ((volume(JMidx) > fullVolume(JMidx)) .and. canSurcharge(JMidx)) then
                     SlotVolume(JMidx) = max(volume(JMidx) - fullVolume(JMidx), zeroR)
 
+                    if ((setting%Time%Step > stepcut) .and. (JMidx == printJM)) then
+                        print *, 'SLOT Vol   ', SlotVolume(JMidx)
+                        print *, 'SLOT depths', SlotDepth(JMidx), SlotDepthN0(JMidx)
+                        print *, 'head - z   ', elemR(JMidx,er_Head) - elemR(JMidx,er_Zcrown)
+                        !print *, volume(JMidx), fullVolume(JMidx), length(JMidx)
+                    end if 
 
                     SlotArea(JMidx)   = SlotVolume(JMidx) / length(JMidx)  
 
+                    if ((setting%Time%Step > stepcut) .and. (JMidx == printJM)) then
+                        print *, 'SLOT area ',SlotArea(JMidx)
+                    end if
 
                     !% --- logicals
                     isSlot(JMidx)       = .true.
@@ -881,12 +901,20 @@ module preissmann_slot
                     PNadd  = zeroR
                     do kk=1,max_branch_per_node
                         if (elemSI(JMidx+kk,esi_JB_Exists) .ne. oneI) cycle 
-
                         PNadd = PNadd + PNumber(JMidx+kk)
                         bcount = bcount + oneI
                     end do
 
+                    if ((setting%Time%Step > stepcut) .and. (JMidx == printJM)) then
+                        print *, 'SLOT pNadd ',PNadd 
+                    end if
+
+                    !% --- average Preissmann number of the branches
                     PNumber(JMidx) = max(PNadd/real(bcount,8), oneR)
+
+                    if ((setting%Time%Step > stepcut) .and. (JMidx == printJM)) then
+                        print *, 'SLOT pNum    ',PNumber(JMidx)
+                    end if
 
                     ! if (printJM == JMidx) then 
                     !     print *, ' '
@@ -896,6 +924,9 @@ module preissmann_slot
 
                     PCelerity(JMidx) = min(TargetPCelerity / PNumber(JMidx), TargetPCelerity)
 
+                    if ((setting%Time%Step > stepcut) .and. (JMidx == printJM)) then
+                        print *, 'SLOT Celerity',PCelerity(JMidx),TargetPCelerity
+                    end if
 
 
                     !% --- find the change in slot volume
@@ -903,44 +934,74 @@ module preissmann_slot
                     !% --- find the change in slot area
                     dSlotArea(JMidx)  = dSlotVol(JMidx) / length(JMidx)
 
-
-                    !% --- find the change in slot depth
-                    if (SlotMethod == DynamicSlot) then
-                        dSlotDepth(JMidx) = (dSlotArea(JMidx) * (PCelerity(JMidx) ** twoI)) &
-                                         / (grav * (fullArea(JMidx)))
-                    else !% SplitDynamicSlot
-                        if (dSlotVol(JMidx) > zeroR) then 
-                            dSlotDepth(JMidx) = (dSlotArea(JMidx) * (PCelerity(JMidx) ** twoI)) &
-                                         / (grav * (fullArea(JMidx)))
-                        else 
-                            dSlotDepth(JMidx) = dSlotArea(JMidx) * SlotDepth(JMidx) / SlotArea(JMidx)
-                            !dSlotDepth(JMidx) = (dSlotArea(JMidx) * (PCelerity(JMidx) ** twoI)) &
-                            !             / (grav * (fullArea(JMidx)))
-                        end if 
+                    if ((setting%Time%Step > stepcut) .and. (JMidx == printJM)) then
+                        print *, 'SLOT dVol    ',dSlotVol(JMidx)
+                        print *, 'SLOT dArea   ',dSlotArea(JMidx)
                     end if
+
+                    !% TEST 20241113 -- using head fixed by 1st junction step 
+                    dSlotDepth(JMidx) = elemR(JMidx,er_Head) - elemR(JMidx,er_Zcrown) - SlotDepthN0(JMidx)
+
+
+                    ! !% --- find the change in slot depth
+                    ! if (SlotMethod == DynamicSlot) then
+                    !     dSlotDepth(JMidx) = (dSlotArea(JMidx) * (PCelerity(JMidx) ** twoI)) &
+                    !                      / (grav * (fullArea(JMidx)))
+
+                    !     if ((setting%Time%Step > stepcut) .and. (JMidx == printJM)) then      
+                    !         print *, 'SLOT dDepth  ',dSlotDepth(JMidx)
+                    !     end if
+
+                    ! else !% SplitDynamicSlot
+                    !     if (dSlotVol(JMidx) > zeroR) then 
+                    !         dSlotDepth(JMidx) = (dSlotArea(JMidx) * (PCelerity(JMidx) ** twoI)) &
+                    !                      / (grav * (fullArea(JMidx)))
+                    !     else 
+                    !         dSlotDepth(JMidx) = dSlotArea(JMidx) * SlotDepth(JMidx) / SlotArea(JMidx)
+                    !         !dSlotDepth(JMidx) = (dSlotArea(JMidx) * (PCelerity(JMidx) ** twoI)) &
+                    !         !             / (grav * (fullArea(JMidx)))
+                    !     end if 
+                    ! end if
 
 
                     !% -- update the plan area for surcharging at this level
                     pAreaSurcharge(JMidx) = dSlotVol(JMidx) / dSlotDepth(JMidx)
 
+                    if ((setting%Time%Step > stepcut) .and. (JMidx == printJM)) then  
+                        print *, 'SLOT pAreaSur  ',pAreaSurcharge(JMidx)
+                    end if
+
                     SlotWidth(JMidx) = pAreaSurcharge(JMidx) / length(JMidx)
 
-       
-                    !% --- surcharge time 
+                    if ((setting%Time%Step > stepcut) .and. (JMidx == printJM)) then  
+                        print *, 'SLOT width   ',SlotWidth(JMidx)
+                    end if
+
+                    !% --- surcharge time    
                     if (bcount > zeroI) then 
                         SurchargeTime(JMidx) = SurchargeTime(JMidx) + Dt / twoR   
                     else 
                         SurchargeTime(JMidx) = zeroR
-                    end if               
+                    end if     
+                
 
+                    if ((setting%Time%Step > stepcut) .and. (JMidx == printJM)) then  
+                        print *, 'SLOT surTime ',SurchargeTime(JMidx)
+                    end if
 
                     PNumber(JMidx) = (PnumberInitial(JMidx) - oneR) &
                          * exp((- SurchargeTime(JMidx) * tenR)/ DecayRate) + oneR
+
+                    if ((setting%Time%Step > stepcut) .and. (JMidx == printJM)) then  
+                        print *, 'SLOT PNumber ',Pnumber(JMidx)
+                    end if
 
                 else 
                     !% --- not surcharged 
                     isSlot(JMidx)      = .false. 
                     isSurcharge(JMidx) = .false.
+                    SurchargeTime(JMidx) = zeroR
+                    PNumber(JMidx) = PnumberInitial(JMidx) 
                 end if
             end do
 

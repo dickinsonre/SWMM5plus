@@ -127,7 +127,7 @@ module update
             integer, pointer :: thisP(:), thisP_Closed(:), thisP_Open(:)
             !integer, pointer :: thisCol, thisCol_Open, thisCol_Closed
             integer :: npackP, npackP_Closed, npackP_Open
-            character(64) :: subroutine_name = 'update_auxiliary_variables_CC'
+           ! character(64) :: subroutine_name = 'update_auxiliary_variables_CC'
         !%------------------------------------------------------------------
         !% Aliases
             if (isSingularYN) then 
@@ -169,38 +169,45 @@ module update
             end if
         !%------------------------------------------------------------------
 
+            ! print *, 'top of update auxiliary variables CC ', npackP
+
            ! if (.not. isSingularYN) call util_utest_CLprint('    aaa update - - - - - - - - - - ')
 
         !% --- update the head (non-surcharged) and geometry
         call geometry_toplevel_CC ( &
             thisP, npackP, thisP_Open, npackP_Open, thisP_Closed, npackP_Closed, &
-             isSingularYN, isAllYN)
+             isAllYN)
 
              ! if (.not. isSingularYN)  call util_utest_CLprint('    bbb update - - - - - - - - - - ')
 
 
         if (npackP > 0) then
             !% --- Compute the flowrate on CC.
+            ! print *, 'calling update flowrate CC'
             call update_flowrate_CC (thisP)
 
             ! if (.not. isSingularYN)  call util_utest_CLprint('    ccc update - - - - - - - - - - ')
 
             !% --- compute element Froude numbers for CC
+            ! print *, 'calling update Froude number element'
             call update_Froude_number_element (thisP)
 
             ! if (.not. isSingularYN) call util_utest_CLprint('    ddd update - - - - - - - - - - ')
 
             !% --- compute the wave speeds
+            ! print *, 'calling update_wavespeed_element'
             call update_wavespeed_element(thisP)
 
             ! if (.not. isSingularYN)  call util_utest_CLprint('    eee update - - - - - - - - - - ')
 
             !% --- compute element-face interpolation weights on CC
+            ! print *, 'calling update_interpweights'
             call update_interpweights_CC(thisP)
 
             ! if (.not. isSingularYN) call util_utest_CLprint('    fff update - - - - - - - - - - ')
 
             !% --- compute element total energyhead 
+            ! print *, 'calling update_energyhead_CC'
             call update_energyhead_CC(thisP)
 
         end if    
@@ -439,7 +446,7 @@ module update
         !% Declarations
             integer, intent(in) :: thisP(:)
             real(8), pointer    :: flowrate(:), velocity(:), area(:), QSWMMmax(:)
-            character(64) :: subroutine_name = 'update_element_flowrate'
+           ! character(64) :: subroutine_name = 'update_element_flowrate'
         !%------------------------------------------------------------------
         !% Aliases
             flowrate    => elemR(:,er_Flowrate)
@@ -475,25 +482,40 @@ module update
         !% tim-marching elements
         !%------------------------------------------------------------------
         !% Declarations
-            character(64)       :: subroutine_name = 'update_interpweights_CC'
+            !character(64)       :: subroutine_name = 'update_interpweights_CC'
             integer, intent(in) :: thisP(:)
             integer, pointer    :: fUp(:), fDn(:)
             real(8), pointer    :: velocity(:), wavespeed(:), ellDepth(:), length(:), QLateral(:)
             real(8), pointer    :: PCelerity(:), SlotVolume(:),SlotWidth(:), fullArea(:)
-            real(8), pointer    :: w_uQ(:), w_dQ(:),  w_uG(:), w_dG(:),  w_uH(:), w_dH(:), w_uP(:), w_dP(:), Area(:)
-            real(8), pointer    :: Fr(:), grav
+            real(8), pointer    :: w_uQ(:), w_dQ(:),  w_uG(:), w_dG(:),  w_uH(:), w_dH(:), w_uP(:), w_dP(:)
+            real(8), pointer    :: Fr(:), grav, invSpeedDif(:), invSpeedSum(:), epsilon
             logical, pointer    :: isSlot(:)
         !%------------------------------------------------------------------
         !% Preliminaries
-            if (setting%Debug%File%update) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
+            
+            ! print *, 'top of update interpweights cc'
+
+            ! print *, ' '
+            ! print *, 'here 1 '
+            ! print *, ' '
+            ! print *, minval(thisP),maxval(thisP)
+            ! print *, size(elemR,1)
+            ! print *, size(elemYN,1)
+            ! print *, size(elemI,1)
+            ! !print *, size(faceR,1)
+            ! print *, ' '
+            ! print *, 'here 2 '
+            ! print *, ' '
         !%------------------------------------------------------------------
         !% Aliases
+            epsilon   => setting%ZeroValue%Velocity
             Qlateral  => elemR(:,er_FlowrateLateral)
             velocity  => elemR(:,er_Velocity)
             wavespeed => elemR(:,er_WaveSpeed)
             ellDepth  => elemR(:,er_EllDepth)  !% modified hydraulic depth!
             length    => elemR(:,er_Length)
+            invSpeedDif  => elemR(:,er_Temp01)
+            invSpeedSum  => elemR(:,er_Temp02)
             w_uQ      => elemR(:,er_InterpWeight_uQ)
             w_dQ      => elemR(:,er_InterpWeight_dQ)
             w_uG      => elemR(:,er_InterpWeight_uG)
@@ -514,10 +536,72 @@ module update
             fullArea   => elemR(:,er_FullArea)
             grav       => setting%constant%gravity
 
-            Area       => faceR(:,er_Area)
+            ! print *, 'elldepth', maxval(EllDepth(thisP)), minval(EllDepth(thisP))
+            ! print *, 'A ', maxval(abs((abs(Fr(thisp)**0) * velocity(thisP) - wavespeed(thisP)))), minval(abs((abs(Fr(thisp)**0) * velocity(thisP) - wavespeed(thisP))))
+            ! print *, 'B ', maxval(abs((abs(Fr(thisp)**0) * velocity(thisP) + wavespeed(thisP)))), minval(abs((abs(Fr(thisp)**0) * velocity(thisP) + wavespeed(thisP))))
+
+            ! print *, ' '
+            ! print *, 'length ',maxval(length(thisP)), minval(length(thisP))
+            ! print *, ' '
+
+           ! print *, 'iSlot ',isSlot(thisP)
         !%------------------------------------------------------------------
         !% --- wavespeed at modified hydraulic depth (ell)
         wavespeed(thisP) = sqrt(grav * EllDepth(thisP))
+
+        !% --- get the difference and sum of velocity and wavespeed
+        !%     using the slot celerity fo slot conditions
+        where (.not. isSlot(thisP))
+            invSpeedDif(thisP) = waveSpeed(thisP)
+            invSpeedSum(thisP) = waveSpeed(thisP)
+        endwhere
+        where (isSlot(thisP))
+            invSpeedDif(thisP) = PCelerity(thisP)
+            invSpeedSum(thisP) = PCelerity(thisP)
+        endwhere
+
+        invSpeedDif(thisP) = velocity(thisP) - invSpeedDif(thisP)
+        invSpeedSum(thisP) = velocity(thisP) + invSpeedSum(thisP)
+
+        !% --- store the inverse speed where value is significant
+        !%     otherwise setup to use the maximum interpweight
+        where (abs(invSpeedDif(thisP)) > epsilon) 
+            invSpeedDif(thisP) = oneR / invSpeedDif(thisP)
+        elsewhere
+            invSpeedDif(thisP) = -setting%Limiter%InterpWeight%Maximum / (onehalfR * length(thisP))
+        endwhere
+
+        where (abs(invSpeedSum(thisP)) > epsilon) 
+            invSpeedSum(thisP) = oneR / invSpeedSum(thisP)
+        elsewhere
+            invSpeedSum(thisP) = setting%Limiter%InterpWeight%Maximum / (onehalfR * length(thisP))
+        endwhere
+
+        w_uQ(thisP) = -onehalfR * length(thisP) * invSpeedDif(thisP)
+        w_dQ(thisP) = +onehalfR * length(thisP) * invSpeedSum(thisP)
+
+        !% --- apply limiters to timescales
+        !% --- negative weight indicates supercritical downstream flow
+        where (w_uQ(thisP) < zeroR)
+            w_uQ(thisP) = setting%Limiter%InterpWeight%Maximum
+        endwhere
+        where (w_uQ(thisP) < setting%Limiter%InterpWeight%Minimum)
+            w_uQ(thisP) = setting%Limiter%InterpWeight%Minimum
+        endwhere
+        where (w_uQ(thisP) > setting%Limiter%InterpWeight%Maximum)
+            w_uQ(thisP) = setting%Limiter%InterpWeight%Maximum
+        endwhere
+        
+        !% --- negative weight indicates supercritical upstream
+        where (w_dQ(thisP) < zeroR)
+            w_dQ(thisP) = setting%Limiter%InterpWeight%Maximum
+        endwhere
+        where (w_dQ(thisP) < setting%Limiter%InterpWeight%Minimum)
+            w_dQ(thisP) = setting%Limiter%InterpWeight%Minimum
+        endwhere
+        where (w_dQ(thisP) > setting%Limiter%InterpWeight%Maximum)
+            w_dQ(thisP) = setting%Limiter%InterpWeight%Maximum
+        endwhere
 
         !% --- limiters below zero depth
         where (elemR(thisP,er_Depth) .le. setting%ZeroValue%Depth)
@@ -527,59 +611,78 @@ module update
             w_dG(thisP) = setting%Limiter%InterpWeight%Maximum
             w_uH(thisP) = setting%Limiter%InterpWeight%Maximum
             w_dQ(thisP) = setting%Limiter%InterpWeight%Maximum
-        elsewhere
+        endwhere
+
+        !% --- timescale interpolation for geometry are identical to flowrate
+        !%     but may be modified elsewhere
+        w_uG(thisP) = w_uQ(thisP)
+        w_dG(thisP) = w_dQ(thisP)
+        w_uP(thisP) = w_uQ(thisP)
+        w_dP(thisP) = w_dQ(thisP)
+
+        !% --- head uses length scale interpolation
+        !%     This shouldn't need limiters.
+        w_uH(thisP) = onehalfR * length(thisP)
+        w_dH(thisP) = onehalfR * length(thisP)
+
+        invSpeedDif = zeroR 
+        invSpeedSum = zeroR
+
+       ! elsewhere
 
             ! --- free surface uses wave speed, Preissmann Slot use Preissmann Celerity
-            where (.not. isSlot(thisP)) 
-                w_uQ(thisP) = - onehalfR * length(thisP)  / (abs(Fr(thisp)**0) * velocity(thisP) - wavespeed(thisP)) !bugfix SAZ 09212021 
-                w_dQ(thisP) = + onehalfR * length(thisP)  / (abs(Fr(thisp)**0) * velocity(thisP) + wavespeed(thisP)) !bugfix SAZ 09212021 
-            elsewhere (isSlot(thisP))
-                !% --- Preissmann slot
-                w_uQ(thisP) = - onehalfR * length(thisP)  / (abs(Fr(thisp)**0) * velocity(thisP) - PCelerity(thisP)) !bugfix SAZ 23022022 
-                w_dQ(thisP) = + onehalfR * length(thisP)  / (abs(Fr(thisp)**0) * velocity(thisP) + PCelerity(thisP)) !bugfix SAZ 23022022 
-            end where
+            ! where (.not. isSlot(thisP)) 
+               !w_uQ(thisP) = - onehalfR * length(thisP)  / (abs(Fr(thisp)**0) * velocity(thisP) - wavespeed(thisP)) !bugfix SAZ 09212021 
+              !  w_dQ(thisP) = + onehalfR * length(thisP)  / (abs(Fr(thisp)**0) * velocity(thisP) + wavespeed(thisP)) !bugfix SAZ 09212021 
+            ! elsewhere (isSlot(thisP))
+            !     !% --- Preissmann slot
+            !   !  w_uQ(thisP) = - onehalfR * length(thisP)  / (abs(Fr(thisp)**0) * velocity(thisP) - PCelerity(thisP)) !bugfix SAZ 23022022 
+            !   !  w_dQ(thisP) = + onehalfR * length(thisP)  / (abs(Fr(thisp)**0) * velocity(thisP) + PCelerity(thisP)) !bugfix SAZ 23022022 
+            ! end where
 
             !% --- apply limiters to timescales
-            !% --- negative weight indicates supercritical downstream flow
-            where (w_uQ(thisP) < zeroR)
-                w_uQ(thisP) = setting%Limiter%InterpWeight%Maximum
-            endwhere
-            where (w_uQ(thisP) < setting%Limiter%InterpWeight%Minimum)
-                w_uQ(thisP) = setting%Limiter%InterpWeight%Minimum
-            endwhere
-            where (w_uQ(thisP) > setting%Limiter%InterpWeight%Maximum)
-                w_uQ(thisP) = setting%Limiter%InterpWeight%Maximum
-            endwhere
+            ! !% --- negative weight indicates supercritical downstream flow
+            ! where (w_uQ(thisP) < zeroR)
+            !     w_uQ(thisP) = setting%Limiter%InterpWeight%Maximum
+            ! endwhere
+            ! where (w_uQ(thisP) < setting%Limiter%InterpWeight%Minimum)
+            !     w_uQ(thisP) = setting%Limiter%InterpWeight%Minimum
+            ! endwhere
+            ! where (w_uQ(thisP) > setting%Limiter%InterpWeight%Maximum)
+            !     w_uQ(thisP) = setting%Limiter%InterpWeight%Maximum
+            ! endwhere
 
-            !% --- negative weight indicates supercritical
-            where (w_dQ(thisP) < zeroR)
-                w_dQ(thisP) = setting%Limiter%InterpWeight%Maximum
-            endwhere
-            where (w_dQ(thisP) < setting%Limiter%InterpWeight%Minimum)
-                w_dQ(thisP) = setting%Limiter%InterpWeight%Minimum
-            endwhere
-            where (w_dQ(thisP) > setting%Limiter%InterpWeight%Maximum)
-                w_dQ(thisP) = setting%Limiter%InterpWeight%Maximum
-            endwhere
+            ! !% --- negative weight indicates supercritical
+            ! where (w_dQ(thisP) < zeroR)
+            !     w_dQ(thisP) = setting%Limiter%InterpWeight%Maximum
+            ! endwhere
+            ! where (w_dQ(thisP) < setting%Limiter%InterpWeight%Minimum)
+            !     w_dQ(thisP) = setting%Limiter%InterpWeight%Minimum
+            ! endwhere
+            ! where (w_dQ(thisP) > setting%Limiter%InterpWeight%Maximum)
+            !     w_dQ(thisP) = setting%Limiter%InterpWeight%Maximum
+            ! endwhere
 
-            !% --- timescale interpolation for geometry are identical to flowrate
-            !%     but may be modified elsewhere
-            w_uG(thisP) = w_uQ(thisP)
-            w_dG(thisP) = w_dQ(thisP)
-            w_uP(thisP) = w_uQ(thisP)
-            w_dP(thisP) = w_dQ(thisP)
+            ! !% --- timescale interpolation for geometry are identical to flowrate
+            ! !%     but may be modified elsewhere
+            ! w_uG(thisP) = w_uQ(thisP)
+            ! w_dG(thisP) = w_dQ(thisP)
+            ! w_uP(thisP) = w_uQ(thisP)
+            ! w_dP(thisP) = w_dQ(thisP)
 
-            !% --- head uses length scale interpolation
-            !%     This shouldn't need limiters.
-            w_uH(thisP) = onehalfR * length(thisP)
-            w_dH(thisP) = onehalfR * length(thisP)
+            ! !% --- head uses length scale interpolation
+            ! !%     This shouldn't need limiters.
+            ! w_uH(thisP) = onehalfR * length(thisP)
+            ! w_dH(thisP) = onehalfR * length(thisP)
 
-        endwhere
+        !endwhere
+
+        ! print *, 'at end'
+
+        ! stop 2980734
 
         !%------------------------------------------------------------------
         !% Closing
-            if (setting%Debug%File%update)  &
-                write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
 
     end subroutine update_interpweights_CC
 !%

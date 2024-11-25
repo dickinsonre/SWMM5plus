@@ -48,7 +48,7 @@ module pump_elements
             integer, intent(in) :: istep
             integer, pointer :: PumpType
             real(8), pointer :: FlowRate,  PSetting
-            character(64) :: subroutine_name = 'pump_toplevel'
+            ! character(64) :: subroutine_name = 'pump_toplevel'
         !%------------------------------------------------------------------
         !% Preliminaries
             !% --- pump flow direction is always positive
@@ -141,7 +141,7 @@ module pump_elements
     !     !%------------------------------------------------------------------ 
     !     !%------------------------------------------------------------------ 
 
-    !     thisLink => elemI(eIdx,ei_link_Gidx_BIPquick)
+    !     thisLink => elemI(eIdx,ei_link_Gidx_SWMM)
     !     upNode   => link%I(thisLink,li_Mnode_u)
     !     upJM     => node%I(upNode,ni_elem_idx)
         
@@ -215,7 +215,6 @@ module pump_elements
             Ci=1; Aidx=eIdx
         !%------------------------------------------------------------------
 
-        
         !% -- get upstream data
         call pump_upstream_data &
             (type1_Pump, eIdx, Ci, Aidx, upDepth, upHead, upVolume, upFlowrate, maxFlowrate)
@@ -261,6 +260,9 @@ module pump_elements
         !% --- dQ/dH is zero for type 1 pump
         dQdH_upstream = zeroR
 
+        print *, 'DQDH appears wrong here. upstream should be based on volume and downstream should be zero'
+        stop 5059873
+
         !% --- get the downstream data HACK 20240524
         call pump_downstream_data (eIdx, Ci, Aidx, elemSR(eIdx,esr_Pump_NominalDownstreamHead)) 
 
@@ -291,6 +293,7 @@ module pump_elements
             real(8), pointer    :: FlowRate, Head, Depth, dQdH_upstream
             real(8)             :: FlowrateStore, DepthStore
             real(8)             :: upDepth, upHead, upVolume, upFlowrate, maxFlowrate
+            logical :: isdebug = .false.
         !%------------------------------------------------------------------
         !% Aliases:
             CurveID   => elemSI(eIdx,esi_Pump_CurveID)
@@ -308,6 +311,8 @@ module pump_elements
 
             !% --- downstream head does not affect a type 2 or 4 pump flow
             elemSR(eIdx,esr_Pump_dQdH_downstream) = zeroR
+
+            if (isdebug) print *, istep
         !%------------------------------------------------------------------
 
         !% -- get upstream data
@@ -382,6 +387,9 @@ module pump_elements
         !%     need to be non-zero so that zero-checking isn't an issue
         Depth = twoR * setting%ZeroValue%Depth 
         Head  = elemR(eIdx,er_Zbottom) + Depth 
+
+        print *, 'NEED dQdH downstream'
+        stop 66098734
 
     end subroutine pump_type2or4
 !%
@@ -474,6 +482,9 @@ module pump_elements
         !% --- flow limitation
         Flowrate = min(Flowrate,maxFlowrate)
 
+        print *, 'NEED DqDh downstream '
+        stop 9873444
+
     end subroutine pump_type3
 !%
 !%==========================================================================        
@@ -522,6 +533,9 @@ module pump_elements
 
         !% --- no change to this pump for JB adjacent
         dQdH_upstream = zeroR
+
+        print *, 'NEED DQDH downstream '
+        stop 669222097
 
         !%------------------------------------------------------------------
         !% Closing:

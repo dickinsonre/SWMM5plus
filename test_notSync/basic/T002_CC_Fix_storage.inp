@@ -50,12 +50,12 @@ DRY_ONLY         NO
 ;;Name           Elevation  MaxDepth   InitDepth  SurDepth   Aponded   
 ;;-------------- ---------- ---------- ---------- ---------- ----------
 J0               11.895      0          0.0        2.0        0    
-;;J1               10.9475     0          0.0        999.0        0    
+J1               10.9475     0          0.0        999.0        0    
 
 [STORAGE]
 ;;Name           Elev.    MaxDepth   InitDepth  Shape      Curve Type/Params            SurDepth  Fevap    Psi      Ksat     IMD     
 ;;-------------- -------- ---------- ----------- ---------- ---------------------------- --------- --------          -------- --------
-J1               10.9475  5.0        0.0        TABULAR    store01        
+;J1               10.9475  5.0        0.0        TABULAR    store01        
      
 
 [OUTFALLS]

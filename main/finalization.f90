@@ -41,7 +41,7 @@ contains
             real(8) :: hydrology_time, loopoutput_time, initialization_time
             real(8) :: lastoutput_time, shared_time, volume_nonconservation
             real(8) :: timemarch_seconds, shared_seconds, partition_time
-            logical :: isLastStep
+            !logical :: isLastStep
             character(8) :: total_units, timemarch_units, hydraulics_units
             character(8) :: hydrology_units, loopoutput_units, initialization_units
             character(8) :: lastoutput_units, shared_units, partition_units
@@ -83,11 +83,15 @@ contains
                 sync all
  
                 call outputML_convert_elements_to_linknode_and_write ()
+
+                ! print *, 'after output'
             end if
         end if  
         call util_crashstop(31903)
 
         !% --- shut down EPA SWMM-C and delete the API
+        !%     Note that the EPA SWMM finalization has possible floating point exceptions
+        !%     when the report is not written correctly (e.g. StepCount=0 gives divide by zero)
         call interface_finalize()
 
         sync all
@@ -100,15 +104,18 @@ contains
 
         if (this_image()==1) then
             !% --- stop the wall clock
+            ! print *, 'calling system clock'
             call system_clock(count=cval,count_rate=crate,count_max=cmax)
             setting%Time%WallClock%End = cval
 
             !% --- compute total time
+            ! print *, 'computin time'
             total_time = real(setting%Time%WallClock%End - setting%Time%WallClock%Start,kind=8)
             total_time = total_time / real(setting%Time%WallClock%CountRate,kind=8)
             call util_datetime_display_time (total_time, total_units)
 
             !% --- finalize the timemarch time counter for display
+            ! print *, 'time march'
             timemarch_time = real(setting%Time%WallClock%TimeMarchEnd &
                              - setting%Time%WallClock%TimeMarchStart,kind=8)
             timemarch_time = timemarch_time / real(setting%Time%WallClock%CountRate,kind=8)
@@ -116,39 +123,46 @@ contains
             call util_datetime_display_time (timemarch_time, timemarch_units)
 
             !% --- hydraulics time
+            ! print *, 'hydraulics'
             hydraulics_time = real(setting%Time%WallClock%HydraulicsCumulative,kind=8) &
                             / real(setting%Time%WallClock%CountRate,kind=8)
             call util_datetime_display_time (hydraulics_time, hydraulics_units)
 
             !% --- hydrology time
+            ! print *, 'hydrology'
             hydrology_time = real(setting%Time%WallClock%HydrologyCumulative,kind=8) &
                             / real(setting%Time%WallClock%CountRate,kind=8)           
             call util_datetime_display_time (hydrology_time, hydrology_units)      
             
             !% --- time spent in shared communication across processors
+            ! print *, 'shared'
             shared_time = real(setting%Time%WallClock%SharedCumulative,kind=8) &
                             / real(setting%Time%WallClock%CountRate,kind=8)  
             shared_seconds = shared_time        
             call util_datetime_display_time (shared_time, shared_units)   
             
             !% --- output processing during time loop
+            ! print *, 'loopeoutput'
             loopoutput_time = real(setting%Time%WallClock%LoopOutputCumulative,kind=8) &
                             / real(setting%Time%WallClock%CountRate,kind=8)
             call util_datetime_display_time (loopoutput_time, loopoutput_units)   
 
             !% --- time spent in initialization
+            ! print *, 'initialization'
             initialization_time = real(setting%Time%WallClock%InitializationEnd &
                                      - setting%Time%WallClock%Start,kind=8)
             initialization_time = initialization_time / real(setting%Time%WallClock%CountRate,kind=8)
             call util_datetime_display_time (initialization_time, initialization_units) 
 
             !% --- time spent in partitioning
+            ! print *, 'partitioning'
             partition_time = real(setting%Time%WallClock%PartitionEnd &
                                      - setting%Time%WallClock%Start,kind=8)
                                      partition_time = partition_time / real(setting%Time%WallClock%CountRate,kind=8)
             call util_datetime_display_time (partition_time, partition_units) 
             
             !% --- time spent in the final output
+            ! print *, 'lastoutput'
             lastoutput_time = real(setting%Time%WallClock%End &
                                 -  setting%Time%WallClock%FinalOutputStart)
             lastoutput_time = lastoutput_time / real(setting%Time%WallClock%CountRate,kind=8)                    

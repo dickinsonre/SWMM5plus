@@ -4,53 +4,67 @@ enable_testing()
 ## Final tests for code cleanup 20230601
 ##########################################################################################
 
+#passed 20241122
 # add_test(NAME Geometry_test 
 # COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/release_tests/all_geometry_test.inp -s ./ctest/internal_testing/release_tests/settings_dx10.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
+# passed 20241122
 # add_test(NAME Y_Junction_test 
 # COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/release_tests/two_Y_fixed_inflow.inp -s ./ctest/internal_testing/release_tests/settings_dx10.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
+# passed 20241122
 # add_test(NAME Weir_test 
 # COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/release_tests/all_weir_test.inp -s ./ctest/internal_testing/release_tests/settings_dx10.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
+# passed 20241122
 # add_test(NAME Weir_test_forceJM
 # COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/release_tests/all_weir_test.inp -s ./ctest/internal_testing/release_tests/settings_dx10_forceJM.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
+# passed 20241122
 # add_test(NAME Orifice_test 
 # COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/release_tests/all_orifice_test.inp -s ./ctest/internal_testing/release_tests/settings_dx10.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
+# PASSED 20241122
 # add_test(NAME Orifice_test_forceJM 
 # COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/release_tests/all_orifice_test.inp -s ./ctest/internal_testing/release_tests/settings_dx10_forceJM.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
+# passed 20241122
 # add_test(NAME Storage_Emptying_test 
 # COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/release_tests/all_storage_emptying_test.inp -s ./ctest/internal_testing/release_tests/settings_dx10.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
-
+# passed 20241122
 # add_test(NAME Storage_Emptying_test_forceJM 
 # COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/release_tests/all_storage_emptying_test.inp -s ./ctest/internal_testing/release_tests/settings_dx10_forceJM.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
-
+# passed 20241122 (36 min runtime)
 # add_test(NAME Storage_Filling_test 
 # COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/release_tests/all_storage_filling_test.inp -s ./ctest/internal_testing/release_tests/settings_dx10.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
+# passed 20241125 (36 min runtime)
+# add_test(NAME Storage_Filling_test 
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/release_tests/all_storage_filling_test.inp -s ./ctest/internal_testing/release_tests/settings_dx10.json -o ./ctest/output/
+# WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+# )
+
+# passed 20241125 (36 min runtime)
 # add_test(NAME Storage_Filling_test_forceJM 
 # COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/release_tests/all_storage_filling_test.inp -s ./ctest/internal_testing/release_tests/settings_dx10_forceJM.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -59,30 +73,35 @@ enable_testing()
 # ##########################################################################################
 # ## Saz dissertation test cases 20240022
 # ##########################################################################################
+# passed 20241125 (15 min runtime)
 # add_test(NAME EXTRAN_1 
 # COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran1.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
+# passed 20241125 (15 min runtime)
 # add_test(NAME EXTRAN_2 
 # COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran2.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
+# passed 20241125 (12 min runtime)
 # add_test(NAME EXTRAN_3 
 # COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran3_bottom_orifice.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
+# passed 20241125 (15 min runtime)
 # add_test(NAME EXTRAN_4 
 # COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran4.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
 # WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # )
 
-# add_test(NAME EXTRAN_5 
-# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran5.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
-# WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-# )
+# fails 20241125 -- something strange about link 8060 -- where does extra Q come from?
+add_test(NAME EXTRAN_5 
+COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran5.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
+WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
 
 # add_test(NAME EXTRAN_6 
 # COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/extran6.inp -s ./ctest/internal_testing/saz_disseration_tests/settings_dx5.json -o ./ctest/output/
@@ -130,10 +149,10 @@ enable_testing()
 # )
 
 
-add_test(NAME USER_3_tallManholes
-COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/user3_tallManholes.inp -s ./ctest/internal_testing/saz_disseration_tests/user3_settings.json -o ./ctest/output/
-WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-)
+# add_test(NAME USER_3_tallManholes
+# COMMAND python ${CMAKE_SOURCE_DIR}/compare.py -i ./ctest/internal_testing/saz_disseration_tests/user3_tallManholes.inp -s ./ctest/internal_testing/saz_disseration_tests/user3_settings.json -o ./ctest/output/
+# WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+# )
 
 
 # add_test(NAME USER_4 

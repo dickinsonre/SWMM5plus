@@ -77,7 +77,7 @@ module geometry
 !%
     subroutine geometry_toplevel_CC (                          &
             thisP, npackP, thisP_Open, npackP_Open,            &
-            thisP_Closed, npackP_Closed, isSingularYN, isALLYN)
+            thisP_Closed, npackP_Closed,  isALLYN)
         !%------------------------------------------------------------------
         !% Description:
         !% Computes geometry on channel/conduit (CC) elements for the  
@@ -88,7 +88,7 @@ module geometry
             integer,  intent(in) :: thisP(:), thisP_Open(:), thisP_Closed(:)
             integer,  intent(in) :: npackP, npackP_Open, npackP_Closed
             !% singular element
-            logical, intent(in) :: isSingularYN, isAllYN
+            logical, intent(in) ::  isAllYN
         !%------------------------------------------------------------------
         !% Preliminary
             if (npackP < 1) return
@@ -108,7 +108,7 @@ module geometry
         !% --- Handle Preissmann Slot for closed CC elements
         !%     with this time march type.
         if (npackP_Closed > 0) then
-            call slot_CC (thisP_Closed, isSingularYN)
+            call slot_CC (thisP_Closed)
         end if
 
         ! if (.not. isSingularYN) call util_utest_CLprint('       222 geo  - - - - - - - - - - ')
@@ -574,9 +574,10 @@ module geometry
             integer, intent(in)  :: eIdx
             real(8), intent(in)  :: inDepth, ZeroValueArea, ZeroValuePerimeter
             real(8) :: thisPerimeter, thisArea
-            character(64) :: subroutine_name = "geo_sectionfactor_from_depth_singular"
+            ! character(64) :: subroutine_name = "geo_sectionfactor_from_depth_singular"
         !%------------------------------------------------------------------  
     
+        !print *, 'HERE AAA ', eIdx 
         thisArea      = geo_area_from_depth_singular      (eIdx, inDepth, ZeroValueArea)
         thisPerimeter = geo_perimeter_from_depth_singular (eIdx, inDepth, ZeroValuePerimeter)
         outvalue      = thisArea * ((thisArea / thisPerimeter)**twothirdR)
@@ -602,6 +603,7 @@ module geometry
             grav => setting%Constant%gravity
         !%------------------------------------------------------------------   
 
+        !print *, 'HERE BBB'
         thisArea      = geo_area_from_depth_singular (eIdx, inDepth, ZeroValue)
         outvalue      = thisArea * sqrt(inDepth * grav)
 
@@ -667,7 +669,7 @@ module geometry
             integer, pointer    :: eIdx
             real(8), pointer    :: thisTable(:)
             real(8)             :: sectionFactor, normSF
-            character(64)       :: subroutine_name = 'geo_normaldepth_singular'
+            ! character(64)       :: subroutine_name = 'geo_normaldepth_singular'
         !%------------------------------------------------------------------
         !% Aliases
             eIdx      => uniformTableI(UT_idx,uti_elem_idx)
@@ -751,7 +753,7 @@ module geometry
         !% Declarations:
             integer, target, intent(in) :: elemPGx(:,:), npack_elemPGx(:), col_elemPGx(:)
             integer, pointer :: Npack, thisCol
-            character(64) :: subroutine_name = 'geo_depth_from_volume_by_type'
+            ! character(64) :: subroutine_name = 'geo_depth_from_volume_by_type'
         !%-------------------------------------------------------------------
         !% cycle through different geometries  
                 
@@ -1051,8 +1053,10 @@ module geometry
         !% Declarations:
             integer, target, intent(in) :: elemPGx(:,:), npack_elemPGx(:), col_elemPGx(:)
             integer, pointer :: Npack, thisP(:), thisCol
-            character(64) :: subroutine_name = 'geo_depth_from_volume_by_type_JM'
+            ! character(64) :: subroutine_name = 'geo_depth_from_volume_by_type_JM'
         !%-------------------------------------------------------------------
+
+
         
         !% --- JUNCTIONS ---------------------------------------------------- 
 
@@ -1100,7 +1104,7 @@ module geometry
         !% Declarations:
             integer, target, intent(in) :: elemPGx(:,:), npack_elemPGx(:), col_elemPGx(:)
             integer, pointer :: Npack, thisP(:), thisCol
-            character(64) :: subroutine_name = 'geo_depth_from_volume_by_type_JM'
+            ! character(64) :: subroutine_name = 'geo_depth_from_volume_by_type_JM'
         !%-------------------------------------------------------------------
         
         !% --- JUNCTIONS ---------------------------------------------------- 
@@ -2776,76 +2780,90 @@ module geometry
                 Atable => ASemiEllip
         end select
 
+        ! print *, ' '
+        ! print *, 'upper level '
+        ! print *, idx, elemI(idx,ei_elementType), ' ',trim(reverseKey(elemI(idx,ei_elementType)))
+        ! print *, idx, elemI(idx,ei_geometryType), ' ',trim(reverseKey(elemI(idx,ei_geometryType)))
+        ! print *, ' '
+        !print *, elemI(idx,ei_link_Gidx_SWMM), elemI(idx,ei_node_Gidx_SWMM)
+        ! if (elemI(idx,ei_node_Gidx_SWMM) .ne. nullvalueI) then
+        !     print *, 'node: ',node%Names(elemI(idx,ei_node_Gidx_SWMM))%str
+        ! elseif  (elemI(idx,ei_link_Gidx_SWMM) .ne. nullvalueI) then
+        !     print *, 'link: ',link%Names(elemI(idx,ei_link_Gidx_SWMM))%str
+        ! end if
+        ! print *, ' '
+        !stop 66987
+
         select case (elemI(idx,ei_geometryType))
-        !% ----open channels  
-        case (irregular)
-            outvalue = irregular_geometry_from_depth_singular &
-                (idx,tt_area, indepth, elemR(idx,er_FullArea), ZeroValueArea)
+            !% ----open channels  
+            case (irregular)
+                outvalue = irregular_geometry_from_depth_singular &
+                    (idx,tt_area, indepth, elemR(idx,er_FullArea), ZeroValueArea)
 
-        case (parabolic)
-            !outvalue = parabolic_area_from_depth_singular (idx, indepth)
-            outA = llgeo_parabolic_area_from_depth_pure(iA, depthA)
-            outvalue = outA(1)
-            outvalue = max(outvalue,ZeroValueArea)
+            case (parabolic)
+                !outvalue = parabolic_area_from_depth_singular (idx, indepth)
+                outA = llgeo_parabolic_area_from_depth_pure(iA, depthA)
+                outvalue = outA(1)
+                outvalue = max(outvalue,ZeroValueArea)
 
-        case (power_function)
-            print *, 'CODE ERROR powerfunction geometry not complete'
-            call util_crashpoint(55098723)   
+            case (power_function)
+                print *, 'CODE ERROR powerfunction geometry not complete'
+                call util_crashpoint(55098723)   
 
-        case (rectangular)
-            outA = llgeo_rectangular_area_from_depth_pure (iA, depthA)
-            outvalue = outA(1)
-            outvalue = max(outvalue,ZeroValueArea)
+            case (rectangular)
+                outA = llgeo_rectangular_area_from_depth_pure (iA, depthA)
+                outvalue = outA(1)
+                outvalue = max(outvalue,ZeroValueArea)
 
-        case (trapezoidal)
-            outA = llgeo_trapezoidal_area_from_depth_pure (iA, depthA)
-            outvalue = outA(1)
-            outvalue = max(outvalue,ZeroValueArea)
+            case (trapezoidal)
+                outA = llgeo_trapezoidal_area_from_depth_pure (iA, depthA)
+                outvalue = outA(1)
+                outvalue = max(outvalue,ZeroValueArea)
 
-        case (triangular)
-            outA= llgeo_triangular_area_from_depth_pure (iA, depthA)
-            outvalue = max(outvalue,ZeroValueArea)
-            outvalue = outA(1)
+            case (triangular)
+                outA= llgeo_triangular_area_from_depth_pure (iA, depthA)
+                outvalue = max(outvalue,ZeroValueArea)
+                outvalue = outA(1)
 
-        !% --- closed conduits   
-        case (arch, basket_handle, catenary, circular, eggshaped, gothic, &
-            horiz_ellipse, horseshoe, semi_circular, semi_elliptical,     &
-            vert_ellipse)
+            !% --- closed conduits   
+            case (arch, basket_handle, catenary, circular, eggshaped, gothic, &
+                horiz_ellipse, horseshoe, semi_circular, semi_elliptical,     &
+                vert_ellipse)
 
-           ! outvalue = arch_area_from_depth_singular (idx, indepth)
-            outvalue = llgeo_tabular_from_depth_singular &
-                    (idx, indepth, fullArea(idx), setting%ZeroValue%Depth, ZeroValueArea, Atable)
-            
-        case (filled_circular)
-            outvalue = llgeo_filled_circular_area_from_depth_singular (idx, indepth, ZeroValueArea)     
-            
-        case (mod_basket)
-            outvalue = llgeo_mod_basket_area_from_depth_singular (idx, indepth, ZeroValueArea)
+            ! outvalue = arch_area_from_depth_singular (idx, indepth)
+                outvalue = llgeo_tabular_from_depth_singular &
+                        (idx, indepth, fullArea(idx), setting%ZeroValue%Depth, ZeroValueArea, Atable)
+                
+            case (filled_circular)
+                outvalue = llgeo_filled_circular_area_from_depth_singular (idx, indepth, ZeroValueArea)     
+                
+            case (mod_basket)
+                outvalue = llgeo_mod_basket_area_from_depth_singular (idx, indepth, ZeroValueArea)
 
-        case (rectangular_closed)
-            outvalue = llgeo_rectangular_closed_area_from_depth_singular (idx, indepth, ZeroValueArea)
+            case (rectangular_closed)
+                outvalue = llgeo_rectangular_closed_area_from_depth_singular (idx, indepth, ZeroValueArea)
 
-        case (rect_round )
-            outvalue = llgeo_rect_round_area_from_depth_singular (idx, indepth, ZeroValueArea)
+            case (rect_round )
+                outvalue = llgeo_rect_round_area_from_depth_singular (idx, indepth, ZeroValueArea)
 
-        case (rect_triang)
-            outvalue = llgeo_rectangular_triangular_area_from_depth_singular (idx, indepth, ZeroValueArea)
+            case (rect_triang)
+                outvalue = llgeo_rectangular_triangular_area_from_depth_singular (idx, indepth, ZeroValueArea)
 
-        case (custom)
-            print *, 'CODE ERROR area for cross-section ',trim(reverseKey(elemI(idx,ei_geometryType)))
-            print *, 'has not been implemented in ',trim(subroutine_name)
-            call util_crashpoint(332341)
+            case (custom)
+                print *, 'CODE ERROR area for cross-section ',trim(reverseKey(elemI(idx,ei_geometryType)))
+                print *, 'has not been implemented in ',trim(subroutine_name)
+                call util_crashpoint(332341)
 
-        case (force_main)
-            print *, 'CODE ERROR area for cross-section ',trim(reverseKey(elemI(idx,ei_geometryType)))
-            print *, 'in ',trim(subroutine_name)   
-            print *, 'This should never be reached as a force_main is not a valid geometryType'
-            call util_crashpoint(332342)
+            case (force_main)
+                print *, 'CODE ERROR area for cross-section ',trim(reverseKey(elemI(idx,ei_geometryType)))
+                print *, 'in ',trim(subroutine_name)   
+                print *, 'This should never be reached as a force_main is not a valid geometryType'
+                call util_crashpoint(332342)
 
-        case default
-            print *, 'CODE ERROR area for cross-section ',trim(reverseKey(elemI(idx,ei_geometryType)))
-            print *, 'has not been implemented in ',trim(subroutine_name)
-            call util_crashpoint(332343)
+            case default
+                print *, 'CODE ERROR area for cross-section ',trim(reverseKey(elemI(idx,ei_geometryType)))
+                print *, 'has not been implemented in ',trim(subroutine_name)
+                call util_crashpoint(332343)
 
         end select
            
@@ -3185,7 +3203,7 @@ module geometry
         !%------------------------------------------------------------------
         !% Declarations
             real(8), intent(in)  :: area, topwidth, ZeroValueHydDepth
-            character(64) :: subroutine_name = 'geo_hyddepth_from_area_and_topwidth_singular'
+            ! character(64) :: subroutine_name = 'geo_hyddepth_from_area_and_topwidth_singular'
         !%------------------------------------------------------------------   
      
         if (topwidth > zeroR) then

@@ -46,7 +46,7 @@ module filled_circular_conduit
 
             integer, allocatable, target :: thisP_analytical(:), thisP_lookup(:)
             integer, target              :: Npack_analytical, Npack_lookup
-            integer :: ii
+            !integer :: ii
         !%---------------------------------------------------------------------
         !% Aliases
             depth      => elemR(:,er_Depth)

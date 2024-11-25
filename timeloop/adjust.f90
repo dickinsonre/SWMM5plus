@@ -42,15 +42,15 @@ module adjust
 !% PUBLIC
 !%==========================================================================
 !%
-    subroutine adjust_element_toplevel (elementType, isConservativeTF)
+    subroutine adjust_element_toplevel (elementType)
         !%------------------------------------------------------------------
         !% Description
         !% adjustments for zero depth or small depth
         !%------------------------------------------------------------------
         !% Declarations
             integer, intent(in) :: elementType !%, CC, JM, JB
-            logical, intent(in) :: isConservativeTF !% true means that artificial volume inflow is included in adjustment
-            integer :: npack
+            !logical, intent(in) :: isConservativeTF !% true means that artificial volume inflow is included in adjustment
+            !integer :: npack
         !%------------------------------------------------------------------
 
         !% --- CC ELEMENT AD HOC ADJUSTMENTS    
@@ -90,7 +90,7 @@ module adjust
         ! print *, ' '
 
         !% --- adjust head, flowrate, and auxiliary values at zero depth
-        call adjust_zerodepth_nonvolume_element_values (elementType, isConservativeTF) 
+        call adjust_zerodepth_nonvolume_element_values (elementType) 
 
         ! print *, ' '
         ! print *, 'in adjust EEE'
@@ -156,7 +156,8 @@ module adjust
             real(8), intent(in) :: geozero
             logical, intent(in) :: isVolume
             real(8), pointer    :: geovalue(:), VolumeArtificialInflow(:)    
-            character(64) :: subroutine_name = 'adjust_limit_by_zerovalues'
+            !integer :: ii
+            ! character(64) :: subroutine_name = 'adjust_limit_by_zerovalues'
         !%------------------------------------------------------------------
         !% Preliminaries
         !%------------------------------------------------------------------
@@ -174,12 +175,17 @@ module adjust
                     VolumeArtificialInflow(thisP) = (geozero - geovalue(thisP))
                     geovalue(thisP) = geozero
                 end where
-                ! if (sum(VolumeArtificialInflow(thisP)) .ne. zeroR) then 
-                !     print *, ' '
-                !     print *, 'In adjust_limit_by_zerovalues , artificialInflow ',sum(VolumeArtificialInflow(thisP))
-                !     print *, ' '
-                !     !stop 509874
-                ! end if
+                if (sum(VolumeArtificialInflow(thisP)) .ne. zeroR) then 
+                    ! print *, ' '
+                    ! print *, 'In adjust_limit_by_zerovalues , artificialInflow ',sum(VolumeArtificialInflow(thisP))
+                    ! print *, ' '
+                    ! do ii=1,size(thisP)
+                    !     if (VolumeArtificialInflow(thisP(ii)) .ne. zeroR) then 
+                    !          print *, thisP(ii), VolumeArtificialInflow(thisP(ii))
+                    !     end if
+                    ! end do
+                    ! stop 509874
+                end if
             else
                 !% --- non-conservation steps simply set the minimum volume
                 where (geovalue(thisP) < geozero)
@@ -211,7 +217,7 @@ module adjust
             real(8), intent(in) :: geozero
             logical, intent(in) :: isVolume
             real(8), pointer :: geovalue(:), VolumeArtificialInflow(:)    
-            character(64) :: subroutine_name = 'adjust_limit_by_zerovalues_singular'
+         !   character(64) :: subroutine_name = 'adjust_limit_by_zerovalues_singular'
         !%------------------------------------------------------------------
         !% Preliminaries:
         !%------------------------------------------------------------------
@@ -247,13 +253,13 @@ module adjust
 !%========================================================================== 
 !%==========================================================================
 !%
-    subroutine adjust_Vfilter (istep)
+    subroutine adjust_Vfilter ()
         !%------------------------------------------------------------------
         !% Description:
         !% Performs ad-hoc adjustments that may be needed for stability
         !%------------------------------------------------------------------
         !% Declarations:
-            integer, intent(in) :: istep
+            !integer, intent(in) :: istep
             integer, pointer :: thisP(:), Npack
 
             character(64)    :: subroutine_name = 'adjust_Vfilter'
@@ -338,11 +344,16 @@ module adjust
             call adjust_smalldepth_face_fluxes_JMJB    (ifixQCons)
         end if
 
+        !print *, 'call X1'
         call adjust_zerodepth_face_fluxes_CC   (ifixQCons)
 
+        !print *, 'call X2'
         call adjust_zerodepth_face_fluxes_JMJB (ifixQCons)
 
+        !print *, 'call X3'
         call adjust_JB_elem_flux_to_equal_face ()  
+
+        !print *, 'call xout'
  
     end subroutine adjust_zero_and_small_depth_face
 !%
@@ -359,7 +370,7 @@ module adjust
         !%------------------------------------------------------------------
             integer, intent(in) :: elementType 
             logical, intent(in) :: isZero
-            logical, pointer :: thisDepth(:), otherDepth(:)
+            logical, pointer :: thisDepth(:)
             integer, pointer :: elemType(:)
             real(8), pointer :: depth0
             real(8), pointer :: eDepth(:)
@@ -453,14 +464,14 @@ module adjust
 !%==========================================================================   
 !%==========================================================================
 !%
-    subroutine adjust_zerodepth_nonvolume_element_values (whichType, isConservativeTF)  !% PRIVATE
+    subroutine adjust_zerodepth_nonvolume_element_values (whichType)  !% PRIVATE
         !% -----------------------------------------------------------------
         !% Description:
         !% thisCol must be one of the ZeroDepth packed arrays that identifies
         !% all the (near) zero depth locations.
         !% -----------------------------------------------------------------
             integer, intent(in)  :: whichType
-            logical, intent(in)  :: isConservativeTF
+            !logical, intent(in)  :: isConservativeTF
             integer, pointer :: thisCol, npack, thisP(:)
         !% -----------------------------------------------------------------
         !% Preliminaries
@@ -531,14 +542,14 @@ module adjust
             integer, pointer :: npack, thisP(:), fdn(:), fup(:)
             real(8), pointer :: Area(:), AreaVelocity(:), CMvelocity(:), CMvelocity2(:)
             real(8), pointer :: Flowrate(:), HydRadius(:), ManningsN(:)
-            real(8), pointer :: VelocityN0(:), Velocity(:), VelocityBlend(:), svRatio(:)
+            real(8), pointer :: VelocityN0(:), Velocity(:), svRatio(:)
             real(8), pointer :: Head(:)
-            real(8), pointer :: SmallVolume(:), Volume(:), faceFlow(:), faceFlowCons(:)
+            real(8), pointer :: SmallVolume(:), Volume(:)
             real(8), pointer :: fHead_u(:), fHead_d(:), Length(:), oneArray(:)
-            integer, target  :: pset(2)
-            real(8)          :: psign(2)
-            integer :: ii
-            character(64) :: subroutine_name = 'adjust_smalldepth_element_fluxes_CC'
+            !integer, target  :: pset(2)
+            !real(8)          :: psign(2)
+           ! integer :: ii
+           ! character(64) :: subroutine_name = 'adjust_smalldepth_element_fluxes_CC'
         !% -----------------------------------------------------------------
         !% Preliminaries:   
             if (.not. setting%SmallDepth%useMomentumCutoffYN) return
@@ -797,6 +808,21 @@ module adjust
         !%     note that JB and face must have consistent fluxes or we
         !%     get conservation errors
         do ii=1,max_branch_per_node,2
+            ! print *, 'in adjust JB ',ii
+            ! print *, 'thisP ',thisP
+            ! print *, 'size ',size(eQ)
+            ! print *,  size(fup), size(fQ), size(isbranch)
+            ! do jj=1,size(thisP)
+            !     print *, ' '
+            !     print *, 'jj ',jj
+            !     print *,  thisP(jj), reverseKey(elemI(thisP(jj),ei_elementType))
+            !     print *, 'ii ',ii
+            !     print *, 'thisP(jj) + ii',thisP(jj)+ii,  reverseKey(elemI(thisP(jj)+ii,ei_elementType))
+            !     print *, 'is branch ',isbranch(thisP(jj)+ii)
+            !     print *, 'fup       ',fup(thisP(jj)+ii)
+            !     print *, 'fQ        ',fQ(fup(thisP(jj)+ii))
+            ! end do
+
             !% --- inflows to JB
             where ((fQ(fup(thisP+ii)) > zeroR) .and. (isbranch(thisP+ii) .eq. oneI))
                eQ(thisP + ii) = fQ(fup(thisP+ii))
@@ -835,14 +861,14 @@ module adjust
         !% Declarations:
             logical, intent(in) ::  ifixQCons
             integer, pointer :: fdn(:), fup(:), thisP(:), thisCol, npack
-            integer, pointer :: thisColJM, thisJM(:), npackJM, isbranch(:) !% 20220122brh
+            integer, pointer ::  isbranch(:) !% 20220122brh
             real(8), pointer :: faceQ(:), elemQ(:), fQCons(:)
             real(8), pointer :: fVel_u(:), fVel_d(:)
             real(8), pointer :: faceHu(:), faceHd(:), faceAu(:), faceAd(:)
-            real(8), pointer :: faceDu(:), faceDd(:)
+            !real(8), pointer :: faceDu(:), faceDd(:)
             real(8), pointer :: elemH(:), elemL(:), elemVol(:)
             real(8), pointer :: dt, grav
-            integer :: ii
+            !integer :: ii
         !%------------------------------------------------------------------
         !% Preliminaries:
             if (.not. setting%SmallDepth%useMomentumCutoffYN) return
@@ -949,12 +975,12 @@ module adjust
         !%------------------------------------------------------------------
         !% Declarations:
             logical, intent(in) ::  ifixQCons
-            integer, pointer :: fdn(:), fup(:), thisP(:), npack
+            integer, pointer :: fdn(:), fup(:)
             integer, pointer :: thisColJM, thisJM(:), npackJM, isbranch(:) !% 20220122brh
             real(8), pointer :: faceQ(:), elemQ(:), fQCons(:)
             real(8), pointer :: fVel_u(:), fVel_d(:)
             real(8), pointer :: faceHu(:), faceHd(:), faceAu(:), faceAd(:)
-            real(8), pointer :: faceDu(:), faceDd(:)
+            !real(8), pointer :: faceDu(:), faceDd(:)
             real(8), pointer :: elemH(:), elemL(:), elemVol(:)
             real(8), pointer :: dt, grav
             integer :: ii
@@ -1332,12 +1358,12 @@ module adjust
             integer,  intent(in) :: thisP(:)
             real(8),  intent(in) :: thisMomentumDepthCutoff
             integer, pointer :: fdn(:), fup(:)
-            real(8), pointer :: faceQ(:), elemQ(:) 
+            real(8), pointer :: faceQ(:)
             real(8), pointer :: faceHu(:), faceHd(:), faceAu(:), faceAd(:)
             real(8), pointer :: faceDu(:), faceDd(:), faceQmax(:), faceQmin(:)
             real(8), pointer :: elemH(:), elemL(:) 
             real(8), pointer :: dt, grav
-            integer :: ii
+            !integer :: ii
         !%------------------------------------------------------------------
         !% Aliases:
             faceQ     => faceR(:,fr_Flowrate)

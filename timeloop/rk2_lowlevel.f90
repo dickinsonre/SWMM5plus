@@ -296,7 +296,7 @@ module rk2_lowlevel
             real(8), pointer :: velocity(:), velocityold(:), mn(:), rh(:)
             real(8), pointer :: grav, ReversalFactor, SmallVelocity 
             integer, pointer :: thisP(:)
-            character(64) :: subroutine_name = 'll_momentum_gammaCM_CC'
+            ! character(64) :: subroutine_name = 'll_momentum_gammaCM_CC'
         !%------------------------------------------------------------------
         !% Preliminaries
             if (Npack < 1) return    
@@ -358,7 +358,7 @@ module rk2_lowlevel
             real(8), parameter :: HZexpU   = 0.852d0
             real(8), parameter :: HZexpD1  = 1.852d0
             real(8), parameter :: HZexpD2  = 1.1667d0
-            character(64) :: subroutine_name = 'll_momentum_gammaFM_CC'
+            ! character(64) :: subroutine_name = 'll_momentum_gammaFM_CC'
         !%------------------------------------------------------------------
             if (Npack < 1) return
         !%------------------------------------------------------------------
@@ -410,7 +410,7 @@ module rk2_lowlevel
             real(8), pointer    :: velocity(:), oneVec(:)
             real(8), pointer    :: Kconduit(:), length(:)
             integer, pointer    :: thisP(:)
-            character(64)       :: subroutine_name = 'll_minorloss_friction_CC'
+            ! character(64)       :: subroutine_name = 'll_minorloss_friction_CC'
         !%------------------------------------------------------------------
         !% Preliminaries
             if (Npack < 1) return
@@ -476,7 +476,7 @@ module rk2_lowlevel
             integer, intent (in) :: inoutCol,  thisCol, Npack
             integer, pointer     :: thisP(:)
             real(8), pointer     :: momentum(:), volume(:)
-            integer :: ii
+            ! integer :: ii
         !%------------------------------------------------------------------
         !% Preliminaries
             if (Npack < 1) return

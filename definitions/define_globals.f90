@@ -1,6 +1,6 @@
 module define_globals
     !%==========================================================================
-    !% SWMM5+ release, version 1.0.0
+    !% SWMM5+ release, version 1.0.0     
     !% 20230608
     !% Hydraulics engine that links with EPA SWMM-C
     !% June 8, 2023
@@ -118,6 +118,7 @@ module define_globals
 
     !%  --- number of dummy row in elem arrays (do not change)
     integer, parameter :: N_dummy_elem = 1
+    integer, parameter :: N_dummy_face = 1
 
     !%  --- vector of number of elements and faces across images
     integer, allocatable, target :: N_elem(:)
@@ -188,20 +189,30 @@ module define_globals
     logical, allocatable, target :: subcatchYN(:,:)     !% subcatchment logical data
 
     !% --- BIPquick Arrays - (De)Allocated in BIPquick.f90
-    integer, allocatable :: B_nodeI(:,:)
-    real(8), allocatable :: B_nodeR(:,:)
-    integer, allocatable :: B_roots(:)
-    real(8), allocatable :: weight_range(:,:)
-    logical, allocatable :: totalweight_visited_nodes(:)
-    logical, allocatable :: partitioned_nodes(:)
-    logical, allocatable :: partitioned_links(:)
-    logical, allocatable :: accounted_for_links(:)
-    integer, allocatable :: phantom_link_tracker(:)
+    !%     Note that these are sized based on N_nodes, not N_elem
+    integer, allocatable, target :: bipqkI(:,:)
+    real(8), allocatable, target :: bipqkR(:,:)
+    logical, allocatable, target :: bipqkYN(:,:)
+    
+   ! integer, allocatable, target :: B_nodeI(:,:)
+
+    ! real(8), allocatable :: B_nodeR(:,:)
+    ! integer, allocatable :: B_roots(:)
+    ! real(8), allocatable :: weight_range(:,:)
+    ! logical, allocatable :: totalweight_visited_node_TF(:)
+    ! logical, allocatable :: totalweight_added_node_TF(:)
+    ! logical, allocatable :: totalweight_computed_node_TF(:)
+    ! logical, allocatable :: totalweight_used_node_TF(:)
+    ! logical, allocatable :: partitioned_node_TF(:)
+    ! logical, allocatable :: partitioned_link_TF(:)
+    ! ! logical, allocatable :: accounted_for_link_TF(:)
+    ! integer, allocatable :: phantom_link_tracker(:)
 
     !% --- Partitioning module Allocatables - Allocated and Deallocated in execute_partitioning.f08
     integer, allocatable :: adjacent_links(:)
     integer, allocatable :: elem_per_image(:)
-    logical, allocatable :: image_full(:)
+    logical, allocatable :: image_full_TF(:)
+    logical, allocatable :: isPbase_TF(:)
 
     !% --- Storage for entrapped air in links
     integer, allocatable, target :: sc_link_Idx(:,:)        !% link indexes of super conduits
@@ -243,7 +254,7 @@ module define_globals
     integer, allocatable, target           :: output_static_typeMultiplyByBarrels_elemR(:)
     character(len=64), allocatable, target :: output_static_typeNames_elemR(:)
     character(len=16), allocatable         :: output_static_typeUnits_elemR(:)
-    real(8), allocatable                   :: output_static_elem(:,:)[:]
+    real(8), allocatable                   :: output_static_elemR(:,:)[:]
 
     !% --- face output types
     integer, allocatable, target           :: output_types_faceR(:)
@@ -317,7 +328,8 @@ module define_globals
 
     !% --- dummy index for elements/faces that do not exist
     !%     value set in network_set_dummy_elem()
-    integer               :: dummyIdx
+    integer               :: dummy_elem_idx
+    integer               :: dummy_face_idx
     integer, dimension(1) :: dummyUnitArray
 
     !% ---- dummy targets
@@ -414,6 +426,7 @@ module define_globals
     integer :: N_monitor_types = 7 !% # of data types transferred from monitorR in monitorPassR
     integer :: N_Total_Curves !% sum of swmm input curves and additional storage curves
     integer :: N_subcatch_runon
+    integer :: N_nExtraDownstream !% number of downstream connections greater than 1 per node
     integer, target :: N_OutTypeElem
     integer, target :: N_Out_static_TypeElem
     integer, target :: N_Out_static_TypeLink
@@ -425,18 +438,19 @@ module define_globals
     integer :: max_caf_face_N    ! size of all face array in coarray
 
     !% --- assign status parameters for nodes
-    integer, parameter :: nUnassigned = 998877
-    integer, parameter :: nAssigned   = 1
-    integer, parameter :: nDeferred   = -1
+    ! integer, parameter :: nUnassigned = 998877
+    ! integer, parameter :: nAssigned   = 1
+    ! integer, parameter :: nDeferred   = -1
 
     !% --- assign status parameters for links
-    integer, parameter :: lUnassigned = 998877
-    integer, parameter :: lAssigned   = 1
-    integer, parameter :: lDeferred   = -1
+    !integer, parameter :: lUnassigned = 998877
+    !integer, parameter :: lAssigned   = 1
+    !integer, parameter :: lDeferred   = -1
+    
 
     !% --- Constants for Junction
-    integer, parameter :: J_elem_add = max_branch_per_node+1 ! Supplement elements for junction 
-    integer, parameter :: J_face_add = max_branch_per_node   ! Supplement faces for junction
+    !integer, parameter :: J_elem_add = max_branch_per_node+1 ! Supplement elements for junction 
+    !integer, parameter :: J_face_add = max_branch_per_node   ! Supplement faces for junction
 
     !% --- default number of elements for different node types
     integer, parameter :: N_elem_nJ2      = 0 ! 2-link nodes are assigned to a single face

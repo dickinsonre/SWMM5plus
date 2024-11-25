@@ -808,7 +808,7 @@ module culvert_elements
 
                     case default
                         print *, 'CODE ERROR unexpected case default'
-                        call util_crashpoint(5098723)
+                        call util_crashpoint(50987231)
                     end select
                 end if
 

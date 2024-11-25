@@ -141,27 +141,27 @@ module utility_allocate
         !%   determine wheter or not there was an error during the allocation.
         !-------------------------------------------------------------------
         !% Declarations
-            character(64) :: subroutine_name = 'util_allocate_link'
-            integer       :: additional_rows = 0
+            ! character(64) :: subroutine_name = 'util_allocate_link'
             integer       :: ii, obj_name_len
         !%-------------------------------------------------------------------
         !% Preliminaries
         !%-------------------------------------------------------------------
         !% --- If BIPquick is being used for Partitioning, 
         !%     include additional rows to the link-node arrays
-        if (setting%Partitioning%PartitioningMethod == BQuick) then
-            additional_rows = num_images() - 1
-        end if
+        !%     These are for the phantom links
+        ! if (setting%Partitioning%PartitioningMethod == BQuick) then
+        !     additional_rows = num_images() - 1
+        ! end if
 
-        allocate(link%I(setting%SWMMinput%N_link + additional_rows, Ncol_linkI)[*], stat=allocation_status, errmsg=emsg)
+        allocate(link%I(setting%SWMMinput%N_link, Ncol_linkI)[*], stat=allocation_status, errmsg=emsg)
         call util_allocate_check(allocation_status, emsg, 'link%I')
         link%I(:,:) = nullvalueI
 
-        allocate(link%R(setting%SWMMinput%N_link + additional_rows, Ncol_linkR)[*], stat=allocation_status, errmsg=emsg)
+        allocate(link%R(setting%SWMMinput%N_link, Ncol_linkR)[*], stat=allocation_status, errmsg=emsg)
         call util_allocate_check(allocation_status, emsg, 'link%R')
         link%R(:,:) = nullvalueR
 
-        allocate(link%YN(setting%SWMMinput%N_link + additional_rows, Ncol_linkYN)[*], stat=allocation_status, errmsg=emsg)
+        allocate(link%YN(setting%SWMMinput%N_link, Ncol_linkYN)[*], stat=allocation_status, errmsg=emsg)
         call util_allocate_check(allocation_status, emsg, 'link%YN')
         link%YN(:,:) = nullvalueL
 
@@ -179,16 +179,16 @@ module utility_allocate
             call util_allocate_check(allocation_status, emsg, 'character(obj_name_len) :: link%Names(ii)%str')
         end do
 
-        allocate(link_output_idx(setting%SWMMinput%N_link + additional_rows), stat=allocation_status,errmsg=emsg)
+        allocate(link_output_idx(setting%SWMMinput%N_link), stat=allocation_status,errmsg=emsg)
         call util_allocate_check(allocation_status, emsg, 'link_output_idx')
 
         !% allocate sc_link_Idx array
-        allocate(sc_link_Idx(setting%SWMMinput%N_link + additional_rows, setting%SWMMinput%N_link + additional_rows), stat=allocation_status,errmsg=emsg)
+        allocate(sc_link_Idx(setting%SWMMinput%N_link, setting%SWMMinput%N_link), stat=allocation_status,errmsg=emsg)
         call util_allocate_check(allocation_status, emsg, 'link_output_idx')
         sc_link_Idx = nullvalueI
 
         !% allocate links_per_sc array
-        allocate(links_per_sc(setting%SWMMinput%N_link + additional_rows), stat=allocation_status,errmsg=emsg)
+        allocate(links_per_sc(setting%SWMMinput%N_link), stat=allocation_status,errmsg=emsg)
         call util_allocate_check(allocation_status, emsg, 'links_per_sc')
         links_per_sc = nullvalueI
 
@@ -210,27 +210,27 @@ module utility_allocate
         !%   determine wheter or not there was an error during the allocation.
         !-------------------------------------------------------------------
         !% Declarations
-            character(64) :: subroutine_name = 'util_allocate_linknode'
-            integer       :: additional_rows = 0
+            ! character(64) :: subroutine_name = 'util_allocate_linknode'
             integer       :: ii, obj_name_len
         !%-------------------------------------------------------------------
         !% Preliminaries
         !%-------------------------------------------------------------------
         !% --- If BIPquick is being used for Partitioning, 
-        !%     include additional rows to the link-node arrays
-        if (setting%Partitioning%PartitioningMethod == BQuick) then
-            additional_rows = num_images() - 1
-        end if
+        !%     include additional rows to the node arrays for phantom nodes
+        ! if (setting%Partitioning%PartitioningMethod == BQuick) then
+        !     !additional_rows = num_images() - 1
+        !     additional_rows = zeroI
+        ! end if
 
-        allocate(node%I(N_node + additional_rows, Ncol_nodeI)[*], stat=allocation_status, errmsg=emsg)
+        allocate(node%I(N_node, Ncol_nodeI)[*], stat=allocation_status, errmsg=emsg)
         call util_allocate_check(allocation_status, emsg, 'node%I')
         node%I(:,:) = nullvalueI
 
-        allocate(node%R(N_node + additional_rows, Ncol_nodeR)[*], stat=allocation_status, errmsg=emsg)
+        allocate(node%R(N_node, Ncol_nodeR)[*], stat=allocation_status, errmsg=emsg)
         call util_allocate_check(allocation_status, emsg, 'node%R')
         node%R(:,:) = nullvalueR
 
-        allocate(node%YN(N_node + additional_rows, Ncol_nodeYN)[*], stat=allocation_status, errmsg=emsg)
+        allocate(node%YN(N_node, Ncol_nodeYN)[*], stat=allocation_status, errmsg=emsg)
         call util_allocate_check(allocation_status, emsg, 'node%YN')
         node%YN(:,:) = nullvalueL
 
@@ -249,7 +249,7 @@ module utility_allocate
         end do
 
         !% --- allocate link_node_output_idx
-        allocate(node_output_idx(N_node + additional_rows),stat=allocation_status,errmsg=emsg)
+        allocate(node_output_idx(N_node),stat=allocation_status,errmsg=emsg)
         call util_allocate_check(allocation_status, emsg, 'node_output_idx')
 
     end subroutine util_allocate_node
@@ -265,7 +265,7 @@ module utility_allocate
         !% Note these are NOT coarrays
         !%------------------------------------------------------------------
         !% Declarations:
-            integer, pointer :: nelem, ncol
+            integer, pointer :: nelem
         !%------------------------------------------------------------------
         !% Aliases
             nelem => N_MonitorPoint  !% number of control/monitoring points
@@ -291,7 +291,7 @@ module utility_allocate
         !% Note these are NOT coarrays
         !%------------------------------------------------------------------
         !% Declarations:
-            integer, pointer :: nelem, ncol
+            integer, pointer :: nelem
         !%------------------------------------------------------------------
         !% Aliases
             nelem => N_ActionPoint  !% number of control/monitoring points
@@ -486,7 +486,7 @@ module utility_allocate
         !-------------------------------------------------------------------
         !% Declarations
             character(64) :: subroutine_name = 'util_allocate_subcatch'
-            integer       :: ii, obj_name_len
+            !integer       :: ii, obj_name_len
         !%-------------------------------------------------------------------
         !% Preliminaries
             if (setting%Debug%File%utility_allocate) &
@@ -523,24 +523,70 @@ module utility_allocate
         !% Arrays required for partitioning the network into processor images
         !%------------------------------------------------------------------
 
+        if (this_image() .ne. oneI) return 
+
+        allocate(isPbase_TF(N_node))
+        isPbase_TF(:) = .true.
+
         allocate(adjacent_links(max_branch_per_node))
+        adjacent_links(:) = nullvalueI
+
         allocate(elem_per_image(num_images()))
-        allocate(image_full(num_images()))
+        elem_per_image(:) = nullvalueI 
+        
+        allocate(image_full_TF(num_images()))
+        image_full_TF = .false.
 
         !% --- Additional arrays that depend on partitioning method
-        select case (setting%Partitioning%PartitioningMethod)
+        select case (setting%Partition%Method)
             case (BQuick) 
-                call util_count_node_types(N_nBCup, N_nBCdn, N_nJm, N_nStorage, N_nJ2, N_nJ1)
+                allocate(bipqkI(N_node, Ncol_bipqkI), stat=allocation_status, errmsg=emsg)
+                call util_allocate_check(allocation_status, emsg, 'bipqkI')
+                bipqkI(:,:) = nullvalueI 
 
-                allocate(B_nodeI(size(node%I,1), max_up_branch_per_node))
-                allocate(B_nodeR(size(node%R,1), twoI))
-                allocate(B_roots(N_nBCdn))
-                allocate(totalweight_visited_nodes(size(node%I, oneI)))
-                allocate(partitioned_nodes(size(node%I, oneI)))
-                allocate(partitioned_links(size(link%I, oneI)))
-                allocate(weight_range(size(link%I, oneI), twoI))
-                allocate(accounted_for_links(size(link%I, oneI)))
-                allocate(phantom_link_tracker(size(link%I, oneI)))
+                allocate(bipqkR(N_node, Ncol_bipqkR), stat=allocation_status, errmsg=emsg)
+                call util_allocate_check(allocation_status, emsg, 'bipqkR')
+                bipqkR(:,:) = nullvalueR 
+
+                allocate(bipqkYN(N_node, Ncol_bipqkYN), stat=allocation_status, errmsg=emsg)
+                call util_allocate_check(allocation_status, emsg, 'bipqkYN')
+                bipqkYN(:,:) = .false.
+
+                ! allocate(B_nodeI(size(node%I,1), max_up_branch_per_node))
+                ! B_nodeI(:,:) = nullvalueI 
+
+                ! allocate(B_nodeR(size(node%R,1), twoI))
+                ! B_nodeR(:,:) = zeroR
+
+                ! allocate(B_roots(N_nBCdn))
+                ! B_roots(:) = nullvalueI 
+
+                ! allocate(totalweight_visited_node_TF(size(node%I, oneI)))
+                ! totalweight_visited_node_TF(:) = .false.
+
+                ! allocate(totalweight_added_node_TF(size(node%I, oneI)))
+                ! totalweight_added_node_TF(:) = .false.
+
+                ! allocate(totalweight_computed_node_TF(size(node%I, oneI)))
+                ! totalweight_computed_node_TF(:) = .false.
+
+                ! allocate(totalweight_used_node_TF(size(node%I, oneI)))
+                ! totalweight_used_node_TF(:) = .false.
+                
+                ! allocate(partitioned_node_TF(size(node%I, oneI)))
+                ! partitioned_node_TF(:) = .false.
+                
+                ! allocate(partitioned_link_TF(size(link%I, oneI)))
+                ! partitioned_link_TF(:) = .false. 
+
+                ! allocate(weight_range(size(link%I, oneI), twoI))
+                ! weight_range(:,:) = zeroR
+                
+                ! allocate(accounted_for_link_TF(size(link%I, oneI)))
+                ! accounted_for_link_TF(:) = .false.
+
+                ! allocate(phantom_link_tracker(size(link%I, oneI)))
+                ! phantom_link_tracker(:) = nullvalueI
 
             case default
                 !% --- no others neede
@@ -559,14 +605,12 @@ module utility_allocate
         !% the coarray on employed images
         !%------------------------------------------------------------------
         !% Declarations
-            integer :: ii
+            !integer :: ii
             integer, pointer :: ncol
-            character(64) :: subroutine_name = 'util_allocate_elemX_faceX'
+            ! character(64) :: subroutine_name = 'util_allocate_elemX_faceX'
 
         !%------------------------------------------------------------------
         !% Preliminaries
-            if (setting%Debug%File%utility_allocate) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
         !%------------------------------------------------------------------
         !% -- elements
         ncol => Ncol_elemR ! the maximum number of columns
@@ -618,33 +662,33 @@ module utility_allocate
             elemIsNan(:,:) = .false.
 
             ncol => Ncol_faceIsNan
-            allocate(faceIsNan(max_caf_face_N, ncol), stat=allocation_status, errmsg=emsg)
+            allocate(faceIsNan(max_caf_face_N+N_dummy_face, ncol), stat=allocation_status, errmsg=emsg)
             call util_allocate_check(allocation_status, emsg, 'faceIsNan')
             faceIsNan(:,:) = .false.
         end if
 
         !==== face allocation ====
         ncol => Ncol_faceR
-        allocate(faceR(max_caf_face_N, ncol)[*], stat=allocation_status, errmsg=emsg)
+        allocate(faceR(max_caf_face_N+N_dummy_face, ncol)[*], stat=allocation_status, errmsg=emsg)
         call util_allocate_check(allocation_status, emsg, 'faceR')
         faceR(:,:) = nullvalueR
 
         ncol=> Ncol_faceI
-        allocate(faceI(max_caf_face_N, ncol)[*], stat=allocation_status, errmsg=emsg)
+        allocate(faceI(max_caf_face_N+N_dummy_face, ncol)[*], stat=allocation_status, errmsg=emsg)
         call util_allocate_check(allocation_status, emsg, 'faceI')
         faceI(:,:) = nullvalueI
 
         ncol=> Ncol_faceYN
-        allocate(faceYN(max_caf_face_N, ncol)[*], stat=allocation_status, errmsg=emsg)
+        allocate(faceYN(max_caf_face_N+N_dummy_face, ncol)[*], stat=allocation_status, errmsg=emsg)
         call util_allocate_check(allocation_status, emsg, 'faceYN')
         faceYN(:,:) = nullvalueL
 
         ncol=> Ncol_faceP
-        allocate(faceP(max_caf_face_N, ncol)[*], stat=allocation_status, errmsg=emsg)
+        allocate(faceP(max_caf_face_N+N_dummy_face, ncol)[*], stat=allocation_status, errmsg=emsg)
         call util_allocate_check(allocation_status, emsg, 'Ncol_faceP')
         faceP(:,:) = nullvalueI
 
-        allocate(facePS(max_caf_face_N, ncol)[*], stat=allocation_status, errmsg=emsg)
+        allocate(facePS(max_caf_face_N+N_dummy_face, ncol)[*], stat=allocation_status, errmsg=emsg)
         call util_allocate_check(allocation_status, emsg, 'facePS')
         facePS(:,:) = nullvalueI
 
@@ -657,8 +701,6 @@ module utility_allocate
 
         !%------------------------------------------------------------------
         !% Closing
-            if (setting%Debug%File%utility_allocate) &
-            write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
 
     end subroutine util_allocate_elemX_faceX
 !
@@ -713,7 +755,7 @@ module utility_allocate
         !%-----------------------------------------------------------------
         !% Declarations:
             character(64)      :: subroutine_name = 'util_allocate_bc'
-            integer            :: ii, allocation_status, bc_node
+            integer            ::  allocation_status
             character(len=99)  :: emsg
         !%-----------------------------------------------------------------
         !% Preliminaries:
@@ -838,7 +880,7 @@ module utility_allocate
         !% Allocate the profiler arrays for collecting timing information
         !%-----------------------------------------------------------------
             character(64)      :: subroutine_name = 'util_allocate_profiler'
-            integer            :: ii, allocation_status, bc_node
+            integer            :: allocation_status
             character(len=99)  :: emsg
         !%-----------------------------------------------------------------
         !% Preliminaries:
@@ -1058,9 +1100,14 @@ module utility_allocate
             call util_allocate_check (allocation_status, emsg, 'output_static_typeUnits_elemR')
             output_static_typeUnits_elemR(:) = ""
 
-            allocate(output_static_elem(sum(N_OutElem),N_Out_static_TypeElem+3)[*], stat=allocation_status, errmsg=emsg)
-            call util_allocate_check (allocation_status, emsg, 'output_static_elem')
-            output_static_elem(:,:) = nullValueR
+            allocate(output_static_elemR(sum(N_OutElem),N_Out_static_TypeElem+Ncol_oser_base)[*], stat=allocation_status, errmsg=emsg)
+            call util_allocate_check (allocation_status, emsg, 'output_static_elemR')
+            output_static_elemR(:,:) = nullValueI
+
+            ! print *, sum(N_OutElem)
+            ! print *, N_Out_static_TypeElem, Ncol_oser_base
+            ! print *, size(output_static_elemR,1), size(output_static_elemR,2)
+            ! stop 55098734
         end if 
 
         !% --- allocate the output types for Links
@@ -1291,7 +1338,7 @@ module utility_allocate
         !% Creates multi-time-level storage for output data
         !%-------------------------------------------------------------------
         !% Declarations
-            integer, pointer  :: nLevel, nTypeElem, nTypeFace, nMaxLevel
+            integer, pointer  :: nLevel, nTypeElem, nTypeFace
             integer           :: nTotalElem, nTotalFace, nMaxElem, nMaxFace
             integer           :: allocation_status
             character(len=99) :: emsg
@@ -1516,7 +1563,7 @@ module utility_allocate
         !%-----------------------------------------------------------------
         !% Declarations:
             integer, pointer    :: ncol
-            integer             :: ii, jj
+            integer             :: ii
             character(64)       :: subroutine_name = 'util_allocate_col_elemI'
         !%-----------------------------------------------------------------
         !% Preliminaries:
@@ -2074,8 +2121,8 @@ module utility_allocate
         !% This array is the communication channel between processors
         !%-----------------------------------------------------------------
         !% Declarations:
-            integer :: ii, nrow, n_elemB
-            integer, pointer :: ncol, Nfaces, Nelems
+            integer ::  nrow
+            integer, pointer :: ncol, Nelems
             character(64) :: subroutine_name = 'util_allocate_boundary_ghost_elem_array'
         !%-----------------------------------------------------------------
         !% Preliminaries:

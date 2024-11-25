@@ -122,13 +122,13 @@ contains
     !% Looping through elemI, and finding the last local index
     do ii=1, size(elemI(:,ei_Lidx))
 
-       if (elemI(ii,ei_Mface_uL) /= nullvalueI .and.  total_faces < elemI(ii,ei_Mface_uL) ) then
+       if (elemI(ii,ei_Mface_uL) /= dummy_face_idx .and.  total_faces < elemI(ii,ei_Mface_uL) ) then
 
           total_faces = elemI(ii, ei_Mface_uL)
 
        end if
 
-       if (elemI(ii,ei_Mface_dL) /= nullvalueI .and. total_faces < elemI(ii,ei_Mface_dL)) then
+       if (elemI(ii,ei_Mface_dL) /= dummy_face_idx .and. total_faces < elemI(ii,ei_Mface_dL)) then
 
           total_faces = elemI(ii, ei_Mface_dL)
 

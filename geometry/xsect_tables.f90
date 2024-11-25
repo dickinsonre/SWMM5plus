@@ -57,7 +57,7 @@ contains
             real(8), intent(in) :: yValue
             real(8), intent(in) :: table(:)
 
-            real(8) :: delta, dy,dx, yfrac, yAdj, yPrime, xGuess, yGuess, yErr
+            real(8) :: delta, dy,dx, yfrac, yAdj, xGuess, yGuess, yErr
             real(8) :: yEps = 1.0d-10
 
             logical :: isfinished
@@ -198,7 +198,7 @@ contains
             real(8), intent(in)              :: normalizedInput(:), table(:)
             integer, intent(in)              :: thisP(:)
             integer, dimension(size(thisP))  :: position
-            integer                          :: nItems, ii
+            integer                          :: nItems
             real(8)                          :: delta
         !%------------------------------------------------------------------
 
@@ -272,7 +272,8 @@ contains
             real(8), intent(in)       :: table(:,:)
             integer, intent(in)       :: thisP(:)
             integer, pointer          :: position(:), tidx(:)
-            integer                   :: nItems, ii, kk
+            integer                   :: nItems,  kk
+            integer                   :: ii !% Note compiler returns not used, but ii is used in do concurrent
             real(8)                   :: delta
         !%------------------------------------------------------------------
 
@@ -349,7 +350,7 @@ contains
             real(8), intent(in)       :: normalizedInput, table(:)
             integer                   :: nItems
             integer                   :: position
-            integer                   :: ii
+            !integer                   :: ii 
             real(8)                   :: delta
         !%------------------------------------------------------------------
 
@@ -410,7 +411,7 @@ contains
             real(8), intent(in)  :: invalue
             real(8), intent(in)  :: tableIn(:), tableOut(:)
             logical, intent(in)  :: isFirstCall
-            integer :: nItems, ii, kk
+            integer :: nItems, ii
             character(64) :: subroutine_name = 'xsect_nonuniform_lookup_singular'
         !%-----------------------------------------------------------------
         !% Preliminaries

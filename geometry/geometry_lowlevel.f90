@@ -732,7 +732,7 @@ module geometry_lowlevel
 !%==========================================================================
 !%==========================================================================
 !%
-    pure function llgeo_powerfunction_depth_from_volume_pure &
+    function llgeo_powerfunction_depth_from_volume_pure &
             (thisP, volume) 
         !%------------------------------------------------------------------
         !% Description
@@ -742,7 +742,14 @@ module geometry_lowlevel
             integer, intent(in) :: thisP(:) !% may be packed array of indexes
             real(8), intent(in) :: volume(:)
             real(8), dimension(size(thisP)) :: llgeo_powerfunction_depth_from_volume_pure
+
+            logical :: isdebug = .false.
         !%------------------------------------------------------------------
+
+            if (isdebug) print *, thisP, volume
+
+            print *, 'CODE ERROR: powerfunction cross-section not implemented '
+            stop 5098734
 
         llgeo_powerfunction_depth_from_volume_pure = nullvalueR  !% STUB  HACK
 
@@ -849,7 +856,7 @@ module geometry_lowlevel
 !%==========================================================================
 !%==========================================================================
 !% 
-    pure function llgeo_powerfunction_area_from_depth_pure &
+    function llgeo_powerfunction_area_from_depth_pure &
             (thisP, depth) 
         !%------------------------------------------------------------------
         !% Description:
@@ -860,6 +867,11 @@ module geometry_lowlevel
             real(8), dimension(size(thisP)) :: llgeo_powerfunction_area_from_depth_pure
         !%------------------------------------------------------------------
 
+            print *, thisP
+            print *, depth 
+            print *, 'CODE ERROR: powerfunction cross-section not implemented'
+            stop 66908731
+            
         llgeo_powerfunction_area_from_depth_pure = nullvalueR  !% STUB  HACK
 
     end function llgeo_powerfunction_area_from_depth_pure
@@ -1153,7 +1165,7 @@ module geometry_lowlevel
 !%==========================================================================
 !%==========================================================================
 !%
-    pure function llgeo_powerfunction_topwidth_from_depth_pure &
+    function llgeo_powerfunction_topwidth_from_depth_pure &
             (thisP, depth) 
         !%------------------------------------------------------------------
         !% Description:
@@ -1163,7 +1175,11 @@ module geometry_lowlevel
             real(8), intent(in) :: depth(:)
             real(8), dimension(size(thisP)) :: llgeo_powerfunction_topwidth_from_depth_pure
         !%------------------------------------------------------------------
-
+            print *, thisP
+            print *, depth 
+            print *, 'CODE ERROR: powerfunction cross-section not implemented'
+            stop 66908732
+            
         llgeo_powerfunction_topwidth_from_depth_pure = nullvalueR  !% STUB  HACK
 
     end function llgeo_powerfunction_topwidth_from_depth_pure
@@ -1171,14 +1187,14 @@ module geometry_lowlevel
 !%==========================================================================    
 !%==========================================================================
 !%    
-    pure function llgeo_rectangular_topwidth_from_depth_pure &
-            (thisP, depth) 
+    function llgeo_rectangular_topwidth_from_depth_pure &
+            (thisP, dummy) !% dummy not needed, but retained for consistency
         !%------------------------------------------------------------------
         !% Description:
         !% Computes topwidth from known depth for rectangular cross section
         !%------------------------------------------------------------------
             integer, intent(in) :: thisP(:)  ! may be a packed array of indexes
-            real(8), intent(in) :: depth(:)
+            real(8), intent(in) :: dummy(:)  !% not needed, but retained for consistency
             real(8), dimension(size(thisP)) :: llgeo_rectangular_topwidth_from_depth_pure
         !%------------------------------------------------------------------
 
@@ -1442,7 +1458,7 @@ module geometry_lowlevel
 !%==========================================================================
 !%==========================================================================
 !% 
-    pure function llgeo_powerfunction_perimeter_from_depth_pure &
+    function llgeo_powerfunction_perimeter_from_depth_pure &
             (thisP, depth) 
         !%------------------------------------------------------------------
         !% Description:
@@ -1451,7 +1467,13 @@ module geometry_lowlevel
             integer, intent(in) :: thisP(:)  ! must be a packed array of indexes
             real(8), intent(in) :: depth(:)
             real(8), dimension(size(thisP)) :: llgeo_powerfunction_perimeter_from_depth_pure
+
         !%------------------------------------------------------------------
+
+            print *, thisP
+            print *, depth 
+            print *, 'CODE ERROR: powerfunction cross-section not implemented'
+            stop 66908734
 
         llgeo_powerfunction_perimeter_from_depth_pure = nullvalueR  !% STUB HACK
 

@@ -37,7 +37,7 @@ module outlet_elements
         !%------------------------------------------------------------------
         !% Declarations:
             integer, intent(in) :: eIdx  !% must be a single element ID      
-            character(64) :: subroutine_name = 'outlet_toplevel'
+            ! character(64) :: subroutine_name = 'outlet_toplevel'
         !%------------------------------------------------------------------
 
         !% --- update the setting

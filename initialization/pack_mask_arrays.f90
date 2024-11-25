@@ -1,6 +1,6 @@
 module pack_mask_arrays
     !%==========================================================================
-    !% SWMM5+ release, version 1.0.0
+    !% SWMM5+ release, version 1.0.0  
     !% 20230608
     !% Hydraulics engine that links with EPA SWMM-C
     !% June 8, 2023
@@ -46,7 +46,7 @@ contains
         !% set all the static packs and masks
         !%------------------------------------------------------------------
         !% Declarations:
-            integer :: ii
+            !integer :: ii, jj
             character(64) :: subroutine_name = 'pack_mask_arrays_all'
         !%------------------------------------------------------------------
         !% Preliminaries
@@ -56,20 +56,27 @@ contains
         
         call pack_geometry_etm_elements()  
         
+        ! print *, 'AAA '
         call pack_nongeometry_static_elements()
         
+        ! print *, 'BBBB '
         call pack_nongeometry_dynamic_elements()
 
         call pack_static_all_faces ()
-        
+
+        ! print *, 'CCC '
         call pack_static_interior_faces()
         
+        ! print *, 'DDD '
         call pack_static_shared_faces()
         
+        ! print *, 'EEEE '
         call pack_jump_interior_faces()
         
+        ! print *, 'FFF '
         call pack_jump_shared_faces()
 
+        ! print *, 'GGG '
         call pack_small_or_zero_depth_elements(CC,.true.)
         call pack_small_or_zero_depth_elements(JM,.true.)
 
@@ -78,31 +85,40 @@ contains
             call pack_small_or_zero_depth_elements(JM,.false.)
         end if
 
+        ! print *, 'HHH '
         call pack_CC_zeroDepth_interior_faces ()
+        ! print *, 'HHH2'
         call pack_CC_zeroDepth_shared_faces ()
+
+        ! print *, 'III '
 
         !%------------------------------------------------------------------
         !% Closing
-        if (setting%Debug%File%initial_condition) then
+       ! if (setting%Debug%File%initial_condition) then
                 !% only using the first processor to print results
-                if (this_image() == 1) then
+                ! if (this_image() == 1) then
 
-                    do ii = 1,num_images()
-                    print*, '----------------------------------------------------'
-                    print*, 'image = ', ii
-                    print*, '..........packed local element indexes of...........'
-                    ! print*, elemP(:,ep_ALLtm)[ii], 'all ETM, AC elements'
-                    ! print*, elemP(:,ep_ETM)[ii], 'all ETM elements'
-                    print*, elemP(:,ep_CC)[ii], 'all CC elements'
-                    print*, elemP(:,ep_Diag)[ii], 'all diagnostic elements'
-                    print*, '.................face logicals......................'
-                    print*, faceP(:,fp_noBC_IorS)[ii], 'all the interior faces'
-                    print*, facePS(:,fp_noBC_IorS)[ii], 'all the shared faces'
-                    ! call execute_command_line('')
-                    end do
+                !     do ii = 1,num_images()
+                !     print*, '----------------------------------------------------'
+                !     print*, 'image = ', ii
+                !     print*, '..........packed local element indexes of...........'
+                !     ! print*, elemP(:,ep_ALLtm)[ii], 'all ETM, AC elements'
+                !     ! print*, elemP(:,ep_ETM)[ii], 'all ETM elements'
+                !    ! print*, elemP(:,ep_CC)[ii], 'all CC elements'
+                !    ! print*, elemP(:,ep_Diag)[ii], 'all diagnostic elements'
+                !     print*, '.................face logicals......................'
+                !     do jj=1,npack_faceP(fp_noBC_IorS)
+                !         print*, faceP(jj,fp_noBC_IorS)[ii]
+                !     end do
+                !     ! print*, faceP(:,fp_noBC_IorS)[ii], 'all the interior faces'
+                !    ! print*, facePS(:,fp_noBC_IorS)[ii], 'all the shared faces'
+                !     ! call execute_command_line('')
+                !     end do
 
-                end if
-            end if
+                ! end if
+        !end if
+
+            !stop 20987343
 
             if (setting%Debug%File%pack_mask_arrays) &
             write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
@@ -163,24 +179,32 @@ contains
                                 )
         end if
 
-        !% --- look for lateral inflows on this image whose downstream nodes
-        !%     are phantom. These will not show up in the nbc set as the inflow
-        !%     nodes are not on this image, but the inflow must be distributed 
-        !%     over the "spanning link" that is upstream of the phantom node          
-        lbc = count( (link%YN(:,lYN_hasLateralInflow)                   ) .and. &
-                     (link%I (:,li_P_image)         == this_image()     ) .and. &
-                     (node%YN(link%I(:,li_Mnode_d ),nYN_is_phantom_node))       &
-                    )
+        ! !% --- look for lateral inflows on this image whose downstream nodes
+        ! !%     are phantom. These will not show up in the nbc set as the inflow
+        ! !%     nodes are not on this image, but the inflow must be distributed 
+        ! !%     over the "spanning link" that is upstream of the phantom node          
+        ! lbc = count( (link%YN(:,lYN_hasLateralInflow)                   ) .and. &
+        !              (link%I (:,li_P_imageUp)         == this_image()     ) .and. &
+        !              (node%YN(link%I(:,li_Mnode_d ),nYN_is_phantom_node))       &
+        !             )
+
+        !% --- find the lateral inflow links whose inflow node (downstream)
+        !%     is on another image. That is, these are image connection links
+        !%     where the imageUp is on the is image and imageDn is on another.
+        lbc = count( (link%YN(:,lYN_hasLateralInflow))  &
+                    .and.                               &
+                     (link%YN(:,lYN_isImageConnection)) &
+                    .and.                               &
+                     (link%I (:,li_P_imageUp) .eq. this_image() ) )
 
         if (lbc > 0) then 
             !% --- store the BC node indexes for lateral inflows whose downstream node
             !%     is a phantom node.
             allocate(fromLinks(lbc))
             fromLinks = pack( link%I (:,li_lateralInflowNode), &
-                             (link%YN(:,lYN_hasLateralInflow)                   ) .and. &
-                             (link%I (:,li_P_image)         == this_image()     ) .and. &
-                             (node%YN(link%I(:,li_Mnode_d ),nYN_is_phantom_node))       & 
-                            )
+                             (link%YN(:,lYN_hasLateralInflow))  &
+                              .and. &
+                             (link%I (:,li_P_imageUp) .eq. this_image()) )
                             
             !% --- combine the fromNodes and fromLinks into a single array
             allocate(allNodes(nbc+lbc))
@@ -198,7 +222,7 @@ contains
             N_flowBCnode = Nunique
 
         else
-            !% --- Note that if there are no lateral inflows with phantom nodes downstream
+            !% --- Note that if there are no lateral inflows on image connection links
             !%     then the fromNodes() contains all the node inflow indexes required for
             !%     this image
             if (nbc > 0) then
@@ -287,13 +311,26 @@ contains
         !%------------------------------------------------------------------
 
         !% --- count the links with lateral inflows on this image     
-        N_flowBClink = count(link%YN(:,lYN_hasLateralInflow) .and. &
-                        (link%I(:,li_P_image) == this_image()))
+        N_flowBClink = count(link%YN(:,lYN_hasLateralInflow)            &
+                             .and.                                      &
+                             (                                          &
+                               (link%I(:,li_P_imageUp) == this_image()) &
+                               .or.                                     &
+                               (link%I(:,li_P_imageDn) == this_image()) &
+                             ) )
 
         if (N_flowBClink > 0) then
             allocate(link%P%have_flowBC(N_flowBClink))
             link%P%have_flowBC = pack(link%I(:,li_idx), &
-                link%YN(:,lYN_hasLateralInflow) .and. (link%I(:,li_P_image) == this_image()))
+                                     (link%YN(:,lYN_hasLateralInflow)            &
+                                      .and.                                      &
+                                      (                                          &
+                                        (link%I(:,li_P_imageUp) == this_image()) &
+                                        .or.                                     &
+                                        (link%I(:,li_P_imageDn) == this_image()) &
+                                        ) ) &
+                                     )
+
         end if
 
     end subroutine pack_links_haveBC_thisImage    
@@ -307,8 +344,8 @@ contains
         !% Allocates arrays and packs the data for the BC
         !%------------------------------------------------------------------
         !% Declarations
-            integer :: psize
-            integer, pointer :: nIdx, linkUp
+            !integer :: psize
+            !integer, pointer :: nIdx, linkUp
             integer, pointer :: tempI(:)
 
             character(64) :: subroutine_name = 'pack_data_BC'
@@ -384,7 +421,7 @@ contains
         !% Declarations:
             logical, pointer :: isElemOut(:), isDummy(:)
             integer, pointer :: eIdx(:), ptype, npack
-            character(64) :: subroutine_name = 'pack_element_outputML'
+            ! character(64) :: subroutine_name = 'pack_element_outputML'
         !%------------------------------------------------------------------
         !% Preliminaries
             if (setting%Output%Report%suppress_MultiLevel_Output) return
@@ -421,7 +458,7 @@ contains
         !% Declarations:
             logical, pointer :: isFaceOut(:)
             integer, pointer :: fIdx(:), ptype, npack
-            character(64) :: subroutine_name = 'pack_face_outputML'
+            ! character(64) :: subroutine_name = 'pack_face_outputML'
         !%-----------------------------------------------------------------
         !% Preliminaries
             if (setting%Output%Report%suppress_MultiLevel_Output) return
@@ -980,6 +1017,24 @@ contains
                 )
         end if 
 
+        ! print *, count(elemI(:,ei_elementType) == JM)
+        ! print *, count(elemSI(:,esi_JM_Type) == ImpliedStorage)
+        ! print *, count( &
+        !         (elemI(:,ei_elementType) == JM) &
+        !         .and. &
+        !         (elemSI(:,esi_JM_Type) == ImpliedStorage))
+        ! print *, count( &
+        !         (elemI(:,ei_elementType) == JM) &
+        !         .and. &
+        !         (elemSI(:,esi_JM_Type) == ImpliedStorage) &
+        !         .and. &
+        !         ( elemI(:,ei_tmType) == ETM) &
+        !         )        
+
+        ! print *, npack 
+        ! print *, elemI(101,ei_HeqType), time_march, reverseKey(elemI(101,ei_HeqType)) 
+        ! print *, elemI(101,ei_tmType), ETM
+        ! stop 66098734
 
         !% --- JM with no storage
         ptype => col_elemPGetm(epg_JM_noStorage)
@@ -1018,7 +1073,7 @@ contains
         !%------------------------------------------------------------------
         !% Declarations
             integer, pointer :: ptype, npack, eIDx(:) !, fUp(:), fDn(:)
-            integer :: ii
+            !integer :: ii
             character(64) :: subroutine_name = 'pack_nongeometry_static_elements'
         !--------------------------------------------------------------------------
         !% Preliminaries
@@ -1852,8 +1907,8 @@ contains
         !% packed arrays for non geometry dynamic elements
         !%------------------------------------------------------------------
         !% Declarations
-            integer          :: ii
-            integer, pointer :: ptype, npack, fup, fdn, eIDx(:)
+            !integer          :: ii
+            integer, pointer :: ptype, npack, eIDx(:)
             character(64) :: subroutine_name = 'pack_nongeometry_dynamic_elements'
         !%------------------------------------------------------------------
         !% Preliminaries
@@ -2258,9 +2313,12 @@ contains
         !% Declarations
             integer, pointer :: ptype, npack 
             integer, pointer :: eUp(:), eDn(:),  fCC(:)
-            integer :: ii
+            !integer :: ii
         !%------------------------------------------------------------------
         !% Aliases:
+            ! print *, 'in here '
+            ! print *, fp_CC_both_IorS, fi_Melem_uL, fi_Melem_dL
+            ! print *, npack_faceP(fp_CC_both_IorS)
             !% --- all the interior faces with CC on both sides
             fCC      => faceP(1:npack_faceP(fp_CC_both_IorS),fp_CC_both_IorS)
             !% --- upstream elements
@@ -2268,7 +2326,19 @@ contains
             !% --- downstream elements
             eDn      => faceI(:,fi_Melem_dL)
         !%------------------------------------------------------------------
-
+            ! print *, ' '
+            ! print *, fp_CC_upstream_is_zero_IorS
+            ! print *, 'ptype ', col_faceP(fp_CC_upstream_is_zero_IorS)
+            ! print *, ' '
+            ! print *, 'fCC '
+            ! do ii=1,size(fCC)
+            !     if (faceP(ii,fp_CC_both_IorS) == nullvalueI) then
+            !          print *, ii, faceP(ii,fp_CC_both_IorS)
+            !     end if
+            !    !%, faceI(faceP(ii,fp_CC_both_IorS),fi_Melem_uL),  faceI(faceP(ii,fp_CC_both_IorS),fi_Melem_dL)
+            ! end do
+            ! stop 509874
+            !print *, fCC
         !%===================
         !% ---- fp_CC_upstream_is_zero_IorS (CC on both sides)
             ptype => col_faceP(fp_CC_upstream_is_zero_IorS)
@@ -2335,7 +2405,7 @@ contains
         !% Declarations
             integer, pointer :: ptype, npack 
             integer, pointer :: eUp(:), eDn(:),  fJB(:)
-            integer :: ii
+          !  integer :: ii
         !%------------------------------------------------------------------
         !% Aliases:
             !% --- all the interior faces with JBCC
@@ -2564,7 +2634,7 @@ contains
         !% Description
         !% packed arrays for static faces
         !%-----------------------------------------------------------------
-            integer :: ii, image
+            integer ::  image
             integer, pointer :: Nfaces, ptype, npack, fIdx(:), eup(:), edn(:)
 
             character(64) :: subroutine_name = 'pack_static_interior_faces'
@@ -2616,6 +2686,13 @@ contains
                       (elemI(eDn,ei_elementType) == CC)    &
                     )
         end if
+
+        ! do ii=1,Nfaces
+        !     print *,ii, eUp(ii), eDn(ii), faceYN(ii,fYN_isInteriorFace)
+        ! end do
+        ! print *, 'npack ',npack
+        ! print *, elemI(nullvalueI, ei_elementType), CC
+        ! stop 5098743
 
     !% fp_Diag_IorS
         !% --- all interior faces adjacent to a diagnostic element
@@ -2776,7 +2853,7 @@ contains
         !% simply packs what is stored in faceI(:,fi_jump_type) as the actual
         !% computation of what is a jump is in the identify_hydraulic_jump subroutine.
         !%-----------------------------------------------------------------
-            integer          :: ii, image
+            integer          :: image
             integer, pointer :: Nfaces, ptype, npack, fIdx(:), eup(:), edn(:)
             character(64) :: subroutine_name = 'pack_jump_interior_faces'
         !--------------------------------------------------------------------------
@@ -2848,7 +2925,7 @@ contains
             integer, pointer :: ptype, npack, fIdx(:), eup, edn, gup, gdn, Nfaces
             integer, pointer :: c_image, N_shared_faces, thisP
             logical, pointer :: isUpGhost, isDnGhost
-            integer(kind=8) :: crate, cmax, cval
+            !integer(kind=8) :: crate, cmax, cval
             character(64) :: subroutine_name = 'pack_static_shared_faces'
         !%-----------------------------------------------------------------
         !% Preliminaries
@@ -3072,10 +3149,10 @@ contains
         !% computation of what is a jump is in the identify_hydraulic_jump subroutine.
         !%-----------------------------------------------------------------
         !% Declarations:
-            integer          :: ii, image
+            integer          :: image
             integer, pointer :: ptype, npack, fIdx(:), Nfaces
-            integer, pointer :: N_shared_faces, thisP, eup, edn, gup, gdn, c_image
-            logical, pointer :: isUpGhost, isDnGhost
+            !integer, pointer ::  eup, edn, gup, gdn, c_image
+            !logical, pointer :: isUpGhost, isDnGhost
             integer(kind=8) :: crate, cmax, cval
             character(64)    :: subroutine_name = 'pack_jump_shared_faces'
         !%-----------------------------------------------------------------

@@ -33,8 +33,9 @@ module define_indexes
     !% Define the column indexes for link%I(:,:) arrays
     !% These are the for the full arrays of integer data
     !%-------------------------------------------------------------------------
-    enum, bind(c)
+    enum, bind(c) 
         enumerator :: li_idx = 1
+        enumerator :: li_order                !% unique assignment order on a partition
         enumerator :: li_link_type            ! KEY type of links (from SWMM.inp) i.e. conduit, orifice, weir, etc.
         enumerator :: li_link_sub_type        ! KEY link subtype (from SWMM.in0) i.e. vnotch weir, side orifice, etc.
         enumerator :: li_link_direction       ! link direction (from SWMM.inp)
@@ -42,21 +43,26 @@ module define_indexes
         enumerator :: li_geometry_background  ! KEY background geometry of diagnostic element
         enumerator :: li_barrels              ! number of barrels (from SWMM.inp)
         enumerator :: li_culvertCode          ! KEY culvert code for conduit (from SWMM.inp)
-        enumerator :: li_N_element            ! Number of elements in this link
+        enumerator :: li_N_element            ! Total Number of elements in this link (may be on different partitions)
+        enumerator :: li_N_elementUp          ! Number of elements from this link on image li_P_imageUp 
+        enumerator :: li_N_elementDn          ! Number of elements from this link on image li_P_imageDn    
         enumerator :: li_Mnode_u              ! map to upstream node connecting to link
         enumerator :: li_Mnode_d              ! map to downstram node connecting to link
-        enumerator :: li_assigned             ! given 1 when link is assigned
+        enumerator :: li_assigned             ! set to lUnassigned, lAssignedUp, lAssignedDn, lAssignedAll
         enumerator :: li_InitialDepthType     ! NOT WORKING: KEY UniformDepth, LinearlyVaryingDepth, IncreasingDepth, FixedHead
         enumerator :: li_length_adjusted      ! 1 = length was not adjusted, 2 = one side was adjusted, 3 = both side was adjusted
-        enumerator :: li_P_image              ! image number assigned from BIPquick
-        enumerator :: li_parent_link          ! A map to the corresponding SWMM link after a BIPquick link-split
+        enumerator :: li_P_imageUp            ! image number for link (or upstream section of link)
+        enumerator :: li_P_imageDn            ! image number for downstream section of link (if different)
+        !enumerator :: li_parent_link          ! OBSOLETE ! map to the corresponding SWMM link after a BIPquick link-split
         enumerator :: li_weir_EndContractions ! (0,1) to indicate contraction (from SWMM.inp)
         enumerator :: li_RoadSurface          ! roadsurface type for roadway weir (from SWMM.inp)
         enumerator :: li_curve_id             ! curve id if the link is associated with any curve (from SWMM.inp)
         enumerator :: li_lateralInflowNode    ! downstream node from which the lateral inflow is coming from
         enumerator :: li_lateralInflowBCidx   ! The idx position in the BC%flowX(idx,:) array for lateral inflow
-        enumerator :: li_first_elem_idx       ! first SWMM5+ elem in the link
-        enumerator :: li_last_elem_idx        ! last SWMM5+ elem in the link
+        enumerator :: li_up_first_elem_idx    ! first SWMM5+ elem in the UpImage partition
+        enumerator :: li_up_last_elem_idx     ! furthest downstream element in the UpImage partition
+        enumerator :: li_dn_first_elem_idx    ! furthest upstream element in the DnImage partition
+        enumerator :: li_dn_last_elem_idx     ! last SWMM5+ elem in DnImage partition
         enumerator :: li_transect_idx         ! transect index if the link is associated with an irregular geometry transect (from SWMM.inp)
         enumerator :: li_lastplusone !% must be last enum item
     end enum
@@ -117,7 +123,7 @@ module define_indexes
         enumerator :: lr_Setting               !% the 0 to 1 open/close setting of EPA-SWMM
         enumerator :: lr_TargetSetting         !% target setting of a control action
         enumerator :: lr_TimeLastSet           !% the time (in seconds) the link setting was last changed
-        enumerator :: lr_InflowVolumeFraction    !% fraction of inflow delivered to this link
+        enumerator :: lr_InflowVolumeFraction    !% fraction of inflow delivered to this link (allows splits for partition)
         enumerator :: lr_ZbottomUp             ! Z bottom of upstream node
         enumerator :: lr_ZbottomDn             ! Z bottom of downstream node
         enumerator :: lr_BackgroundScale1      ! length or area scale used for defining background geometry of diagnostice element
@@ -132,16 +138,19 @@ module define_indexes
     !%-------------------------------------------------------------------------
     enum, bind(c)
         enumerator :: lYN_weir_CanSurcharge = 1
-        enumerator :: lYN_is_nj2_connection
+        enumerator :: lYN_is_nj2_connection            
         enumerator :: lYN_isOutput
         enumerator :: lYN_isEquivalentOrifice
-        enumerator :: lYN_isPhantomLink
+        enumerator :: lYN_isPhantomLink  ! OBSOLETE
+        enumerator :: lYN_isSpanningLink  !% OBSOLETE
+        enumerator :: lYN_isImageConnection
         enumerator :: lYN_hasFlapGate
         enumerator :: lYN_isUpSurcharge
         enumerator :: lYN_isDnSurcharge
         enumerator :: lYN_isSurcharged
         enumerator :: lYN_hasLateralInflow
         enumerator :: lYN_airPocketDetected
+        enumerator :: lYN_isAssigned
         enumerator :: lYN_temp1
         enumerator :: lYN_lastplusone !% must be last enum item
     end enum
@@ -158,13 +167,14 @@ module define_indexes
     !%-------------------------------------------------------------------------
     enum, bind(c)
         enumerator :: ni_idx = 1
+        enumerator :: ni_order         !% unique assignment order on partition
         enumerator :: ni_node_type     ! KEY
         enumerator :: ni_N_link_u      ! number of upstream links at this node
         enumerator :: ni_N_link_d      ! number of downstram links at this node
         enumerator :: ni_curve_ID      ! ID for nodal storage surface area curve
         enumerator :: ni_assigned      ! given 1 when node has been assigned to face/elem,
         enumerator :: ni_P_image       ! image number assigned from BIPquick
-        enumerator :: ni_P_is_boundary ! 0=this node has nothing to do with image communication; >0=this node is a partition boundary
+        !enumerator :: ni_P_is_boundary ! OBSOLETE use nYN_isImageConnect !0=this node has nothing to do with image communication; >0=this node is a partition boundary
         enumerator :: ni_elem_idx      !% this is the element of an nJM node, upstream element of BCdn, downstream element of BCup
         enumerator :: ni_face_idx      !% for nJ2, BCup, BCdn, nJ1, this is the face associated with the node, not defined for nJM
         enumerator :: ni_pattern_resolution ! minimum resolution of patterns associated with node BC
@@ -210,6 +220,7 @@ module define_indexes
     enum, bind(c)
         enumerator :: nr_Zbottom = 1
         enumerator :: nr_InitialDepth
+        enumerator :: nr_InitialHead
         enumerator :: nr_FullDepth
         enumerator :: nr_StorageConstant
         enumerator :: nr_StorageCoeff
@@ -218,9 +229,8 @@ module define_indexes
         enumerator :: nr_PondedArea
         enumerator :: nr_OverflowHeightAboveCrown
         enumerator :: nr_MaxInflow
-        enumerator :: nr_Eta
-        enumerator :: nr_Depth
-        enumerator :: nr_head
+        !enumerator :: nr_Eta
+        !enumerator :: nr_Depth
         enumerator :: nr_Volume
         enumerator :: nr_Flooding
         ! enumerator :: nr_UpLinksFullVolume
@@ -241,12 +251,47 @@ module define_indexes
         enumerator :: nYN_has_dwfInflow
         enumerator :: nYN_has_storage
         enumerator :: nYN_isOutput
-        enumerator :: nYN_is_phantom_node
+        enumerator :: nYN_is_phantom_node !% OBSOLETE
+        enumerator :: nYN_isImageBoundary
         enumerator :: nYN_hasFlapGate
         enumerator :: nYN_isLinkFlow !% inflow is forced to link
+        enumerator :: nYN_isAssigned !% true if assigned an to partition
         enumerator :: nYN_lastplusone !% must be last enum item
     end enum
     integer, target :: Ncol_nodeYN  = nYN_lastplusone-1
+!%
+!%==========================================================================
+!% BIPQUICK PARTITIONING
+!%==========================================================================
+!% 
+    enum, bind(c)
+        ! enumerator :: bqI_upLink1 !% --- upstream links of this node
+        ! enumerator :: bqI_upLink2
+        ! enumerator :: bqI_upLink3
+        ! enumerator :: bqI_upLink4
+        ! enumerator :: bqI_upLink5 !% ADDBRANCH
+        enumerator :: bqI_BaseIdx = 1 !% --- base index to which this node is presently assigned
+        !enumerator :: bqI_
+        enumerator :: bqI_lastplusone 
+    end enum
+    integer, target :: Ncol_bipqkI = bqI_lastplusone-1
+
+    enum, bind(c)
+        enumerator :: bqR_DirectWeight = 1
+        enumerator :: bqR_TotalWeight
+        enumerator :: bqR_lastplusone 
+    end enum
+    integer, target :: Ncol_bipqkR = bqR_lastplusone-1
+
+    enum, bind(c)
+        enumerator :: bqYN_isPotentialBase = 1 !% --- possible base point for network in partition
+        enumerator :: bqYN_isPartitioned   !% --- T if node is assigned to a partition
+        enumerator :: bqYN_isSubsumed      !% --- T if total weight has been subsumed by another node
+        enumerator :: bqYN_hasTotalWeight  !% --- T if total weight has been computed
+        enumerator :: bqYN_lastplusone 
+    end enum
+    integer, target :: Ncol_bipqkYN = bqYN_lastplusone-1
+
 !%
 !%==========================================================================
 !% BOUNDARY CONDITIONS
@@ -320,15 +365,16 @@ module define_indexes
          enumerator :: ei_geometryType              !% KEY cross-sectional geometry type  (static)
          enumerator :: ei_barrels                   !% Integer number of barrels
          enumerator :: ei_HeqType                   !% KEY type of head equation (static)
+         enumerator :: ei_Pimage                    !% partition (image) for this element
          enumerator :: ei_lateralInflowNode         !% SWMM node from which the element will get lateral inflow
          enumerator :: ei_lateralInflowBCidx        !% BC(idx) for the lateral inflow  
          enumerator :: ei_link_Gidx_SWMM            !% link index from global SWMM network  (static)
-         enumerator :: ei_link_Gidx_BIPquick        !% link index from global BIPquick network  (static)
+         !enumerator :: ei_link_Gidx_BIPquick        !% link index from global BIPquick network  (static)
          enumerator :: ei_link_pos                  !% position (elem from upstream = 1 to downstream = n) in link
          enumerator :: ei_Mface_uL                  !% map to upstream face local index  (static)
          enumerator :: ei_Mface_dL                  !% map to downstream face local index  (static)
          enumerator :: ei_node_Gidx_SWMM            !% node index from global SWMM network  (static)
-         enumerator :: ei_node_Gidx_BIPquick        !% node index from global BIPquick network  (static)
+         !enumerator :: ei_node_Gidx_BIPquick        !% node index from global BIPquick network  (static)
          enumerator :: ei_adjacent_JM_idx           !% if the link elem connected to a JM, then the JM idx
          enumerator :: ei_adjacent_JB_idx           !% if the link elem connected to a JM, then the JB idx
          enumerator :: ei_QeqType                   !% KEY type of flow equation (static)     
@@ -471,6 +517,7 @@ module define_indexes
         enumerator :: eYN_hasLateralInflow              !% TRUE if lateral inflow exists on this element
         enumerator :: eYN_isBoundary_up                 !% TRUE if the element is connected to a shared face upstream thus a boundary element of a partition
         enumerator :: eYN_isBoundary_dn                 !% TRUE if the element is connected to a shared face downstream thus a boundary element of a partition
+        enumerator :: eYN_isConnectingLink              !% TRUE if the element is in a connecting link between images
         enumerator :: eYN_isCulvert                     !% TRUE if CC element is inlet, outlet or culvert barrel
         enumerator :: eYN_isDummy
         enumerator :: eYN_is_CCadjacent_JBorDiag        !% TRUE if element is adjacent to CC and is not CC
@@ -820,7 +867,7 @@ module define_indexes
         enumerator ::  esr_Pump_xMax                       !% maximum pt. on pump curve
         enumerator ::  esr_Pump_dQdH_upstream              !% rate of change of Q with upstream head
         enumerator ::  esr_Pump_dQdH_downstream            !% rate of change of Q with downstream head
-        enumerator ::  esr_Pump_Zcrest
+        !enumerator ::  esr_Pump_Zcrest
         enumerator ::  esr_Pump_Rampup_Time                !% Time interval for pump startup 
         enumerator ::  esr_Pump_MinShutoffTime             !% Minimum shutoff time before pump can restart
         enumerator ::  esr_Pump_TimeSinceStartOrShutdown   !% Time since last change in status
@@ -1255,10 +1302,10 @@ module define_indexes
         enumerator ::  fi_GhostElem_dL              !% map to downstream ghost element
         enumerator ::  fi_BoundaryElem_uL           !% map to upstream boundary/ghost element in the boundary/ghost array
         enumerator ::  fi_BoundaryElem_dL           !% map to dwonstream boundary/ghost element in the boundary/ghost array
-        enumerator ::  fi_Connected_image           !% image number a shared face connected to
+        enumerator ::  fi_Connected_image           !% additional image a shared face connected to (i.e., not this_image)
         enumerator ::  fi_Identical_Lidx            !% local face index of the identical face in the other connected image
-        enumerator ::  fi_node_idx_BIPquick         !% if the face is originated from a node, then the BQ idx
-        enumerator ::  fi_link_idx_BIPquick         !% face connected to a BQ link element 
+        !enumerator ::  fi_node_idx_BIPquick         !% if the face is originated from a node, then the BQ idx
+        !enumerator ::  fi_link_idx_BIPquick         !% face connected to a BQ link element 
         enumerator ::  fi_node_idx_SWMM             !% if the face is originated from a node, then the SWMM idx
         enumerator ::  fi_link_idx_SWMM             !% face connected to a SWMM link element 
         enumerator :: fi_lastplusone !% must be last enum item
@@ -1296,7 +1343,7 @@ module define_indexes
         enumerator :: fr_Froude_Adjacent_to_JB        !% Froude number of adjacent element
         enumerator :: fr_Depth_Adjacent_to_JB         !% Depth of adjacent element
         enumerator :: fr_KJunction_MinorLoss    !% K factor for entrance/exit loss from element adjacent to nJM
-        enumerator :: fr_psiL2                  !% head loss term for juction computation
+        !enumerator :: fr_psiL2                  !% head loss term for juction computation
         enumerator :: fr_Zbottom                !% zbottom of faces
         enumerator :: fr_Velocity_d             !% velocity on downstream side of face
         enumerator :: fr_Velocity_u             !% velocity on upstream side of face
@@ -1488,7 +1535,7 @@ module define_indexes
     enum, bind(c)
         enumerator :: pfc_initialize_all = 1
         enumerator :: pfc_init_partitioning
-        enumerator :: pfc_init_BIPquick
+        !!enumerator :: pfc_init_BIPquick
         enumerator :: pfc_network_define_toplevel
         enumerator :: pfc_IC_bc
         enumerator :: pfc_IC_setup
@@ -1534,7 +1581,17 @@ module define_indexes
         enumerator :: offi_lastplusone !% must be the last enum item
     end enum
     integer, target :: Ncol_offi = offi_lastplusone-1
-!%
+
+    !% --- data columns for output_static_elemR
+    enum, bind(c)
+        enumerator :: oser_LNidx  = 1    !% --- SWMM GIDX for node or element 
+        enumerator :: oser_LNtype        !% --- whether link or node (key NodeElemOut LinkElemOut )
+        enumerator :: oser_GEidx         !% --- global element index (must be last key)
+        enumerator :: oser_lastplusone  !% must be the last enum item    
+    end enum 
+    integer, target :: Ncol_oser_base = oser_lastplusone-1
+    !%
+ !%
 !%==========================================================================
 !% SUBCATCHMENTS
 !%==========================================================================

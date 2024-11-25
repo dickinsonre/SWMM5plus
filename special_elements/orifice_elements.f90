@@ -31,10 +31,11 @@ module orifice_elements
 
     public :: orifice_toplevel
     public :: orifice_set_setting
+    public :: orifice_geometry_update
     !public :: orifice_upstream_geometry
 
-    integer :: printIdx = 923
-    integer :: stepcut  = 120908
+    integer :: printIdx = 223
+    integer :: stepcut  = 10594
 
     contains
 !%
@@ -45,12 +46,12 @@ module orifice_elements
     subroutine orifice_toplevel (eIdx)
         !%------------------------------------------------------------------
         !% Description:
-        !% Calculate flow through an orifice
+        !% Calculate flow through an orifice of element index eIdx
         !%------------------------------------------------------------------
             integer, intent(in) :: eIdx  !% eIdx must be a single element ID
             integer, pointer    :: iupf, idnf
             real(8)             :: HeadStore, FlowrateStore
-            character(64)       :: subroutine_name = 'orifice_toplevel'
+            ! character(64)       :: subroutine_name = 'orifice_toplevel'
             
         !%------------------------------------------------------------------
         !% Aliases
@@ -60,6 +61,7 @@ module orifice_elements
         !% --- NOTE the opening of the orifice due to control intervention
         !%     is already set in control_update_setting subroutine
 
+            ! print *, 'CALLING ORIFICE TOP LEVEL ',eIdx
 
             ! if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then  
             !     print *, ' '
@@ -67,6 +69,8 @@ module orifice_elements
             !     print *, 'heads            ', faceR(iupf,fr_Head_d),faceR(idnf,fr_Head_u)
             !     print *, 'heads + delta    ', faceR(iupf,fr_Head_d) + setting%Orifice%delta, faceR(idnf,fr_Head_u) + setting%Orifice%delta
             ! end if
+            
+        !% --- note that an orifice may be both upstream and downstream of JB elements
 
         !% --- if orifice is downstream of JB, compute the flowrate for
         !%     upstream (of orifice) head increase of magnitude delta
@@ -140,15 +144,16 @@ module orifice_elements
 
         call orifice_compute (eIdx, .false.)
 
+     
         ! if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then  
         !     print *, ' '
         !     print *, 'in orifice toplevel B: Downstream of JB'
         !     print *, 'flowrate          ',elemR(eIdx,er_Flowrate), elemSR(eIdx,esr_Orifice_dQdH_upstream) 
         !     print *, 'difference ',elemSR(eIdx,esr_Orifice_dQdH_upstream)- elemR(eIdx,er_Flowrate) 
         !     print *, ' '
-        !     print *, 'in orifice toplevel B: Upstream of JB'
-        !     print *, 'flowrate          ',elemR(eIdx,er_Flowrate), elemSR(eIdx,esr_Orifice_dQdH_downstream) 
-        !     print *, 'difference ',elemSR(eIdx,esr_Orifice_dQdH_downstream)- elemR(eIdx,er_Flowrate) 
+        !     ! print *, 'in orifice toplevel B: Upstream of JB'
+        !     ! print *, 'flowrate          ',elemR(eIdx,er_Flowrate), elemSR(eIdx,esr_Orifice_dQdH_downstream) 
+        !     ! print *, 'difference ',elemSR(eIdx,esr_Orifice_dQdH_downstream)- elemR(eIdx,er_Flowrate) 
         !     print *, ' '
         ! end if
 
@@ -169,6 +174,14 @@ module orifice_elements
         end if
 
 
+        ! print *, ' '
+        ! print *, ' orifice top level  flowrate'
+        ! print *, eIdx
+        ! print *,  elemR(eIdx,er_Flowrate) ! elemSR(223,esr_Orifice_dQdH_upstream), elemSR(223,esr_Orifice_dQdH_downstream)
+        ! print *, ' '
+
+        !stop 55098734
+
         ! if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then  
         !     print *, ' '
         !     print *, 'in orifice toplevel c'
@@ -180,15 +193,14 @@ module orifice_elements
 
         !% ---- functions that do not apply to dQdH computation
     
-        !% --- limit orifice flow change for stability
-        call common_flowchange_limiter_singular (eIdx)
+
 
         ! if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then  
         !     print *, ' '
         !     print *, 'in orifice toplevel d -- after 2nd corrections'
         !     print *, 'equivalent flow ',elemR(eIdx,er_Flowrate)
         !     print *, ' '
-        ! end if
+        ! ! end if
 
 
         !% --- update velocity from flowrate and area
@@ -196,8 +208,8 @@ module orifice_elements
 
         ! if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then  
         !     print *, ' '
-        !     print *, 'in orifice toplevel e -- after 3rd corrections'
-        !     print *, 'equivalent flow ',elemR(eIdx,er_Flowrate)
+            ! print *, 'in orifice toplevel e -- after 3rd corrections'
+            ! print *, 'equivalent flow ',elemR(eIdx,er_Flowrate)
         !     print *, ' '
         ! end if
 
@@ -207,8 +219,8 @@ module orifice_elements
 
             ! if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then  
             !     print *, ' '
-            !     print *, 'in orifice toplevel f -- after 4th corrections'
-            !     print *, 'equivalent flow ',elemR(eIdx,er_Flowrate)
+                ! print *, 'in orifice toplevel f -- after 4th corrections'
+                ! print *, 'equivalent flow ',elemR(eIdx,er_Flowrate)
             !     print *, ' '
             ! end if
 
@@ -292,7 +304,7 @@ module orifice_elements
     !     logical             :: useNodeValues
     ! !%------------------------------------------------------------------ 
 
-    !     thisLink => elemI(eIdx,ei_link_Gidx_BIPquick)
+    !     thisLink => elemI(eIdx,ei_link_Gidx_SWMM)
     !     upNode   => link%I(thisLink,li_Mnode_u)
     !     upJM     => node%I(upNode,ni_elem_idx)
         
@@ -332,10 +344,14 @@ module orifice_elements
             integer, intent(in) :: eIdx
             logical, intent(in) :: isdelta
             integer, pointer    :: SpecificOrificeType
+
+            logical :: isdebug = .false.
         !%------------------------------------------------------------------
         !% Aliases
             SpecificOrificeType   => elemSI(eIdx,esi_Orifice_SpecificType)
         !%------------------------------------------------------------------
+
+            if (isdebug) print *, isdelta
 
         !% -- get the head and flow direction through orifice
         call common_head_and_flowdirection_singular &
@@ -394,6 +410,13 @@ module orifice_elements
                 !% --- no action for equivalent orifices
         end if
 
+
+        !% --- limit orifice flow change for stability
+        !%     limiter applied to delta and regular orifice
+        !%     computation for consistency in dQdH
+        call common_flowchange_limiter_singular (eIdx)
+
+
         ! if ((setting%Time%Step > stepCut) .and. (eIdx == printIdx)) then  
         !     print *, ' '
         !     print *, '    in orifice compute -- after corrections'
@@ -413,14 +436,14 @@ module orifice_elements
         !%------------------------------------------------------------------
         !% Declarations
             integer, intent(in) :: eIdx !% single ID of element
-            real(8), pointer    :: CriticalDepth, CriticalHead, FullArea, FractionCritDepth
-            real(8), pointer    :: EffectiveFullArea, EffectiveHeadDelta, FullDepth
-            real(8), pointer    :: Head, NominalDsHead, RectangularBreadth
+            !real(8), pointer    ::
+            real(8), pointer    :: EffectiveHeadDelta
+            real(8), pointer    :: Head, NominalDsHead
             real(8), pointer    :: EffectiveFullDepth, Zcrown, Zcrest
-            real(8), pointer    :: DischargeCoeff, SharpCrestedWeirCoeff
-            integer, pointer    :: SpecificOrificeType, FlowDirection, GeometryType
+            !real(8), pointer    :: SharpCrestedWeirCoeff
+            integer, pointer    :: SpecificOrificeType, FlowDirection
             logical, pointer    :: hasFlapGate
-            real(8)             :: AoverL, YoverYfull, Zmidpt
+            real(8)             :: Zmidpt
 
             character(64) :: subroutine_name = 'orifice_effective_head_delta'
         !%-----------------------------------------------------------------------------
@@ -676,11 +699,11 @@ module orifice_elements
             integer, intent(in) :: eIdx
             integer, pointer :: FlowDirection, SpecificOrificeType
             real(8), pointer :: Flowrate, EffectiveHeadDelta,  grav
-            real(8), pointer :: dQdH, DischargeCoeff, EffectiveFullArea
+            real(8), pointer :: DischargeCoeff, EffectiveFullArea
             real(8), pointer :: WeirExponent, CriticalHead, FractionCritDepth
             real(8) :: Coef
 
-            character(64) :: subroutine_name = 'orifice_flow'
+            ! character(64) :: subroutine_name = 'orifice_flow'
         !%-----------------------------------------------------------------------------
         !% Aliases
             SpecificOrificeType   => elemSI(eIdx,esi_Orifice_SpecificType)
@@ -815,7 +838,7 @@ module orifice_elements
             integer, pointer    :: GeometryType
             real(8)             :: YoverYfull
 
-            character(64) :: subroutine_name = 'orifice_flow_area'
+            ! character(64) :: subroutine_name = 'orifice_flow_area'
         !%------------------------------------------------------------------
         !% Aliases
             GeometryType       => elemSI(eIdx,esi_Orifice_GeometryType)
@@ -876,7 +899,7 @@ module orifice_elements
             real(8), pointer    :: FractionCritDepth, NominalDsHead, Head, Zcrest
             real(8), pointer    :: Flowrate, WeirExponent, VillemonteExponent
             real(8)             :: ratio
-            character(64) :: subroutine_name = 'orifice_submergence_correction'
+            ! character(64) :: subroutine_name = 'orifice_submergence_correction'
         !%-----------------------------------------------------------------------------
         !% Aliases
             Head               => elemR(eIdx,er_Head)
@@ -1214,7 +1237,7 @@ module orifice_elements
         !% Declarations
             integer, intent(in) :: eIdx
             integer, pointer    :: FlowDirection
-            real(8), pointer    :: DischargeCoeff, EffectiveHeadDelta, dQdH
+            real(8), pointer    :: DischargeCoeff, EffectiveHeadDelta
             real(8), pointer    :: Flowrate, grav
         !%------------------------------------------------------------------
         !% Aliases

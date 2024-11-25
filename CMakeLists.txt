@@ -63,7 +63,12 @@ elseif(build_configuration STREQUAL "debug")
 endif()
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC -lm -lpthread -shared -fcommon")
-set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -traceback -coarray=distributed -ldl")
+# for debugging
+# -check noarg_temp_created is needed because output to csv has arrays of form array(1,:) which require a temp array and setoff a check failure
+# cannot use -fpe0 as EPA SWMM has possible divide by zero in reports that aren't properly initialized by SWMM5+
+set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -check noarg_temp_created -gen-interfaces -warn -traceback -coarray=distributed -ldl")
+# for release
+# set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -traceback -coarray=distributed -ldl")
 
 set(FETCHCONTENT_QUIET OFF)
 

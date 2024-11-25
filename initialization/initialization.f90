@@ -43,6 +43,8 @@ module initialization
     use utility_crash
     use xsect_tables
 
+    ! use utility_unit_testing, only: util_utest_CLprint
+
     implicit none
 
     private
@@ -60,18 +62,26 @@ contains
         !% Calls all the initialization subroutines
         !%-------------------------------------------------------------------
         !% Declarations
-            real(8)              :: arbitraryreal = 0.d0
-            integer              :: ii
-            character(64)        :: subroutine_name = 'initialize_toplevel'
+            ! real(8)              :: arbitraryreal = 0.d0
+            ! integer              :: ii,mm
+            ! character(64)        :: subroutine_name = 'initialize_toplevel'
         !%-------------------------------------------------------------------
         !% Preliminaries
         !%-------------------------------------------------------------------  
-      
+
+        print *, 'calling init_preliminaries'
         call init_preliminaries ()
+        call util_crashstop(5295)
 
         !% --- get the SWMM input file data and store in link-node-subcatch arrays
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin init SWMM input data"
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin init SWMM input data"
         call init_SWMM_input_data ()
+        call util_crashstop(5296)
+
+        ! do ii=1,N_node  
+        !     print *, ii, node%I(ii,ni_N_link_u), node%I(ii,ni_N_link_d)
+        ! end do
+        ! stop 7709874
 
         !%==========================================================================
         !%                      BEGIN PARTITIONING FOR PARALLEL                            
@@ -79,7 +89,7 @@ contains
         !%==========================================================================
     
         !% --- break the link-node system into partitions for multi-processor operation
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin link-node partitioning"
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin link-node partitioning"
         call init_partitioning()
         call util_crashstop(5297)
 
@@ -87,31 +97,58 @@ contains
         !%                NETWORK DEFINITION ON EACH PROCESSOR IMAGE
         !%==========================================================================
       
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin FV network"
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin FV network"
         call init_FV_network ()
         call util_crashstop(20574)
+
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, 'calling util_crash_initialize'
+        !% --- initialize blowup limits -- must be done after input file read in
+        call util_crash_initialize
 
         !%==========================================================================
         !%                               AIR ENTRAPMENT INIT
         !%==========================================================================
 
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin airtrapping"
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin airtrapping"
         call init_airtrapping ()
         call util_crashstop(71087)
 
         !%==========================================================================
         !%                                   OUTPUT SETUP
         !%==========================================================================
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin initializing output report"
+        if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin initializing output report"
         call init_report()
 
         !%==========================================================================
         !%                     SETUP INITIAL CONDITIONS ON ELEMENTS
         !%==========================================================================
-        !% --- initial conditions (in separater module)
+        !% --- initial conditions (in separate module)
         if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin init IC_toplevel"
         call IC_toplevel ()       
         call util_crashstop(4429873)
+
+        ! print *, ' '
+        ! print *, 'JM head ',elemR(101,er_Head)
+        ! print *, ' '
+        ! print *, 'elem 105, face 301, elem 212'
+        ! print *, trim(reverseKey(elemI(105,ei_elementType))), ' ',trim(reverseKey(elemI(212,ei_elementType)))
+        ! print *, 'face dn ',elemI(105,ei_Mface_dL)
+        ! print *, 'elem up/dn ',faceI(301,fi_Melem_uL), faceI(301,fi_Melem_dL)
+        ! print *, 'face up ',elemI(212,ei_Mface_uL)
+        ! print *, 'head:'
+        ! print *, elemR(105,er_Head), faceR(301,fr_Head_u), faceR(301,fr_Head_d)
+        ! print *, elemR(212,er_Head)
+        ! print *, ' '
+        ! print *, 'elem 103, face 300, elem 112'
+        ! print *, trim(reverseKey(elemI(103,ei_elementType))),' ',trim(reverseKey(elemI(112,ei_elementType)))
+        ! print *, 'face dn ',elemI(103,ei_Mface_dL)
+        ! print *, 'elem up/dn ',faceI(300,fi_Melem_uL), faceI(300,fi_Melem_dL)
+        ! print *, 'face up ',elemI(112,ei_Mface_uL)
+        ! print *, 'head:'
+        ! print *, elemR(103,er_Head), faceR(300,fr_Head_u), faceR(300,fr_Head_d)
+        ! print *, elemR(112,er_Head)
+
+        ! stop 698734
 
         !% --- setup the multi-level finite-volume output
         if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin init FV output"
@@ -121,10 +158,49 @@ contains
         !% --- wait for all processors before exiting to the time loop
         sync all
         
-        if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin init_finish"
-        call init_finish()
-        call util_crashstop(440987)
-        
+        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin init_finish"
+        ! call init_finish()
+        ! call util_crashstop(440987)
+
+        ! print *, 'elem 105, face 301, elem 212'
+        ! print *, trim(reverseKey(elemI(105,ei_elementType))),trim(reverseKey(elemI(212,ei_elementType)))
+        ! print *, 'face dn ',elemI(105,ei_Mface_dL)
+        ! print *, 'elem up/dn ',faceI(301,fi_Melem_uL), faceI(301,fi_Melem_dL)
+        ! print *, 'face up ',elemI(212,ei_Mface_uL)
+        ! print *, 'head:'
+        ! print *, elemR(105,er_Head), faceR(301,fr_Head_u), faceR(301,fr_Head_d)
+        ! print *, elemR(212,er_Head)
+
+        ! print *, 'elem 103, face 300, elem 112'
+        ! print *, trim(reverseKey(elemI(103,ei_elementType))),trim(reverseKey(elemI(112,ei_elementType)))
+        ! print *, 'face dn ',elemI(103,ei_Mface_dL)
+        ! print *, 'elem up/dn ',faceI(300,fi_Melem_uL), faceI(300,fi_Melem_dL)
+        ! print *, 'face up ',elemI(112,ei_Mface_uL)
+        ! print *, 'head:'
+        ! print *, elemR(103,er_Head), faceR(300,fr_Head_u), faceR(300,fr_Head_d)
+        ! print *, elemR(112,er_Head)
+
+
+
+        ! stop 77098273
+
+        if (setting%Debug%WarningTripped) then 
+            if (setting%Debug%StopOnWarning) then 
+                print *, ' '
+                print *, 'WARNING FLAGS OCCURRED ON IMAGE ',this_image()
+                print *, 'Code stopped because setting.Debug.StopOnWarning = true'
+                print *, 'Review command line output for WARNING'
+                call util_crashpoint(6209861)
+            else
+                print *, ' '
+                print *, 'WARNING FLAGS OCCURRED ON IMAGE ',this_image()
+                print *, 'Code continues because setting.Debug.StopOnWarning = false'
+                !% --- reset warning flag
+                setting%Debug%WarningTripped = .false.
+            end if
+        end if
+        call util_crashstop(798723)
+
         !%------------------------------------------------------------------- 
         !% Closing
             if ((setting%Output%Verbose) .and. (this_image() == 1)) then 
@@ -147,18 +223,22 @@ contains
         !% Declarations
             real(8)              :: arbitraryreal = 0.d0
         !%------------------------------------------------------------------
+        !% Preliminaries
+            !% --- Set a small real based on machine precision
+            !%     This produces a number that is significantly larger than machine
+            !%     precision so that it can be a usable number, but small enough
+            !%     to be irrelevant.
+            setting%Eps%Machine = tenR**(-floor(sqrt(-log10(tiny(arbitraryreal)))))
+        !%------------------------------------------------------------------
 
-        !% --- Set a small real based on machine precision
-        !%     This produces a number that is significantly larger than machine
-        !%     precision so that it can be a usable number, but small enough
-        !%     to be irrelevant.
-        setting%Eps%Machine = tenR**(-floor(sqrt(-log10(tiny(arbitraryreal)))))
-
+        ! print *, 'calling init_model_timer'
         !% --- set the CPU and wall-clock timers
         call init_model_timer()
 
+        ! print *, 'calling define_keys_reverse'
         !% --- define the reverse keys (used mainly for debugging)
         call define_keys_reverse()
+        ! print *, 'calling defineL_apikeys_reverse'
         call define_apikeys_reverse()
 
         !% NOTES:
@@ -167,22 +247,27 @@ contains
         !%       call define_keys_printByNumber() !% command-line writes a full list of keys by number
         !%       call define_keys_printByName()   !% command-line writes a full list of keys in alphabetical order
 
+        ! print *, 'calling util_file_assign_unitnumber'
         !% --- assign and store unit numbers for input/output files
         call util_file_assign_unitnumber ()
 
+        ! print *, 'calling util_file_get_commandline'
         !% --- get command line assignments and store
         call util_file_get_commandline ()
 
+        ! print *, 'calling util_file_setup_input_paths_and_files'
         !% --- setup the input project paths and filenames from command line arguments.
         !%        Note that all files and folders must exist or you get error condition.
         !%        This is needed here so that -p command line option works
         call util_file_setup_input_paths_and_files()
         
+        ! print *, 'calling define_settings_load'
         !% --- load the settings.json file with the default setting% model control structure
         !%         define_settings_load is one of the few subroutines in the Definition modules
         !%         If the file is not found, the defaults in define_settings.f90 are used 
         call define_settings_load()
-        
+
+        ! print *, 'calling json setup'
         !% --- if the settings.json file was read we need to re-process the command-line 
         !%        options a second time to prevent overwrite from json file.
         !%        That is, settings on the command line take precedence over the json file
@@ -192,9 +277,7 @@ contains
             call util_file_setup_input_paths_and_files()
         end if
 
-        !% --- initialize blowup limits
-        call util_crash_initialize
-
+        ! print *, 'calling util_file_duplicate_input'
         !% --- create duplicate input files
         !%     this is required because each image needs its own copy of the input files
         !%     HACK -- for large files we will need a better approach, but this is 
@@ -205,18 +288,20 @@ contains
         call util_crashstop(2983)
         sync all
 
+        ! print *, 'calling init_timestamp'
         !% --- initialize the time stamp used for output (must be after json is read)
         call init_timestamp ()
-        sync all
 
+        ! print *, 'calling util_file_setup_output_folders'
         !% --- setup the output file directories. 
         !%     This will create a new directory with a timestamp for output
         call util_file_setup_output_folders()
-        sync all
 
+        sync all !% --- ensures this is the first command-line output unless there is fatal error
         !% --- print program header
         if ((setting%Output%Verbose) .and. (this_image() == 1)) &
              call util_print_programheader ()  
+        sync all !% --- ensures this is the first command-line output unless there is fatal error
              
         !% --- set up the profiler
         if (setting%Profile%useYN) then
@@ -239,7 +324,7 @@ contains
         call interface_init ()
         call util_crashstop(43974)
 
-                !% --- Allocate storage for link  tables
+        !% --- Allocate storage for link  tables
         call util_allocate_link()
         !% --- Allocate storage for node tables
         call util_allocate_node()
@@ -266,65 +351,77 @@ contains
         !% Description
         !% stores the EPA SWMM input data into SWMM5+ arrays
         !%------------------------------------------------------------------
+            ! integer :: ii
 
-          !% --- Store the Link/Node names 
+        !% --- Store the Link/Node names 
         call interface_update_linknode_names()
 
         !% --- set up and store the SWMM-C link arrays in equivalent Fortran arrays
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin link processing"
+        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin link processing"; sync all
         call init_link_arrays ()
+        call util_crashstop(698723)
 
         !% --- identify the small links for special handling
         !%     At this point, small links designiated for equivalent orifices
         !%     will still store their original geometry.
         call init_small_link_handling ()
+        call util_crashstop(2298744)
 
         !% --- set up and store the SWMM-C node arrays in equivalent Fortran arrays
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin node processing"
+        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin node processing"; sync all
         call init_node_arrays ()
+        call util_crashstop(6093784)
+
+        !% --- check for errors in the Equiv Orifice associated with node
+        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin small link error check"; sync all
+        call init_small_link_error_check ()
+        call util_crashstop(298474)
 
         !% --- set up arrays for subcatchments
         call init_subcatchment_arrays ()
         call util_crashstop(31973)
 
         !% --- initialize ForceMain settings (determines if FM is used)
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin Forcemain setting"
+        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin Forcemain setting"; sync all
         call init_ForceMain_setting ()
+        call util_crashstop(319731)
 
         !% --- initialize Adjustments from EPA SWMM input file
         !%     these are the temperature, evaporation, rainfall, and conductivity values
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin get adjustments"
+        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin get adjustments"; sync all
         call interface_get_adjustments ()
+        call util_crashstop(319732)
 
         !% --- setup the irregular transect arrays associated with SWMM-C input links
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin transect_arrays"
+        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin transect_arrays"; sync all
         call init_link_transect_array()
         call util_crashstop(42873)
 
         !% --- initialize globals that are run-time dependent
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin initialize globals"
+        if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin initialize globals"; sync all
         call init_globals()
+        call util_crashstop(131973)
         
         !% --- store the SWMM-C curves in equivalent Fortran arrays
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin SWMM5 curve processing"
+        if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin SWMM5 curve processing"; sync all
         call init_curves()
         call util_crashstop(53454)
 
         !% --- read in profiles from .inp file and create 
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin SWMM5 profile processing"
+        if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin SWMM5 profile processing"; sync all
         if (this_image() .eq. 1) then 
             call init_profiles()
         end if
 
         !% --- initialize culverts
-        ! if (setting%Output%Verbose) print *, "begin initializing culverts"
+        if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin initializing culverts"; sync all
         call init_culvert()
 
         !% --- kinematic viscosity for water
         call init_viscosity()
 
         !% --- initialize volume fractions for links that replace node inflows (if used)
-        ! if (setting%Output%Verbose) print *, "begin initializing link inflow volumefraction"
+        if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin initializing link inflow volumefraction"; sync all
         call init_link_inflow_volumefraction ()
 
         !% --- error checking
@@ -353,12 +450,9 @@ contains
         !%
         !%------------------------------------------------------------------
             integer       :: ii
-            character(64) :: subroutine_name = 'init_partitioning'
+            ! character(64) :: subroutine_name = 'init_partitioning'
         !%------------------------------------------------------------------
         !% Preliminaries
-            if (setting%Debug%File%initialization) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
-
             !% if there are no links, the system cannot be partitioned
             if (N_link == 0) then
                 if (this_image() == 1) then
@@ -380,6 +474,15 @@ contains
         do ii = 1, setting%SWMMinput%N_link
             call discretization_nominal(ii)
         end do
+
+        ! do ii=1,N_link
+        !     print *, ii, link%I(ii,li_N_element), link%R(ii,lr_Length)
+        ! end do
+
+        ! do ii=1,N_node 
+        !     print *, ii, node%I(ii,ni_node_type)
+        ! end do
+
 
         !% --- Set the network partitioning method used for multi-processor parallel computation
         call partitioning_toplevel()
@@ -421,37 +524,46 @@ contains
         !% Description
         !% initializes the Finit-volume network of elem() and face() arrays
         !%------------------------------------------------------------------
+        !% Declarations
+            ! integer :: ii
         !%------------------------------------------------------------------
 
         !% --- translate the link-node system into a finite-volume network
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,"begin network define"
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,"begin network define"
         call network_define_toplevel ()
         call util_crashstop(3293)
+
+        ! print *, 'in init_FV_network'
+        ! print *, 'JM ',111
+        ! print *, 'JB ',114 
+        ! print *, 'is branch ', elemSI(114,esi_JB_exists)
+        ! print *, 7709855'fup       ', elemI(114,ei_Mface_uL), dummy_face_idx
+        ! stop 
 
         !% --- LINK-ELEM DATA BROADCAST
         !%     ensures that all images have the unique data they need from other images after
         !%     partitioning and network definition
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,"begin init linkarray broadcast"
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *,"begin init linkarray broadcast"
         call init_linkarray_broadcast()
         call util_crashstop(550987)
 
         !% --- initialize boundary and ghost elem arrays for inter image data transfer
-        ! if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin init boundary ghost"
+        if ((setting%Output%Verbose) .and. (this_image() == 1)) print *, "begin init boundary ghost"
         call init_boundary_ghost_elem_array ()
         call util_crashstop(2293)
         
         !% --- initialize the time variables
-        ! if (setting%Output%Verbose) print *, "begin initializing time"
+        if (setting%Output%Verbose) print *, "begin initializing time"
         call init_time()
 
         !% --- initialize simple controls from json file
-        ! if (setting%Output%Verbose) print *, "begin initializing simulation controls"
+        if (setting%Output%Verbose) print *, "begin initializing simulation controls"
         call init_simulation_controls() 
 
         !% --- HYDROLOGY
         if (setting%Simulation%useHydrology) then 
             if (setting%SWMMinput%N_subcatch > 0) then
-                ! if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin subcatchment initialization"
+                if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin subcatchment initialization"
                 call init_subcatchment_elements()
             else 
                 if (this_image() == 1) then
@@ -464,6 +576,23 @@ contains
             !% continue without hydrology    
         end if
         call util_crashstop(320983)
+
+        ! print *, 'in init_FV_network'
+        ! print *, 'JM ',111
+        ! print *, 'JB ',114 
+        ! print *, 'is branch ', elemSI(114,esi_JB_exists)
+        ! print *, 'fup       ', elemI(114,ei_Mface_uL), dummy_face_idx
+        ! stop 7709873
+        ! ! do ii=1,N_elem(1)
+             
+        !     print *, ii, elemI(ii,ei_Mface_uL), elemI(ii,ei_Mface_dL)
+        !     if (elemI(ii,ei_Mface_uL) .eq. nullvalueI) then
+        !         print *, '   ',elemI(ii,ei_Lidx), elemI(ii,ei_Gidx)
+        !         print *, '   ',elemI(ii,ei_link_Gidx_SWMM),elemI(ii,ei_node_Gidx_SWMM)
+        !         print *, '   ',elemI(ii,ei_elementType), trim(reverseKey(elemI(ii,ei_elementType)))
+        !     end if
+        ! end do
+        ! stop 98374
         
     end subroutine init_FV_network 
 !%
@@ -499,11 +628,12 @@ contains
 
         if (setting%Output%Report%TimeInterval < zeroR) then 
             if (this_image() == 1) then
-                write(*,*) '***************************************************************'
-                write(*,*) '** WARNING -- selected report time interval is zero or less, **'
-                write(*,*) '**          so all output will be suppressed              **'
-                write(*,*) '***************************************************************'
+                print *, ' '
+                print *, 'CONFIGURATION WARNING'       
+                print *, 'report time interval is zero or less'
+                print *, 'so all output will be suppressed.' 
             end if
+            setting%Debug%WarningTripped = .true.
             setting%Output%Report%provideYN = .false.
             setting%Output%Report%suppress_MultiLevel_Output = .true.
             setting%Output%Report%ThisStep = 1
@@ -587,9 +717,9 @@ contains
         !%        but that caused linking problems due to use of pack/mask calls
         if (setting%Output%Report%provideYN) then 
             if (setting%Simulation%useHydraulics) then !% 
-                !if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin setup of output files"
+                if ((setting%Output%Verbose) .and. (this_image() == 1))  print *, "begin setup of output files"
                 !% --- Get the output element and face locations
-                call outputML_selection ()                
+                call outputML_selection ()          
                 !% --- Create packed arrays of elem row numbers that are output
                 call pack_element_outputML ()
                 !% --- Create packed arrays of face row numbers that are output
@@ -696,7 +826,7 @@ contains
             character(len=4)  :: cyear
             character(len=2)  :: cmonth, cday, chour, cmin
             character(len=13) :: datetimestamp
-            character(64)     :: subroutine_name = 'init_timestamp'
+            ! character(64)     :: subroutine_name = 'init_timestamp'
         !%-------------------------------------------------------------------
         call date_and_time(values = thisTime)
         write(cyear, "(i4)") thisTime(1)
@@ -727,8 +857,6 @@ contains
 
         setting%Time%DateTimeStamp = datetimestamp
 
-        sync all
-
     end subroutine init_timestamp
 !%
 !%==========================================================================
@@ -749,11 +877,11 @@ contains
         !%   not know their image location
         !%------------------------------------------------------------------
         !% Declarations   
-            integer          :: ii, jj, total_n_links, link_idx
-            integer, pointer :: linkUp, linkDn
-            real(8)          :: deltaL
-            logical          :: noerrorfound, linkErrorFound
-            character(64)    :: subroutine_name = 'init_link_arrays'
+            integer          :: ii
+            !integer, pointer :: linkUp, linkDn
+            !real(8)          :: deltaL
+            logical          ::  linkErrorFound
+            ! character(64)    :: subroutine_name = 'init_link_arrays'
         !%--------------------------------------------------------------------
         !% Preliminaries
             if (.not. api_is_initialized) then
@@ -825,7 +953,7 @@ contains
 
             !% --- the "parent" link is the input EPA-SWMM link, 
             !%     which may be broken up (later) into 2 SWMM5+ links by partitioning
-            link%I(ii,li_parent_link) = ii
+            !OBSOLETE link%I(ii,li_parent_link) = ii
 
             !% --- increment the connection counter for the node downstream
             node%I(link%I(ii,li_Mnode_d), ni_N_link_u) = node%I(link%I(ii,li_Mnode_d), ni_N_link_u) + oneI
@@ -895,6 +1023,9 @@ contains
             !     stop 59874
             ! end if
 
+            ! print *, ' '
+            ! print *, 'thisLink ',ii, trim(reversekey(link%I(ii,li_link_type))) 
+            ! print *, 'Length   ',link%R(ii,lr_Length)
 
 
             !% --- Note that link%R(ii,lr_Slope) and link%R(ii,lr_TopWidth) are defined in network_define.f08 
@@ -1225,6 +1356,7 @@ contains
 
                 nEquivOrifice = count(link%YN(:,lYN_isEquivalentOrifice))
 
+                !% --- Fail on existince of small elements with FailLimiter used
                 if (nEquivOrifice > 0) then 
                     setting%Discretization%EquivalentOrificesFound = .true.
 
@@ -1247,7 +1379,18 @@ contains
                         call util_crashpoint(240987)
                     end if 
                 end if
-                
+
+
+                ! !% --- check for equivalent orifice adjacent to another equivalent orifice or
+                ! !%     a diagnostic element
+                ! if (nEquivOrifice > 0) then 
+                !     do ii = 1,setting%SWMMinput%N_link
+                !         if (.not. link%YN(ii,lYN_isEquivalentOrifice)) cycle 
+                !         mup => link%I(ii,li_Mnode_u)
+                !         mdn => link%I(ii,li_Mnode_d)
+
+                !     end do
+                ! end if
 
                 ! print *, 'found? ',setting%Discretization%EquivalentOrificesFound
                 ! print *, 'number EqOr ',nEquivOrifice
@@ -1284,10 +1427,10 @@ contains
         !%   not know their image location
         !%------------------------------------------------------------------
         !% Declarations   
-        integer          :: ii, total_n_links
-        integer, pointer :: nodeDn
-        logical          :: noerrorfound
-        character(64)    :: subroutine_name = 'init_node_arrays'
+            integer          :: ii, total_n_links, nodeType
+            !integer, pointer :: nodeDn
+            logical          :: noerrorfound
+            ! character(64)    :: subroutine_name = 'init_node_arrays'
         !%--------------------------------------------------------------------
         !% Preliminaries
             if (.not. api_is_initialized) then
@@ -1347,6 +1490,9 @@ contains
             !% --- node geometry
             node%R(ii,nr_Zbottom)           = interface_get_nodef_attribute(ii, api_nodef_invertElev)
             node%R(ii,nr_FullDepth)         = interface_get_nodef_attribute(ii, api_nodef_fullDepth)
+
+            !% --- initial head 
+            node%R(ii,nr_InitialHead) = node%R(ii,nr_Zbottom) + node%R(ii,nr_InitialDepth)
 
             !% --- Total pressure head above max depth allowed for surcharge
             !%     If 0 then node cannot surcharge, so exceeding depth means water either ponds or is lost
@@ -1413,61 +1559,78 @@ contains
             !% --- set if node is designiated for output
             node%YN(ii,nYN_isOutput)  = (interface_get_nodef_attribute(ii, api_nodef_rptFlag) == 1)
 
+            ! print *, '                 '
+            ! print *, ' '
+            ! print *, '--------------------------------------'
+            ! print *, 'assigning NJ2 or NJM to node  ',ii
+
             !% --- Assign required node types nJm, nJ1, nJ2, nBCdn,
             !%     Note that defined storage is ALWAYS nJM
             !%     The goal is to identify nodes that have only two connections and could
             !%     be represented by a face (nJ2) between two elements in the SWMM5+ FV system rather 
             !%     than requiring the more complicated junction (nJm) solution.
-            if (interface_get_nodef_attribute(ii, api_nodef_type) == API_OUTFALL) then
-                !% --- OUTFALL NODES
-                node%I(ii, ni_node_type) = nBCdn
+            !%     NOTE that EPA SWMM only has nodeTypes for Outfall (1) and Storage (?), all other
+            !%     junctions return 0
+            nodeType = interface_get_nodef_attribute(ii, api_nodef_type)
+            ! print *, 'node type read in',nodeType, api_nodef_type
 
-                !% --- get the SWMMoutfall index (i.e. the 'k' in Outfall[k].vRouted in EPASWMM)
-                node%I(ii,ni_SWMMoutfallIdx) = interface_get_nodef_attribute(ii,api_nodef_outfall_idx)
+            select case (nodeType)
+            !if (interface_get_nodef_attribute(ii, api_nodef_type) == API_OUTFALL) then
+                case (API_OUTFALL)
+                    !% --- OUTFALL NODES
+                    node%I(ii, ni_node_type) = nBCdn
 
-                !% --- check for a flap gate on an outfall
-                if (interface_get_nodef_attribute(ii, api_nodef_hasFlapGate) == oneI) then
-                    node%YN(ii, nYN_hasFlapGate) = .true.
-                else
-                    node%YN(ii, nYN_hasFlapGate) = .false.
-                end if
+                    !% --- get the SWMMoutfall index (i.e. the 'k' in Outfall[k].vRouted in EPASWMM)
+                    node%I(ii,ni_SWMMoutfallIdx) = interface_get_nodef_attribute(ii,api_nodef_outfall_idx)
 
-                !% --- check for routeTo subcatchment
-                node%I(ii,ni_routeTo) = interface_get_nodef_attribute(ii,api_nodef_RouteTo)
-                if (node%I(ii,ni_routeTo) == -oneI) then
-                    node%I(ii,ni_routeTo) = nullvalueI
-                elseif ( (node%I(ii,ni_routeTo) > zeroI)                           &
-                        .and.                                                         &
-                            (node%I(ii,ni_routeTo) .le. setting%SWMMinput%N_subcatch) &
-                        ) then
-                    !% correct value found
-                else
-                    print *, 'CODE ERROR unexpected value for ni_routeTo'
-                    print *, 'value obtained is ',node%I(ii,ni_routeTo)
-                    print *, 'allowable values are -1 or > 0 but less than number of subcatchments'
-                    print *, 'number of subcatchments is ',setting%SWMMinput%N_subcatch
-                    print *, 'Node index ',ii
-                    print *, 'Node name  ',trim(node%Names(ii)%str)
-                    call util_crashpoint(69873)
-                end if
+                    !% --- check for a flap gate on an outfall
+                    if (interface_get_nodef_attribute(ii, api_nodef_hasFlapGate) == oneI) then
+                        node%YN(ii, nYN_hasFlapGate) = .true.
+                    else
+                        node%YN(ii, nYN_hasFlapGate) = .false.
+                    end if
 
-            else if (interface_get_nodef_attribute(ii, api_nodef_type) == API_STORAGE) then
-                !% --- STORAGE NODES (always nJm)
-                node%I(ii, ni_node_type)     = nJm
-                node%YN(ii, nYN_has_storage) = .true.
+                    !% --- check for routeTo subcatchment
+                    node%I(ii,ni_routeTo) = interface_get_nodef_attribute(ii,api_nodef_RouteTo)
+                    if (node%I(ii,ni_routeTo) == -oneI) then
+                        node%I(ii,ni_routeTo) = nullvalueI
+                    elseif ( (node%I(ii,ni_routeTo) > zeroI)                           &
+                            .and.                                                         &
+                                (node%I(ii,ni_routeTo) .le. setting%SWMMinput%N_subcatch) &
+                            ) then
+                        !% correct value found
+                    else
+                        print *, 'CODE ERROR unexpected value for ni_routeTo'
+                        print *, 'value obtained is ',node%I(ii,ni_routeTo)
+                        print *, 'allowable values are -1 or > 0 but less than number of subcatchments'
+                        print *, 'number of subcatchments is ',setting%SWMMinput%N_subcatch
+                        print *, 'Node index ',ii
+                        print *, 'Node name  ',trim(node%Names(ii)%str)
+                        call util_crashpoint(69873)
+                    end if
 
-            else 
-                !% --- OTHER NODES
-                !%     classify by number of links connected
-                select case (total_n_links)
-                    case (oneI)
-                        node%I(ii, ni_node_type) = nJ1
-                    case (twoI)      
-                        node%I(ii, ni_node_type) = nJ2
-                    case default 
-                        node%I(ii, ni_node_type) = nJm
-                end select
-            end if 
+            !else if (interface_get_nodef_attribute(ii, api_nodef_type) == API_STORAGE) then
+                case (API_STORAGE)
+                    !% --- STORAGE NODES (always nJm)
+                    node%I(ii, ni_node_type)     = nJm
+                    node%YN(ii, nYN_has_storage) = .true.
+
+            !else 
+                case default
+                    !% --- OTHER NODES
+                    !%     classify by number of links connected
+                    select case (total_n_links)
+                        case (oneI)
+                            node%I(ii, ni_node_type) = nJ1
+                        case (twoI)      
+                            node%I(ii, ni_node_type) = nJ2
+                        case default 
+                            node%I(ii, ni_node_type) = nJm
+                    end select
+                    ! print *, 'total links ',total_n_links
+                    !print *, 'node type assigned ',reverseKey(node%I(ii, ni_node_type))
+            !end if 
+            end select
 
             !% --- select nJM nodes that can be represented as element faces (nJ2)
             call init_node_nJ2_nJM (ii)
@@ -1537,13 +1700,17 @@ contains
             !% --- note pattern initialization MUST be called after inflows are set
             node%I(ii,ni_pattern_resolution) = interface_get_BC_resolution(ii)
 
-            !% --- identify links that are connected my nJ2 junctions
+            !% --- identify links that are connected by nJ2 junctions
             if (node%I(ii,ni_node_type) == nJ2) then
                 link%YN(node%I(ii,ni_Mlink_u1), lYN_is_nj2_connection) = .true.
                 link%YN(node%I(ii,ni_Mlink_d1), lYN_is_nj2_connection) = .true.
+            else 
+                !% --- no action
             end if
 
         end do
+
+        ! stop 66098734
 
         !% --- error checking for disconnected nodes
         noerrorfound = .true.
@@ -1581,6 +1748,78 @@ contains
         end do
 
     end subroutine init_node_arrays
+!%
+!%==========================================================================
+!%==========================================================================
+!%
+    subroutine init_small_link_error_check ()
+        !% -----------------------------------------------------------------
+        !% Description
+        !% Check for error conditions that prevent use of equiv orifice
+        !% These are cases where the node is incompatible with the equivalent
+        !% orifice
+        !% -----------------------------------------------------------------
+        !% Declarations
+            integer :: ii, nidx, nEquivOrifice
+        !% -----------------------------------------------------------------
+        !% Preliminaries
+            if (setting%Discretization%SmallElementHandling .ne. EquivalentOrifice) return
+        !% -----------------------------------------------------------------
+
+        do ii=1,setting%SWMMinput%N_link
+            if ( link%YN(ii,lYN_isEquivalentOrifice)  ) then 
+                nidx =link%I(ii,li_Mnode_d)
+                select case (node%I(nidx,ni_node_type))
+                    case (nBCdn)
+                        !% --- equiv orifice is incompatible
+                        print *, ' '
+                        print *, 'CONFIGURATION WARNING:'
+                        print *, 'A short link is found connected to an outfall'
+                        print *, 'Link index is ',ii 
+                        print *, 'Link name is  ',trim(link%Names(ii)%str)
+                        print *, 'Node index is ',nidx 
+                        print *, 'Node name i   ',trim(node%Names(nidx)%str)
+                        print *, 'The equivalent orifice algorithm cannot function on this link'
+                        print *, 'because it is adjacent to an outfall.'
+                        print *, 'Minimum link length is  ',setting%Discretization%MinLinkLength
+                        print *, 'This link length is     ',link%R(ii,lr_Length)
+                        print *, 'To fix this you can either:'
+                        print *, '... (1) change the setting.Discretization.SmallElementHandling '
+                        print *, '        to AllowSmallLinks (thereby turning off Equivalent Orifice)'
+                        print *, '... (2) increase the length of the link to larger than the MinLinkLength'
+                        print *, '... (3) continue without changes, but the time step may be controlled '
+                        print *, '        by this small link'
+                        print *, 'Simulation will continue as in (3) above unless JSON file has'
+                        print *, '... setting.Debug.StopOnWarning = true'
+
+                        setting%Debug%WarningTripped = .true.
+
+                        link%YN(ii,lYN_isEquivalentOrifice) = .false.
+                        nEquivOrifice = count(link%YN(:,lYN_isEquivalentOrifice))
+                        if (nEquivOrifice < 1) then 
+                            setting%Discretization%EquivalentOrificesFound = .false.
+                        end if
+
+                    case (nJ1, nJ2, nJm, nStorage, nBCup)
+                        !% --- equiv orifice is OK
+                    case default 
+                        print *, 'CODE ERROR: unexpected case default'
+                        call util_crashpoint(60987987)
+                end select
+
+            end if
+            ! if ( link%YN(ii,lYN_isEquivalentOrifice)  ) then 
+            !     nidx =link%I(ii,li_Mnode_d)
+            !     print *, 'ii equiv orifice ',ii
+            !     print *, 'node downstream ',nidx
+            !     print *, 'node Type       ',trim(reverseKey(node%I(nidx,ni_node_type)))
+            !     print *, trim(node%Names(nidx)%str)
+            ! end if
+        end do
+
+        !stop 20987341
+        
+    end subroutine init_small_link_error_check
 !%
 !%==========================================================================
 !%==========================================================================
@@ -2597,7 +2836,7 @@ contains
         if (setting%Junction%ForceNodesJM ) then
             node%I(ii, ni_node_type) = nJm
 
-           ! print *, 'switch A',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
+        !    print *, 'switch A',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
 
             return
         else
@@ -2630,6 +2869,9 @@ contains
         else
             !% --- continue
         end if
+
+        !% --- Below here we should be guaranteed that all node candidates for nJ2 only
+        !%     have one upstream and one downstream
 
         !% --- Set junctions with inflows and upstream pipes to nJM
         !%     i.e., we are not (at this time) allowing node inflow to be
@@ -2698,20 +2940,20 @@ contains
             !% --- continue         
         end if   
 
-        !% --- if the downstream link is
-        !%     a type 1 pump, then the node must be nJm
-        if (  (link%I(linkDn,li_link_type) .eq. lPump)          &
-                .and.                                            &
-              (link%I(linkDn,li_link_sub_type)  .eq. lType1Pump) &
-            ) then
-            node%I(ii, ni_node_type) = nJm 
+        ! !% --- if the downstream link is
+        ! !%     a type 1 pump, then the node must be nJm
+        ! if (  (link%I(linkDn,li_link_type) .eq. lPump)          &
+        !         .and.                                            &
+        !       (link%I(linkDn,li_link_sub_type)  .eq. lType1Pump) &
+        !     ) then
+        !     node%I(ii, ni_node_type) = nJm 
 
-            ! print *, 'switch H',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
+        !     ! print *, 'switch H',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
 
-            return
-        else
-            !% --- continue
-        end if
+        !     return
+        ! else
+        !     !% --- continue
+        ! end if
 
         ! print *, 'overflow ', node%R(ii,nr_OverflowHeightAboveCrown) ,  setting%Junction%InfiniteExtraDepthValue
 
@@ -2730,7 +2972,7 @@ contains
                    > setting%Junction%InfiniteExtraDepthValue*meters_per_ft - 0.01d0) &
             ) ) then 
 
-               ! print *, 'no overflow ',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+            !    print *, 'no overflow ',ii, trim(reverseKey(node%I(ii, ni_node_type)))
 
             !% --- continue, junction cannot overflow
         else
@@ -2758,7 +3000,7 @@ contains
                 (link%I(linkUp,li_link_type) .eq. lOrifice)    &
                 ) then    
 
-                   ! print *, 'weir/orifice up with offset ',ii, trim(reverseKey(node%I(ii, ni_node_type)))
+                !    print *, 'weir/orifice up with offset ',ii, trim(reverseKey(node%I(ii, ni_node_type)))
                 !% --- continue
             else
                 !% --- switch to nJm
@@ -2778,7 +3020,7 @@ contains
                 ) then    
                 !% --- continue
 
-              !  print *, 'weir/orifice dn with offset',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
+            !    print *, 'weir/orifice dn with offset',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
 
             else
                 !% --- switch to nJm
@@ -2790,21 +3032,82 @@ contains
             end if
         end if 
 
-        if (link%YN(linkUp,lYN_isEquivalentOrifice)) then 
-            select case (link%I(linkDn,li_link_type))
-                case (lPipe,lChannel)
-                    !% --- nJ2 is allowed
-                case (lOrifice,lWeir,lOutlet)
-                    !% --- swith to nJM  
-                    node%I(ii, ni_node_type) = nJm
+        ! !% --- Equivalent orifice
+        ! if (link%YN(linkUp,lYN_isEquivalentOrifice)) then 
+        !     select case (link%I(linkDn,li_link_type))
+        !         case (lPipe,lChannel)
+        !             !% --- nJ2 is allowed
+        !         case (lOrifice,lWeir,lOutlet)
+        !             !% --- swith to nJM  
+        !             node%I(ii, ni_node_type) = nJm
 
-                    ! print *, 'switch L',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
+        !             ! print *, 'switch L',ii, trim(reverseKey(node%I(ii, ni_node_type))), ' ',trim(node%Names(ii)%str)
                     
-                    return
-                case default 
-                    print *, 'CODE ERROR: unexepected case default'
-            end select
-        end if
+        !             return
+        !         case default 
+        !             print *, 'CODE ERROR: unexepected case default'
+        !     end select
+        ! end if
+
+        !% --- diagnostic component adjacency selection that requires nJm
+        select case (link%I(linkUp,li_link_type)) 
+            case (lPipe, lChannel) !% --- upstream link type:
+                select case (link%I(linkDn,li_link_type))
+                    case (lPipe, lChannel) !% --- downstream link type:
+                        !% --- nj2 allowed
+                        return
+                    case (lOrifice, lWeir) !% --- downstream link type:
+                        !% --- nj2 allowed 
+                        return
+                    case (lPump) !% --- downstream link type:
+                        !% --- type 1 pump (only) requires an upstream nJm
+                        if (link%I(linkDn,li_link_sub_type)  .eq. lType1Pump) then
+                            node%I(ii, ni_node_type) = nJm 
+                            return
+                        end if
+                    case default
+                end select
+            case (lOrifice, lWeir) !% --- upstream link type:
+                select case (link%I(linkDn,li_link_type))
+                    case (lPipe, lChannel) !% --- downstream link type:
+                        !% --- nj2 allowed
+                        return
+                    case (lOrifice, lWeir) !% --- downstream link type:
+                        !% --- adjacent orifice/weirsrequires nJm
+                        node%I(ii, ni_node_type) = nJm 
+                        return
+                    case (lPump) !% --- downstream link type:
+                        !% --- requires nJm  
+                        !%  HACK -- IS IT CORRECT THAT ORIFICE/WEIR UPSTREAM OF PUMP REQUIRES NODE?
+                        node%I(ii, ni_node_type) = nJm 
+                        return
+                    case default
+                end select
+            case (lPump) !% --- upstream link type:
+                select case (link%I(linkDn,li_link_type))
+                    case (lPipe, lChannel) !% --- downstream link type:
+                        !% --- nj2 allowed
+                        return
+                    case (lOrifice, lWeir) !% --- downstream link type:
+                        !% --- requires nJm  
+                        !%  HACK -- IS IT CORRECT THAT ORIFICE/WEIR DOWNSTREAM OF PUMP REQUIRES NODE?
+                        node%I(ii, ni_node_type) = nJm 
+                        return
+                    case (lPump) !% --- downstream link type:
+                        !% --- should not occur
+                        print *, 'USER CONFIGURATION ERROR:'
+                        print *, 'Two pumps are in series without any conduit/channel link between'
+                        print *, 'Node indix problem is ',node%I(ii,ni_idx)
+                        print *, 'node name ',trim(node%Names(ii)%str)
+                        call util_crashpoint(2208974)
+                    case default
+                end select
+            case default
+                !% --- should not reach here
+                print *, 'CODE ERROR: unexpected case default'
+                call util_crashpoint(66098723)
+        end select
+
         
         !% --- two channels can be connected by nJ2
         !% --- if either link is an open channel AND node cannot overflow
@@ -3786,7 +4089,7 @@ contains
                         print *, '... has upstream node  ',trim(node%Names(testNode)%str)
                         print *, 'The correct downstream link should be one that connects to'
                         print *, '... the downstream node.'
-                        call util_crashpoint(7220987)
+                        call util_crashpoint(72209857)
                     else
                         !% --- store next link
                         output_profile_ids(pp,2*mm+2) = nextLink
@@ -3859,8 +4162,6 @@ contains
             character(64) :: subroutine_name = 'init_subcatchment'
         !%------------------------------------------------------------------
         !% Preliminaries
-            if (setting%Debug%File%initialization) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
         !%------------------------------------------------------------------
         !% Aliases
             nodeIdx  => subcatchI(:,si_runoff_nodeIdx) 
@@ -3922,7 +4223,7 @@ contains
                                 end select
                         end select
 
-                    case (nJm)
+                    case (nJm,nStorage)
                         !% --- for a node that is a multi-branch junction, subcatch connects to 
                         !%     the element itself
                         !%     Note this is only allowed for runoff. Runon requires an outfall
@@ -4136,89 +4437,162 @@ contains
         !% number of elements on each processor
         !%-----------------------------------------------------------------
         !% Declarations
-            integer :: nimgs_assign
-            integer, allocatable :: unique_imagenum(:)
-            integer :: ii, jj, idx, counter, elem_counter=0, face_counter=0, junction_counter=0
+            !integer :: nimgs_assign
+            !integer, allocatable :: unique_imagenum(:)
+            integer :: thisImage, kk,  elem_counter, face_counter, junction_counter
 
             integer :: duplicated_face_counter=0
-            integer, allocatable :: node_index(:), link_index(:)
-            character(64) :: subroutine_name = 'init_coarray_length'
+            !integer, allocatable :: node_index(:), linkUp_index(:), linkDn_index(:)
+            ! character(64) :: subroutine_name = 'init_coarray_length'
         !%------------------------------------------------------------------
         !% Preliminaries
-            if (setting%Debug%File%utility_array) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
+            elem_counter     = zeroI
+            face_counter     = zeroI 
+            junction_counter = zeroI
+            duplicated_face_counter = zeroI
         !%------------------------------------------------------------------
 
-        call util_image_number_calculation(nimgs_assign, unique_imagenum)
+        !call util_image_number_calculation(nimgs_assign, unique_imagenum)
 
         call util_allocate_scalar_for_images ()
 
-        do ii=1, num_images()
+        do thisImage = oneI, num_images()
 
             !% --- create corresponding indices for node and link in this image
-            node_index = PACK([(counter, counter=1,size(node%I,1))], node%I(:, ni_P_image) == unique_imagenum(ii))
-            link_index = PACK([(counter, counter=1,size(link%I,1))], link%I(:, li_P_image) == unique_imagenum(ii))
+            !node_index   = PACK([(counter, counter=1,size(node%I,1))], node%I(:, ni_P_image)   == thisImage)
+            !linkUp_index = PACK([(counter, counter=1,size(link%I,1))], link%I(:, li_P_imageUp) == ii)
+            !linkDn_index = PACK([(counter, counter=1,size(link%I,1))], link%I(:, li_P_imageDn) == ii)
             
             !% --- The number of elements and faces is affected by the number of nJm junctions
             !%     So we will calculate the number of junction and use this in the setup
-            junction_counter = count(node%I(node_index, ni_node_type) == nJm)
+            !junction_counter = count(node%I(node_index, ni_node_type) == nJm)
 
             !% --- first calculate the number of nodes in each partition, assign elems/faces for junctions
             !%     J_elem_add is the total number of elements reserved for each junction
             !%     J_face_add is the total number of faces reserved for each junction
-            elem_counter = elem_counter + J_elem_add * junction_counter
-            face_counter = face_counter + J_face_add * junction_counter
+            ! elem_counter = elem_counter + (max_branch_per_node + oneI) * junction_counter
+            ! face_counter = face_counter +  max_branch_per_node         * junction_counter
 
             !% --- loop through the links and count the internal faces between elements
-            do jj = 1, size(link_index,1)
-                idx = link_index(jj)
-                face_counter = face_counter + link%I(idx, li_N_element)-1 !% internal faces between elems, e.g. 5 elements have 4 internal faces
-                elem_counter = elem_counter + link%I(idx, li_N_element)   !% number of elements
+            ! do jj = 1, size(link_index,1)
+            !     idx = link_index(jj)
+            !     face_counter = face_counter + link%I(idx, li_N_element)-1 !% internal faces between elems, e.g. 5 elements have 4 internal faces
+            !     elem_counter = elem_counter + link%I(idx, li_N_element)   !% number of elements
+            ! end do
+
+            !% --- count the elements in each link assigned to the image
+            do kk=1,N_link 
+                if (link%YN(kk,lYN_isImageConnection)) then
+                    !% --- for a link connecting two images
+                    if     (link%I(kk, li_P_imageUp) == thisImage) then 
+                        elem_counter = elem_counter + link%I(kk,li_N_elementUp)
+                        face_counter = face_counter + link%I(kk,li_N_elementUp) - oneI
+                    elseif (link%I(kk, li_P_imageDn) == thisImage) then 
+                        elem_counter = elem_counter + link%I(kk,li_N_elementDn)
+                        face_counter = face_counter + link%I(kk,li_N_elementDn) - oneI
+                    else
+                        !% --- not in this image 
+                        cycle
+                    end if
+                else
+                    !% --- for a link in only one image 
+                    !%     (both image up and dn are the same)
+                    if (link%I(kk, li_P_imageUp) == thisImage) then
+                        !% --- count all the elements in this link
+                        elem_counter = elem_counter + link%I(kk, li_N_element)        
+                        !% --- count only internal faces (faces with JB are counted in junctions)
+                        face_counter = face_counter + link%I(kk, li_N_element) - oneI 
+                    end if
+                end if
+
             end do
 
-            !% --- loop through the nodes and count the node faces
-            do jj = 1, size(node_index,1)
-                idx = node_index(jj)
-                if (node%I(idx, ni_node_type) == nJ2) then
-                    face_counter = face_counter + 1 !% add the face of 1-to-1 junction between 2 links
-                elseif ((node%I(idx, ni_node_type) == nBCup) .or. (node%I(idx, ni_node_type) == nJ1)) then  
-                    face_counter = face_counter +1 !% add the upstream faces
-                elseif (node%I(idx, ni_node_type) == nBCdn) then
-                    face_counter = face_counter +1 !% add the downstream faces
-                elseif (node%I(idx, ni_node_type) == nJm) then   
-                    !% skip -- faces are counted elsewhere
-                else 
-                    print *, jj, node%I(idx, ni_node_type), reverseKey(node%I(idx, ni_node_type))
-                    print *, reverseKey(nJ1), reverseKey(nJ2), reverseKey(nBCup), reverseKey(nBCdn)
-                    print *, 'CODE ERROR, unexpected else'
-                    call util_crashpoint(390715)
-                end if !% multiple junction faces already counted
+            !% --- loop through the nodes and add the node counts for this image
+            do kk = 1,N_node
+                if (node%I(kk,ni_P_image) .ne. thisImage) cycle
+                select case (node%I(kk, ni_node_type))
+                    case (nJ2,nBCup, nBCdn, nJ1)
+                        !% --- these do not add elements, only faces
+                        face_counter = face_counter + oneI 
+                    case (nJm,nStorage)
+                        !% --- add an element for each branch, plus one for the node itself
+                        elem_counter = elem_counter + (max_branch_per_node + oneI)
+                        !% --- add a face for each branch
+                        !face_counter = face_counter +  max_branch_per_node
+                        face_counter = face_counter + node%I(kk,ni_N_link_u) + node%I(kk,ni_N_link_d)
+                    case default 
+                        print *, 'CODE ERROR: unexpected case default'
+                        print *, 'node ',kk
+                        print *, 'type ',node%I(kk, ni_node_type)
+                        print *,  trim(reverseKey(node%I(kk, ni_node_type)))
+                        call util_crashpoint(519873)
+                end select
+
+                ! if (node%I(idx, ni_node_type) == nJ2) then
+                !     face_counter = face_counter + 1 !% add the face of 1-to-1 junction between 2 links
+                ! elseif ((node%I(idx, ni_node_type) == nBCup) .or. (node%I(idx, ni_node_type) == nJ1)) then  
+                !     face_counter = face_counter +1 !% add the upstream faces
+                ! elseif (node%I(idx, ni_node_type) == nBCdn) then
+                !     face_counter = face_counter +1 !% add the downstream faces
+                ! elseif (node%I(idx, ni_node_type) == nJm) then   
+                    
+                ! else 
+                !     print *, jj, node%I(idx, ni_node_type), reverseKey(node%I(idx, ni_node_type))
+                !     print *, reverseKey(nJ1), reverseKey(nJ2), reverseKey(nBCup), reverseKey(nBCdn)
+                !     print *, 'CODE ERROR, unexpected else'
+                !     call util_crashpoint(390715)
+                ! end if !% multiple junction faces already counted
             end do
 
             !% --- count the space for duplicated faces
-            do jj = 1, size(link_index,1)
-                idx = link_index(jj)
-                !% --- check upstream node first
-                if ( ( node%I(link%I(idx, li_Mnode_u), ni_P_is_boundary) == 1)  &
-                     .and.                                                      &
-                     ( node%I(link%I(idx, li_Mnode_u), ni_P_image) .ne. ii)     &
-                    ) then
-                    face_counter = face_counter +1
-                    duplicated_face_counter = duplicated_face_counter + 1
-                end if
-                !% --- check  downstream node
-                if ( ( node%I(link%I(idx, li_Mnode_d), ni_P_is_boundary) == 1)  & 
-                     .and.                                                      &
-                     ( node%I(link%I(idx, li_Mnode_d), ni_P_image) .ne. ii)     &
-                    ) then
-                    face_counter = face_counter +1
-                    duplicated_face_counter = duplicated_face_counter + 1
+            ! do jj = 1, size(link_index,1)
+            !     idx = link_index(jj)
+            !     !% --- check upstream node first
+            !     ! if ( ( node%I(link%I(idx, li_Mnode_u), ni_P_is_boundary) == 1)  &
+            !     !      .and.                                                      &
+            !     !      ( node%I(link%I(idx, li_Mnode_u), ni_P_image) .ne. ii)     &
+            !     !     ) then
+            !     if ((node%YN(link%I(idx, li_Mnode_u),nYN_isImageBoundary))   &
+            !         .and.                                                   &
+            !         ( node%I(link%I(idx, li_Mnode_u), ni_P_image) .ne. ii)  &
+            !        ) then
+            !         face_counter = face_counter +1
+            !         duplicated_face_counter = duplicated_face_counter + 1
+            !     end if
+            !     !% --- check  downstream node
+            !     ! if ( ( node%I(link%I(idx, li_Mnode_d), ni_P_is_boundary) == 1)  & 
+            !     !      .and.                                                      &
+            !     !      ( node%I(link%I(idx, li_Mnode_d), ni_P_image) .ne. ii)     &
+            !     !     ) then
+            !     if ((node%YN(link%I(idx, li_Mnode_d),nYN_isImageBoundary))   &
+            !         .and.                                                   &
+            !         ( node%I(link%I(idx, li_Mnode_d), ni_P_image) .ne. ii)  &
+            !         ) then
+            !         face_counter = face_counter +1
+            !         duplicated_face_counter = duplicated_face_counter + 1
+            !     end if
+            ! end do
+
+            !% --- count faces that are duplicated on images 
+            !%     each connecting link implies one duplicated face
+            !%     Note that these are the faces NOT counted in the up and down links, above.
+            do kk=1,N_link 
+                if (link%YN(kk,lYN_isImageConnection)) then 
+                    if ((link%I(kk,li_P_imageUp) == thisImage) &
+                        .or.                                   &
+                        (link%I(kk,li_P_imageDn) == thisImage) &
+                     ) then
+                        face_counter = face_counter + oneI
+                        duplicated_face_counter = duplicated_face_counter + oneI
+                     end if
+                else
+                    !% --- continue, does not add any faces
                 end if
             end do
 
-            N_elem(ii) = elem_counter
-            N_face(ii) = face_counter
-            N_unique_face(ii) = face_counter - duplicated_face_counter
+            N_elem(thisImage)        = elem_counter
+            N_face(thisImage)        = face_counter
+            N_unique_face(thisImage) = face_counter - duplicated_face_counter
 
             elem_counter = zeroI ! reset the counter
             face_counter = zeroI
@@ -4232,17 +4606,16 @@ contains
         max_caf_face_N = maxval(N_face) 
 
         if (setting%Debug%File%utility_array) then
-            do ii = 1, size(unique_imagenum,1)
-                print *, 'Processor =>      ', ii
-                print *, 'Elements expected ', N_elem(ii)
-                print *, 'Faces expected    ', N_face(ii)
+            do thisImage = 1, num_images() !size(unique_imagenum,1)
+                print *, 'Processor =>      ', thisImage
+                print *, 'Elements expected ', N_elem(thisImage)
+                print *, 'Faces expected    ', N_face(thisImage)
             end do
         end if
 
-        !%------------------------------------------------------------------
-        !% Closing
-            if (setting%Debug%File%utility_array)  &
-            write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
+        ! deallocate(node_index)
+        ! deallocate(linkUp_index)
+        ! deallocate(linkDn_index)
 
     end subroutine init_coarray_length
 !%
@@ -4257,59 +4630,107 @@ contains
         !% in the link). This is clunky because you cannot broadcast
         !% using a packed array of indices -- you have to do the entire array.
         !% This approach works because every image knows which links belong
-        !% to which images through link%I(:,li_P_image)
+        !% to which images through link%I(:,li_P_imageUp)
         !%------------------------------------------------------------------
         !% Declarations:
-            integer :: ii, kk, cset(3)
-            integer, allocatable :: linkThisImage(:), tempI(:)[:]
+            integer              :: cImage, jj, kk, cset(3)
+            integer, allocatable :: linksToBroadcast(:), dataTemp(:)[:]
         !%------------------------------------------------------------------
 
         sync all
-        do ii=1,num_images()
-            !% --- get all the links for each image
-            !%     Note that this_image() conducts this for every image, but
-            !%     only when this_image()==ii will the values be the ones 
-            !%     that are broadcast
-            linkThisImage = pack(link%I(:,li_idx), link%I(:,li_P_image) == ii)
+        do cImage = 1,num_images()
+            !% --- cycle through non-connections, up, and down cases
+            do jj = oneI, threeI
+                !% --- get all the links for each image
+                !%     Note that this_image() conducts this for every image, but
+                !%     only when this_image()==ii will the values be the ones 
+                !%     that are broadcast
+                select case (jj)
 
-            !% --- check that this image has links, if so allocate 
-            !%     the temporary integer space as a coarray
-            if (size(linkThisImage) > 0) then
-                !% --- allocate every loop because we have different # of links on each image
-                allocate(tempI(size(linkThisImage))[*])
-                tempI(:) = zeroI
-            else
-                cycle
-            end if
+                    case (1) !% non-connection links
+                        linksToBroadcast = pack(link%I(:,li_idx),                      &
+                                              ((link%I(:,li_P_imageUp) == cImage)      &
+                                              .and.                                    & 
+                                              (.not. link%YN(:,lYN_isImageConnection)) &
+                                              ) )
+                                        
+                    case (2) !% ImageUp links
+                        linksToBroadcast = pack(link%I(:,li_idx),                      &
+                                              ((link%I(:,li_P_imageUp) == cImage)      &
+                                              .and.                                    & 
+                                              (link%YN(:,lYN_isImageConnection))       &
+                                              ) )       
+                        
+                    case (3) !% ImageDn links
+                        linksToBroadcast = pack(link%I(:,li_idx),                      &
+                                              ((link%I(:,li_P_imageDn) == cImage)      &
+                                              .and.                                    & 
+                                              (link%YN(:,lYN_isImageConnection))       &
+                                              ) )                              
 
-            !% --- columns to be broadcast
-            cset(1) = li_N_element
-            cset(2) = li_first_elem_idx
-            cset(3) = li_last_elem_idx
+                    case default
+                        print *, 'CODE ERROR: unexpected case default'
+                end select
 
-            !% --- cycle through the columns to broadcast
-            do kk=1,3  !% increase this if more data needs to be broadcast in cset
-                !% --- store the link data in the single array
-                !%     note that if this data is all nullvalueI unless ii==this_image()
-                tempI = link%I(linkThisImage,cset(kk))[ii]
-                !% --- broadcast from the source image to all the others
-                !%     which overwrites the nullvalueI
-                call co_broadcast (tempI, source_image=ii)
-                !%
-                if (ii .ne. this_image()) then
-                    !% store the broadcast data back in the link array
-                    link%I(linkThisImage,cset(kk)) = tempI
+                !% --- check that this image has links, if so allocate 
+                !%     the temporary integer space as a coarray
+                if (size(linksToBroadcast) > 0) then
+                    !% --- allocate every loop because we have different # of links on each image
+                    allocate(dataTemp(size(linksToBroadcast))[*])
+                    dataTemp(:) = zeroI
+                else
+                    cycle !% --- go on to next jj
                 end if
-            end do
+
+                !% --- columns to be broadcast
+                select case (jj)
+                    case (1) !% --- not a connectionImage link
+                        cset(1) = li_N_element
+                        cset(2) = li_up_first_elem_idx
+                        cset(3) = li_dn_last_elem_idx
+
+                    case (2) !% --- imageUp
+                        cset(1) = li_N_elementUp
+                        cset(2) = li_up_first_elem_idx
+                        cset(3) = li_up_last_elem_idx
+
+                    case (3) !% --- imageDn
+                        cset(1) = li_N_elementDn
+                        cset(2) = li_dn_first_elem_idx
+                        cset(3) = li_dn_last_elem_idx
+
+                    case default
+                        print *, 'CODE ERROR: unexpected case default'
+                end select
+
+                !% --- cycle through the columns to broadcast
+                do kk = oneI,size(cset) 
+                    !% --- store the link data in the single array
+                    !%     note that if this data is all nullvalueI unless ii==this_image()
+                    dataTemp = link%I(linksToBroadcast,cset(kk))[cImage]
+                    !% --- broadcast from the source image to all the others
+                    !%     which overwrites the nullvalueI
+                    call co_broadcast (dataTemp, source_image=cImage)
+
+                    if (cImage .ne. this_image()) then
+                        !% store the broadcast data back into the local link array
+                        link%I(linksToBroadcast,cset(kk)) = dataTemp
+                    else 
+                        !% --- continue
+                    end if
+                end do
             
-            !% --- note we have to deallocate and allocate in every
-            !%     loop because the different images have different numbers of elements
-            deallocate(tempI)
+                !% --- we deallocate the dataTemp and allocate in every
+                !%     loop because the different images have different numbers of elements
+                deallocate(dataTemp)
+
+            end do
+
         end do    
 
         !%------------------------------------------------------------------
         !% Closing
-            deallocate(linkThisImage)
+            deallocate(linksToBroadcast)
         
     end subroutine init_linkarray_broadcast
 !%
@@ -4325,14 +4746,11 @@ contains
             integer          :: ii, jj, NSfaces, eset_local(4), eBGset(4)
             integer, pointer :: Nfaces, fIdx, fGidx, eUp, eDn, ci, BeUp, BeDn
             integer, dimension(:), allocatable, target :: packed_shared_face_idx
-            character(64)    :: subroutine_name = 'init_boundary_ghost_elem_array'
+            ! character(64)    :: subroutine_name = 'init_boundary_ghost_elem_array'
         !-------------------------------------------------------------------
         !% Preliminaries
             !% only initialize inter-image data transfer array for more than one processor
             if (num_images() .le. 1) return
-
-            if (setting%Debug%File%network_define) &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
         !-------------------------------------------------------------------
         
         !% --- allocate elemB and elemG data structure
@@ -4352,7 +4770,7 @@ contains
         !% HACK 
         !% The two do-loops below provide diagnostic for shared faces in the elemB array. 
         !% This could be  simplified, by replacing BeUp and BeDn pointers in the second
-        !% do-loope with ii. However, the current state of mapping is more self explanatory
+        !% do-loop with ii. However, the current state of mapping is more self explanatory
         !% and easier to debug
 
         !% --- cycle through faces to identify elements for the elemB set and store their
@@ -4424,11 +4842,6 @@ contains
         sync all
 
         deallocate(packed_shared_face_idx) !% deallocate temporary arrays
-
-        !-------------------------------------------------------------------
-        !% Closing
-            if (setting%Debug%File%network_define) &
-                write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
 
     end subroutine init_boundary_ghost_elem_array
 !%    
@@ -4660,6 +5073,7 @@ contains
             write(*,'(A)') '** The above are possible issues with user settings for this version of SWMM5+.  '
             write(*,'(A)') '** '
             write(*,'(A)') '*******************************************************************'
+            setting%Debug%WarningTripped = .true.
         end if
 
         if (ifail) then 
@@ -4753,9 +5167,21 @@ contains
         !% Description:
         !% Initialize culvert parameters and numbers.
         !%------------------------------------------------------------------
+        !% Declarations:
+            integer :: ii
+        !%------------------------------------------------------------------
 
         !% --- set up the culvert parameters array
         call culvert_parameter_values ()
+
+        do ii=1,N_link
+            if (link%I(ii,li_culvertCode) .ne. zeroI) then
+                print *, 'CODE/CONFIGURATION ERROR:'
+                print *, 'User has requested a culvert. The culvert algorithms are'
+                print *, 'not fully implemented and debugged.'
+                call util_crashpoint(679873)
+            end if
+        end do
 
     end subroutine init_culvert
 !%  
@@ -4813,33 +5239,35 @@ contains
                 do while (is_nJ2_connection(current_link) .and. lType(current_link) == lPipe)
                     visitedLinks(current_link) = .true.
 
-                    !% check if the downstream node of the current link is a nJm or nBCdn
+                    !% check if the downstream node of the current link is a nJm, storage, or nBCdn
                     !% if so, exit the loop
-                    if ((nType(nDn(current_link)) == nJm) .or. (nType(nDn(current_link)) == nBCdn)) then
-                        !% exit the loop
-                        exit
-                    
-                    else
-                        !% else advance to the next link downstream of the nJ2 node
-                        current_link = linkDn(nDn(current_link))
-                        !% advance the lnik count
-                        link_count = link_count + 1
-                        !% save the link index in the conduit array
-                        sc_link_Idx(num_conduits + 1, link_count) = current_link
-
-                        !% if the advanced link is not a pipe, exit the loop
-                        if (.not. lType(current_link) == lPipe .or. visitedLinks(current_link)) then
-                            !% revert back to the old link
-                            current_link = linkUp(nUp(current_link))
-                            !% reset the previously saved conduit in the conduit array
-                            sc_link_Idx(num_conduits + 1, link_count) = zeroR
-                            !% reset the link counter
-                            link_count = link_count  - 1 
-                            !% exit the loop
+                    select case (nType(nDn(current_link)))
+                        case (nJm, nStorage, nBCdn)
                             exit
-                        end if
-  
-                    end if
+                        case (nJ1, nJ2, nBCup)
+                            !% else advance to the next link downstream of the nJ2 node
+                            current_link = linkDn(nDn(current_link))
+                            !% advance the lnik count
+                            link_count = link_count + 1
+                            !% save the link index in the conduit array
+                            sc_link_Idx(num_conduits + 1, link_count) = current_link
+
+                            !% if the advanced link is not a pipe, exit the loop
+                            if (.not. lType(current_link) == lPipe .or. visitedLinks(current_link)) then
+                                !% revert back to the old link
+                                current_link = linkUp(nUp(current_link))
+                                !% reset the previously saved conduit in the conduit array
+                                sc_link_Idx(num_conduits + 1, link_count) = zeroR
+                                !% reset the link counter
+                                link_count = link_count  - 1 
+                                !% exit the loop
+                                exit
+                            end if
+
+                        case default
+                            print *, 'CODE ERROR: unexpected case default'
+                            call util_crashpoint(6098723)
+                    end select
 
                     !% exit when the link counter exceeds the number of links
                     if (current_link > N_link) exit
@@ -4883,7 +5311,7 @@ contains
             integer          :: ii, jj, startPos, endPos
             integer, pointer :: cIdx, nElem
             integer, dimension(:), allocatable :: p_elem, p_up_face, p_dn_face
-            character(64)    :: subroutine_name = 'init_entrapped_air_arrays'
+            ! character(64)    :: subroutine_name = 'init_entrapped_air_arrays'
         !-------------------------------------------------------------------
 
         do ii = 1, N_super_conduit
@@ -4897,11 +5325,11 @@ contains
                 nElem     =>  link%I(cIdx,li_N_element)
 
                 !% pack all the element indexes in the link ii
-                p_elem    = pack(elemI(:,ei_Lidx),     (elemI(:,ei_link_Gidx_BIPquick) == cIdx))
+                p_elem    = pack(elemI(:,ei_Lidx),     (elemI(:,ei_link_Gidx_SWMM) == cIdx))
                 !% pack the upstream face indexes of those corresponding elements
-                p_up_face = pack(elemI(:,ei_Mface_uL), (elemI(:,ei_link_Gidx_BIPquick) == cIdx))
+                p_up_face = pack(elemI(:,ei_Mface_uL), (elemI(:,ei_link_Gidx_SWMM) == cIdx))
                 !% pack the downstream face indexes of those corresponding elements
-                p_dn_face = pack(elemI(:,ei_Mface_dL), (elemI(:,ei_link_Gidx_BIPquick) == cIdx))
+                p_dn_face = pack(elemI(:,ei_Mface_dL), (elemI(:,ei_link_Gidx_SWMM) == cIdx))
 
                 !% find the starting and ending position to save element idxs and maps
                 startPos = endPos + oneI
@@ -4952,22 +5380,29 @@ contains
                 case (BC_UpLinkOpenChannelElements)
                     !% --- sum volumes of the upstream open channels connected to the node
                     do kk=1,max_up_branch_per_node
-                        linkUp(kk) = node%I(ii,ni_idx_base1+kk) !% ADDBRANCH
-                        if ((linkUp(kk) .le. 0) .or. (linkUp(kk) .eq. nullvalueI)) cycle
+                        linkUp(kk) = node%I(ii,ni_idx_base1+kk) !% ADDBRANCH 
+                        if (linkUp(kk) .le. 0) cycle !% no valid node upstream
+                        if (linkUp(kk) .eq. nullvalueI) cycle  !% no valuid node upstream
+                        if (link%I(linkUp(kk),li_culvertCode) > zeroI) cycle  !% cannot provide inflow across culvert
+                        if (link%YN(linkUp(kk),lYN_isEquivalentOrifice)) cycle !% cannot provide inflow across eq. orifice
 
                         if (link%I(linkUp(kk),li_link_type) .eq. lChannel) then 
-
                             linkVolumeTotal = linkVolumeTotal &
                                 + link%R(linkUp(kk),lr_FullArea) * link%R(linkUp(kk),lr_Length)
+                        else 
+                            !% --- contine; skip non-channel for this inflow type
                         end if
                     end do
 
                     !% -- get the inflow volume fractions
-                    !%     Note this is recomputed in ic_phantom_link_distributed_inflow
-                    !%     when a phantom link is involved
+                    !%    Note that this is the fraction for the entire link, which
+                    !%    must be split for links connecting images.
                     if (linkVolumeTotal > zeroR) then
                         do kk=1,max_up_branch_per_node
-                            if ((linkUp(kk) .le. 0) .or. (linkUp(kk) .eq. nullvalueI)) cycle
+                            if (linkUp(kk) .le. 0) cycle 
+                            if (linkUp(kk) .eq. nullvalueI) cycle
+                            if (link%I(linkUp(kk),li_culvertCode) > zeroI) cycle
+                            if (link%YN(linkUp(kk),lYN_isEquivalentOrifice)) cycle
 
                             if (link%I(linkUp(kk),li_link_type) .eq. lChannel) then 
 
@@ -4977,7 +5412,17 @@ contains
                             end if
                         end do
                     else 
-                        print *, 'CODE ERROR: unexpected linkVolumeTotal is zero '
+                        print *, ' '
+                        print *, 'CODE DEBUGGING NEEDED'
+                        print *, ' check that inflow reverts to node when no valid'
+                        print *, 'upstream lateral channels exist'
+                        ! print *, 'CODE ERROR: unexpected linkVolumeTotal is zero '
+                        ! print *, 'Likely occurred in trying to distribute a node inflow'
+                        ! print *, 'upstream into links but no valid links were found.'
+                        ! print *, 'This is an edge case that needs to be fixed.'
+                        ! print *, 'When this condition occurs, the inflow'
+                        ! print *, 'As a work around, set...' 
+                        ! print *, 'setting.BC.InflowBC.UseLinkDistributionTF = .false.'
                         call util_crashpoint(7109873) 
                     end if
 
@@ -4987,23 +5432,28 @@ contains
                     do kk=1,max_up_branch_per_node
 
                         linkUp(kk) = node%I(ii,ni_idx_base1+kk) !% ADDBRANCH
-
-                        if ((linkUp(kk) .le. 0) .or. (linkUp(kk) .eq. nullvalueI)) cycle
+                        if (linkUp(kk) .le. 0) cycle 
+                        if (linkUp(kk) .eq. nullvalueI) cycle
+                        if (link%I(linkUp(kk),li_culvertCode) > zeroI) cycle
+                        if (link%YN(linkUp(kk),lYN_isEquivalentOrifice)) cycle
 
                         if ((link%I(linkUp(kk),li_link_type) .eq. lChannel) .or. &
                             (link%I(linkUp(kk),li_link_type) .eq. lPipe)) then
 
                             linkVolumeTotal = linkVolumeTotal &
                                 + link%R(linkUp(kk),lr_FullArea) * link%R(linkUp(kk),lr_Length)
+                        else
+                            !% --- continue, skip other types of upstream elements
                         end if
                     end do
                     
                     !% --- get the inflow volume fractions
-                    !%     Note this is recomputed in ic_phantom_link_distributed_inflow
-                    !%     when a phantom link is involved
                     if (linkVolumeTotal > zeroR) then
                         do kk=1,max_up_branch_per_node    
-                            if ((linkUp(kk) .le. 0) .or. (linkUp(kk) .eq. nullvalueI)) cycle
+                            if (linkUp(kk) .le. 0) cycle 
+                            if (linkUp(kk) .eq. nullvalueI) cycle
+                            if (link%I(linkUp(kk),li_culvertCode) > zeroI) cycle
+                            if (link%YN(linkUp(kk),lYN_isEquivalentOrifice)) cycle
 
                             if ((link%I(linkUp(kk),li_link_type) .eq. lChannel) .or. &
                                 (link%I(linkUp(kk),li_link_type) .eq. lPipe   )) then
@@ -5015,8 +5465,17 @@ contains
                             end if
                         end do
                     else 
-                        print *, 'CODE ERROR: unexpected linkVolumeTotal is zero '
-                        call util_crashpoint(67109873) 
+                        print *, ' '
+                        print *, 'CODE DEBUGGING NEEDED'
+                        print *, ' check that inflow reverts to node when no valid'
+                        print *, 'upstream lateral channels/pipes exist'
+                        ! print *, 'CODE ERROR: unexpected linkVolumeTotal is zero '
+                        ! print *, 'Likely occurred in trying to distribute a node inflow'
+                        ! print *, 'upstream into links but no valid links were found.'
+                        ! print *, 'This is an edge case that needs to be fixed.'
+                        ! print *, 'As a work around, set...' 
+                        ! print *, 'setting.BC.InflowBC.UseLinkDistributionTF = .false.'
+                        call util_crashpoint(7109873) 
                     end if
 
                 case default

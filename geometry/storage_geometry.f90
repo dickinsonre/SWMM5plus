@@ -111,7 +111,7 @@ module storage_geometry
             integer, target, intent(in) :: thisP(:), Npack
             integer, pointer :: curveID
             real(8), pointer :: depth, fulldepth, volume
-            real(8), pointer :: aConst, aCoeff, aExpon
+            ! real(8), pointer :: aConst, aCoeff, aExpon
             integer :: ii
         !%------------------------------------------------------------------
         
@@ -250,7 +250,7 @@ module storage_geometry
         !% Declarations:
             integer, intent(in)  :: StorageIdx
             integer, pointer     :: curveID
-            character(64) :: subroutine_name = 'storage_interpolate_from_curve'
+            ! character(64) :: subroutine_name = 'storage_interpolate_from_curve'
         !%------------------------------------------------------------------
         !% Aliases
             curveID  => elemSI(StorageIdx,esi_JM_Curve_ID)
@@ -273,7 +273,7 @@ module storage_geometry
             integer, intent(in)  :: StorageIdx
             real(8), pointer     :: fullDepth, aConst, aCoeff, aExpon
             integer, pointer     :: CurveID, nRow
-            character(64) :: subroutine_name = 'storage_create_curve_from_function'
+            ! character(64) :: subroutine_name = 'storage_create_curve_from_function'
         !%------------------------------------------------------------------
         !% Aliases
             fullDepth => elemR(StorageIdx,er_FullDepth)

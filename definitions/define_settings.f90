@@ -1,6 +1,6 @@
 module define_settings
     !%==========================================================================
-    !% SWMM5+ release, version 1.0.0
+    !% SWMM5+ release, version 1.0.0  
     !% 20230608
     !% Hydraulics engine that links with EPA SWMM-C
     !% June 8, 2023
@@ -450,6 +450,8 @@ module define_settings
         !type(DebugFileGroupYNType) :: FileGroup
         !logical :: SetupYN = .false.
         !logical :: OutputYN = .false.
+        logical :: StopOnWarning = .false.  !% -- code will stop on warning
+        logical :: WarningTripped = .false. !% NOT A USER SETTING
     end type DebugType
 
     !% setting%Discretization
@@ -598,11 +600,20 @@ module define_settings
         type(ReportType) :: Report
     end type OutputType
 
-    !% setting%Partitioning
-    type PartitioningType
-        integer :: PartitioningMethod = BQuick !% Allowable values: BQquick (others have not been checked)
-        logical :: PhantomLinkAdjust  = .true.
-    endtype PartitioningType
+    !% setting%Partition
+    type PartitionType
+        integer :: Method = BQuick !% Allowable values: BQquick (others have not been checked)
+        integer :: Ordering = DefaultOrder  !% ordering scheme for assigning element indexes to links/nodes
+        integer :: iterationCutoffMultiplier = 20  !% multiplier times the number of partitions (images) allowed to cycle
+        integer :: MinElementsPerImage = 1000   !% minimum computational weight per image
+        logical :: Fail = .false.         !% NOT A USER SETTING
+        logical :: AutomaticWindow = .true. !% if false. then user must set WindowUp and WindowDn
+        logical :: AcceptImbalance = .false.  !% user can override the balance checking for partitioning
+        !logical :: PhantomLinkAdjust  = .true. !% should be true unless debugging BIPquick
+        real(8) :: WindowUp = 0.1 !% fraction of maximum partition size (set by AutomaticWindow)
+        real(8) :: WindowDn = 0.1 !% fraction of maximum partition size (set by AutomaticWindow)
+        integer :: MinNode = 2    !% number of unpartitioned nodes that are simply assigned to the partition with the smallest weight 
+        endtype PartitionType
 
     !% setting%Profile
     type ProfileType
@@ -825,7 +836,7 @@ module define_settings
         type(LinkType)           :: Link
         type(OrificeType)        :: Orifice
         type(OutputType)         :: Output
-        type(PartitioningType)   :: Partitioning
+        type(PartitionType)      :: Partition
         !type(PreissmannSlotType) :: PreissmannSlot
         type(ProfileType)        :: Profile
         type(PumpSettingType)    :: Pump
@@ -909,19 +920,20 @@ contains
         !% Description:
         !%    Loads setting values from external JSON file.
         !%------------------------------------------------------------------
-            character(kind=json_CK, len=:), allocatable :: c, cvec(:)
-            integer              :: ii, integer_value, n_controls, n_cols, n_rows,var_type
-            integer              :: len_max, n_cols1, n_rows1
-            integer(kind=8)      :: long_integer_value
-            integer, allocatable :: ilen(:)
+            character(kind=json_CK, len=:), allocatable :: c !, cvec(:)
+            integer               :: integer_value
+            !integer              :: ii, integer_value, n_controls, n_cols, n_rows,var_type
+            !integer              :: len_max, n_cols1, n_rows1
+            !integer(kind=8)      :: long_integer_value
+            !integer, allocatable :: ilen(:)
             real(8)              :: real_value
-            real(8), allocatable :: rvec(:)
+           ! real(8), allocatable :: rvec(:)
             logical :: logical_value
             logical :: found
             logical, pointer :: jsoncheck
             type(json_file)  :: json
-            type(json_core)  :: core
-            type(json_value),pointer :: PointerMatrix,row
+            !type(json_core)  :: core
+            !type(json_value),pointer :: PointerMatrix,row
 
             character(64) :: subroutine_name = 'def_load_settings'
         !%------------------------------------------------------------------
@@ -1986,7 +1998,7 @@ contains
 
         !%                       Report.StartTime
         call json%get('Output.Report.StartTime', real_value, found)
-        if (found) setting%Output%Report.StartTime = real_value
+        if (found) setting%Output%Report%StartTime = real_value
         if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Output.Report.StartTime not found'
 
         !%                       Report.TimeInterval
@@ -2018,34 +2030,66 @@ contains
         if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Output.Report.TimeUnits'
 
     !% Partitioning.  =====================================================================
-        !%                       Partitioning.PartitioningMethod
-        call json%get('Partitioning.PartitioningMethod', c, found)
+        !%                       Partition.Method
+        call json%get('Partition.Method', c, found)
         if (found) then 
             call util_lower_case(c)
             if (c == 'default') then
-                setting%Partitioning%PartitioningMethod = Default
-                stop "Error - json file - setting" // "PartitioningMethod = Default not presently supported"
+                setting%Partition%Method = Default
+                stop "Error - json file - setting" // "Partition.Method = Default not presently supported"
             else if (c == 'bquick') then
-                setting%Partitioning%PartitioningMethod = BQuick
+                setting%Partition%Method = BQuick
             else if (c == 'random') then
-                setting%Partitioning%PartitioningMethod = Random
-                stop "Error - json file - setting" // "PartitioningMethod = Random not presently supported"
+                setting%Partition%Method = Random
+                stop "Error - json file - setting" // "Partition.Method = Random not presently supported"
             else if (c == 'blink') then
-                setting%Partitioning%PartitioningMethod = BLink
-                stop "Error - json file - setting" // "PartitioningMethod = BLink not presently supported"
+                setting%Partition%Method = BLink
+                stop "Error - json file - setting" // "Partition.Method = BLink not presently supported"
             else
-                write(*,"(A)") 'Error - json file - setting.Partitioning.PartitioningMethod of ',trim(c)
+                write(*,"(A)") 'Error - json file - setting.Partition.Method of ',trim(c)
                 write(*,"(A)") '..is not in allowed options of:'
                 write(*,"(A)") '... seconds, minutes, hours, days'
                 stop 73785
             end if
-        end if
-        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Partitioning.PartitioningMethod not found'        
+        end if 
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Partition.Method not found'        
+
+        !%                       AcceptImbalance
+        call json%get('Partition.AcceptImbalance', logical_value, found)
+        if (found) setting%Partition%AcceptImbalance  = logical_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Partition.AcceptImbalance not found'
+
+        !%                       WindowUp
+        call json%get('Partition.WindowUp', real_value, found)
+        if (found) setting%Partition%WindowUp  = real_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Partition.WindowUp not found'
+
+                !%                       Window
+        call json%get('Partition.WindowDn', real_value, found)
+        if (found) setting%Partition%WindowDn  = real_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Partition.WindowDn not found'
+
+                        !%                       MinMode
+        call json%get('Partition.MinNode', integer_value, found)
+        if (found) setting%Partition%MinNOde  = integer_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Partition.MinNode not found'
+
+        !%                       MinElementsPerImage
+        call json%get('Partition.MinElementsPerImage', real_value, found)
+        if (found) setting%Partition%MinElementsPerImage = real_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Partition.MinElementsPerImage not found'
+
+                !%                       iterationCutoffMultiplier
+        call json%get('Partition.iterationCutoffMultiplier', integer_value, found)
+        if (found) setting%Partition%iterationCutoffMultiplier = integer_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Partition.iterationCutoffMultiplier not found'
+
+
 
         !%                       PhantomLinkAdjust
-        call json%get('Partitioning.PhantomLinkAdjust', logical_value, found)
-        if (found) setting%Partitioning%PhantomLinkAdjust = logical_value
-        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Partitioning.PhantomLinkAdjust not found'
+        ! call json%get('Partitioning.PhantomLinkAdjust', logical_value, found)
+        ! if (found) setting%Partitioning%PhantomLinkAdjust = logical_value
+        ! if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Partitioning.PhantomLinkAdjust not found'
   
     !% Profile. =====================================================================
         !%                       Profile.useYN
@@ -2590,7 +2634,13 @@ contains
         call json%get('Debug.checkIsNanTF', logical_value, found)
         if (found) setting%Debug%checkIsNanTF = logical_value
         if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Debug.checkIsNanTF not found'
-        
+      
+        !%                       StopOnWarning
+        call json%get('Debug.StopOnWarning', logical_value, found)
+        if (found) setting%Debug%StopOnWarning = logical_value
+        if ((.not. found) .and. (jsoncheck)) stop "Error - json file - setting " // 'Debug.StopOnWarning not found'
+       
+
     !% Debug.File =====================================================================
         !%                       
         call json%get('Debug.File.adjust', logical_value, found)

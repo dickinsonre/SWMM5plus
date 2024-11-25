@@ -17,7 +17,7 @@ START_TIME           01:00:00
 REPORT_START_DATE    01/01/1999
 REPORT_START_TIME    01:00:00
 END_DATE             01/01/1999
-END_TIME             07:00:00
+END_TIME             07:00:00  
 SWEEP_START          01/01
 SWEEP_END            12/31
 DRY_DAYS             0
@@ -894,22 +894,22 @@ CPAC75           CIRCULAR     0.914            0.0        0          0          
 CLOGYEO          CIRCULAR     0.762            0.0        0          0          1                    
 CLOGWNK          CIRCULAR     0.762            0.0        0          0          1                    
 CAUBWOL          EGG          2.8              0          0.0        0.0        1                    
-XCAUBPAL_c         RECT_CLOSED  4.0              3.0        0.0        0.0        1                    
+XCAUBPAL_c       RECT_CLOSED  4.0              3.0        0.0        0.0        1                    
 CAUBWSM          EGG          2.85             0          0.0        0.0        1                    
-CAUBPOR_c          EGG          2.682            0          0.0        0.0        1                    
+CAUBPOR_c        EGG          2.682            0          0.0        0.0        1                    
 CPORLIP          EGG          2.56             0          0.0        0.0        1                    
-CLIP25_c           EGG          2.56             0          0.0        0.0        1                    
+CLIP25_c         EGG          2.56             0          0.0        0.0        1                    
 CLIPSMT          EGG          2.56             0          0.0        0.0        1                    
-CLIP35_c           EGG          2.56             0          0.0        0.0        1                    
+CLIP35_c         EGG          2.56             0          0.0        0.0        1                    
 CLIPELC          EGG          2.56             0          0.0        0.0        1                    
 CLIPSAR          EGG          2.408            0          0.0        0.0        1                    
 CLIPWEL          EGG          2.21             0          0.0        0.0        1                    
-CLIPYAR_c          EGG          2.164            0          0.0        0.0        1                    
+CLIPYAR_c        EGG          2.164            0          0.0        0.0        1                    
 CLIPNOT          EGG          2.164            0          0.0        0.0        1                    
 CMCPWIN          EGG          2.164            0          0.0        0.0        1                    
 CMCPBAN          EGG          2.164            0          0.0        0.0        1                    
 CMCPELG          EGG          2.164            0          0.0        0.0        1                    
-CMCPROS_c          EGG          2.073            0          0.0        0.0        1                    
+CMCPROS_c        EGG          2.073            0          0.0        0.0        1                    
 CMCPPAC          EGG          2.073            0          0.0        0.0        1                    
 CMCPLOG          EGG          1.219            0          0.0        0.0        1                    
 CALEXAN          EGG          1.905            0          0.0        0.0        1                    
@@ -924,23 +924,23 @@ CSARARL          CIRCULAR     0.762            0.0        0          0          
 CCOROUT1         EGG          1.64             0          0.0        0.0        1                    
 CCORMID          CIRCULAR     1.5              0.0        0          0          1                    
 CMRYCOR          CIRCULAR     1.5              0.0        0          0          1                    
-CMRYCSO_c          CIRCULAR     0.75             0.0        0          0          1                    
+CMRYCSO_c        CIRCULAR     0.75             0.0        0          0          1                    
 CMRYWSM          EGG          1.829            0          0.0        0.0        1                    
 CWALPUR          EGG          1.585            0          0.0        0.0        1                    
 CWSMWAL          CIRCULAR     0.914            0.0        0          0          1                    
 CWSMCAN          CIRCULAR     0.914            0.0        0          0          1                    
 CWSMETH          CIRCULAR     0.914            0.0        0          0          1                    
 CWSMARL          CIRCULAR     0.762            0.0        0          0          1                    
-CPREWAL_c          EGG          1.585            0          0.0        0.0        1                    
+CPREWAL_c        EGG          1.585            0          0.0        0.0        1                    
 CCANPRE          EGG          1.585            0          0.0        0.0        1                    
 CPORCAN          EGG          1.585            0          0.0        0.0        1                    
-CSIMPOR_c          EGG          1.219            0          0.0        0.0        1                    
+CSIMPOR_c        EGG          1.219            0          0.0        0.0        1                    
 CPORHOM          CIRCULAR     0.762            0.0        0          0          1                    
 CSIMSTM          CIRCULAR     0.762            0.0        0          0          1                    
 CSIMELC          CIRCULAR     0.762            0.0        0          0          1                    
 CSIMSAR          CIRCULAR     0.61             0.0        0          0          1                    
 CSIMWEL          CIRCULAR     0.61             0.0        0          0          1                    
-CAUBSPS_c          CIRCULAR     2.85             0.0        0          0          1                    
+CAUBSPS_c        CIRCULAR     2.85             0.0        0          0          1                    
 SSHBPAL          CIRCULAR     2.89             0.0        0          0          1                    
 SSHBWSM          CIRCULAR     2.85             0.0        0          0          1                    
 SPORSHB          CIRCULAR     2.85             0.0        0          0          1                    
@@ -952,7 +952,7 @@ SSHBWLV          CIRCULAR     2.7              0.0        0          0          
 SSHBSTM          CIRCULAR     2.7              0.0        0          0          1                    
 SSTMDOM          CIRCULAR     1.27             0.0        0          0          1                    
 SELCDOM          CIRCULAR     1.245            0.0        0          0          1                    
-SSHB33_c           CIRCULAR     2.43             0.0        0          0          1                    
+SSHB33_c         CIRCULAR     2.43             0.0        0          0          1                    
 SSHBELC          CIRCULAR     2.4              0.0        0          0          1                    
 SSHBSAR          CIRCULAR     2.43             0.0        0          0          1                    
 SSHBWEL          CIRCULAR     2.25             0.0        0          0          1                    
@@ -963,19 +963,19 @@ SRS-XCON2        CIRCULAR     1.2              0.0        0          0          
 SNOTMYR          CIRCULAR     1.5              0.0        0          0          1                    
 SMYRWIN          CIRCULAR     1.5              0.0        0          0          1                    
 SNOTWLL          CIRCULAR     0.6              0.0        0          0          1                    
-SRUB02_c           CIRCULAR     2.7              0.0        0          0          1                    
+SRUB02_c         CIRCULAR     2.7              0.0        0          0          1                    
 SRUBWOL          CIRCULAR     2.7              0.0        0          0          1                    
-XSRUBPAL_c         RECT_CLOSED  4.0              3.0        0.0        0.0        1                    
+XSRUBPAL_c       RECT_CLOSED  4.0              3.0        0.0        0.0        1                    
 SLENWSM          CIRCULAR     2.7              0.0        0          0          1                    
 SBURPOR          CIRCULAR     2.7              0.0        0          0          1                    
 SBUREIN          CIRCULAR     2.7              0.0        0          0          1                    
-SBUR28_c           CIRCULAR     2.7              0.0        0          0          1                    
+SBUR28_c         CIRCULAR     2.7              0.0        0          0          1                    
 SBURSMT          CIRCULAR     2.55             0.0        0          0          1                    
 SBURELC          CIRCULAR     2.55             0.0        0          0          1                    
 SALVSAR          CIRCULAR     2.55             0.0        0          0          1                    
 SALVWEL          CIRCULAR     2.59             0.0        0          0          1                    
 SALVNOT          CIRCULAR     2.4              0.0        0          0          1                    
-SMCPNOT_c          CIRCULAR     2.4              0.0        0          0          1                    
+SMCPNOT_c        CIRCULAR     2.4              0.0        0          0          1                    
 SMCPMCD          CIRCULAR     2.4              0.0        0          0          1                    
 SLARWIL          CIRCULAR     1.95             0.0        0          0          1                    
 SXANELG          CIRCULAR     1.95             0.0        0          0          1                    
@@ -1004,8 +1004,8 @@ SDUM1            CIRCULAR     1.8              0.0        0          0          
 SDUM2            CIRCULAR     1.5              0.0        0          0          1                    
 SDUM3            CIRCULAR     1.5              0.0        0          0          1                    
 SMCP85A          CIRCULAR     1.8              0.0        0          0          1                    
-SDUM4_c            CIRCULAR     1.8              0.0        0          0          1                    
-SDUM5_c            CIRCULAR     1.8              0.0        0          0          1                    
+SDUM4_c          CIRCULAR     1.8              0.0        0          0          1                    
+SDUM5_c          CIRCULAR     1.8              0.0        0          0          1                    
 
 [LOSSES]
 ;;Link           Kentry     Kexit      Kavg       Flap Gate  Seepage   

@@ -215,25 +215,29 @@ module face
         !%------------------------------------------------------------------ 
         !% --- cycle through a set of diagnostic elements
         do ii=1,Npack
+            ! print *, ' '
+            ! print *, 'ii ',ii, thisP(ii)
             !% -- cycle through upstream and downstream faces
             do kk=1,2
-                !print *, 'kk ',kk
+                ! print *, 'kk ',kk
                 if (kk==1) then !% -- upstream face of thisP(ii)
                     ff = elemI(thisP(ii),ei_Mface_uL)
 
-                   ! print *, 'faceYN 1 ', ff, faceYN(ff,fYN_isFaceDownstreamOfJB)
+                !    print *, 'faceYN 1 ', ff, faceYN(ff,fYN_isFaceDownstreamOfJB)
 
                     if (.not. faceYN(ff,fYN_isFaceDownstreamOfJB)) cycle !% if not JB adjacent
 
                 else !% -- downstream face
                     ff = elemI(thisP(ii),ei_Mface_dL)
 
-                    !print *, 'faceYN 2 ',ff, faceYN(ff,fYN_isFaceUpstreamOfJB)
+                    ! print *, 'faceYN 2 ',ff, faceYN(ff,fYN_isFaceUpstreamOfJB)
 
                     if (.not. faceYN(ff,fYN_isFaceUpstreamOfJB)) cycle !% if not JB adjacent
 
                    
                 end if
+
+                ! print *, 'type ',elemI(thisP(ii),ei_elementType), orifice
 
                 !% --- set the adjacent element value storage on the face
                 select case (elemI(thisP(ii),ei_elementType))
@@ -257,9 +261,15 @@ module face
                             faceYN(ff,fYN_isSharedFaceDiverged) = .true.
                         end if
                     case (orifice)
+                        ! print *, ' '
+                        ! print *, 'thisP ', thisP(ii)
+                        ! print *, 'ff    ', ff 
+                        ! print *, elemSR(thisP(ii),esr_Orifice_dQdH_upstream), elemSR(thisP(ii),esr_Orifice_dQdH_downstream)
+                        
                         !faceR(ff,fr_EnergyHead_Adjacent_to_JB) = elemR (thisP(ii),er_EnergyHead)
                         !faceR(ff,fr_Zcrest_Adjacent_to_JB)     = elemSR(thisP(ii),esr_Orifice_Zcrest)
                         !faceR(ff,fr_dQdH_Adjacent_to_JB)       = elemSR(thisP(ii),esr_Orifice_dQdHe)
+                        
                         if (kk==1) then
                             faceR(ff,fr_dQdH_Adjacent_to_JB)   = elemSR(thisP(ii),esr_Orifice_dQdH_upstream)
                         else
@@ -310,6 +320,11 @@ module face
             end do
         end do    
 
+        ! print *, ' at bottom of push_diag_adjacent_data_to_face'
+        ! print *, faceR(201,fr_dQdH_Adjacent_to_JB),faceR(202,fr_dQdH_Adjacent_to_JB)
+        
+        ! stop 66908722
+
     end  subroutine face_push_diag_adjacent_data_to_face
 !%
 !%==========================================================================    
@@ -339,6 +354,7 @@ module face
             logical, intent(in)  :: Qyn, Hyn, Gyn
             logical, intent(in)  :: skipZeroAdjust, skipJump
             logical              :: isBConly !, isTM
+            logical :: isdebug = .false.
             
             character(64) :: subroutine_name = 'face_interpolation'
         !%-------------------------------------------------------------------
@@ -347,6 +363,8 @@ module face
                 write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
             
             if (setting%Profile%useYN) call util_profiler_start (pfc_face_interpolation)
+
+            if (isdebug) print *, skipZeroAdjust
         !%--------------------------------------------------------------------
         isBConly = .false.
 
@@ -444,6 +462,15 @@ module face
                     fi_eType = fi_eType_uL
                 end if
 
+                ! do ii=1,2
+                !     if (this_image() == ii) then
+                !         print *, 'here in face ', this_image()
+                !         print *, 'JBIDX ',JBidx 
+                !         print *, 'face  ', elemI(JBidx,ei_Mface)
+                !         print *, 'facetype    ', faceI(elemI(JBidx,ei_Mface),fi_eType)
+                !         print *, 'reversekey  ', reverseKey(faceI(elemI(JBidx,ei_Mface),fi_eType))
+                !     end if
+                ! end do
                 !% --- check the case of the JB-adjacent element
                 select case (faceI(elemI(JBidx,ei_Mface),fi_eType))
                     case (CC)
@@ -459,8 +486,22 @@ module face
                             !% --- skip 
                         end if
                     case default 
-                        print *, 'CODE ERROR: unexpected case default'
-                        call util_crashpoint(7209873)
+                        ! print *, ' '
+                        ! print *, 'here in face ',thisElemCol
+                        ! print *, this_image(), mm, kk
+                        ! print *, 'JBIDX ',JBidx, thisJM(mm) 
+                        ! print *,   trim(node%Names(elemI(thisJM(mm),ei_node_GIDX_SWMM))%str)
+                        ! print *, 'facedir '
+                        ! print *, ei_Mface_uL, ei_Mface, ei_Mface_dL
+                        ! print *, 'face  '
+                        ! print *, elemI(JBidx,ei_Mface_uL), elemI(JBidx,ei_Mface) , elemI(JBidx,ei_Mface_dL)
+                        ! print *, 'facetype    '
+                        ! print *,         faceI(elemI(JBidx,ei_Mface),fi_eType_uL), faceI(elemI(JBidx,ei_Mface),fi_eType), faceI(elemI(JBidx,ei_Mface),fi_eType_dL)
+                        ! print *, 'reversekey  ', reverseKey(faceI(elemI(JBidx,ei_Mface),fi_eType))
+                        ! print *, 'CODE ERROR: unexpected case default'
+                        ! print *, 'this image ',this_image()
+                        ! call util_crashpoint(72098731)
+                        ! stop 709800
                 end select
 
             end do
@@ -750,7 +791,7 @@ module face
 
         !% --- enforce zero flow on J1 faces
         if (npackJ1 > 0) then
-            faceR(idx_fJ1, fr_Flowrate)  = zeroR
+            faceR(idx_fJ1, fr_Flowrate)   = zeroR
             faceR(idx_fJ1, fr_Velocity_u) = zeroR
             faceR(idx_fJ1, fr_Velocity_d) = zeroR
         end if
@@ -901,6 +942,7 @@ module face
                     endif
 
                     !% --- consistent areas
+                    !print *, 'HERE EEE'
                     faceR(thisF,fr_Area_u)  = geo_area_from_depth_singular   &
                                     (eUp, faceR(thisF, fr_Depth_u), setting%ZeroValue%Area)
                     faceR(thisF,fr_Area_d)  = faceR(thisF,fr_Area_u)
@@ -916,7 +958,7 @@ module face
                             print *, '...conduit/channel element with non-zero, positive bottom slope.'
                             print *, 'Problem for Outfall ',trim(node%Names(BC%headI(ii,bi_node_idx))%str)
                             print *, 'Connected to element ', eUp
-                            print *, 'Part of link ',trim(  link%Names(elemI(eup,ei_link_Gidx_BIPquick))%str)
+                            print *, 'Part of link ',trim(  link%Names(elemI(eup,ei_link_Gidx_SWMM))%str)
                             print *, 'Bottom slope is ',elemR(eup,er_BottomSlope)
                             call util_crashpoint(728474)
                         end if
@@ -939,6 +981,7 @@ module face
                         faceR(thisF, fr_Depth_d) = faceR(thisF, fr_Depth_u)
 
                         !% --- consistent areas
+                        !print *, 'HERE FFF'
                         faceR(thisF,fr_Area_u)  = geo_area_from_depth_singular   &
                                                     (eUp, faceR(thisF, fr_Depth_u), setting%ZeroValue%Area)
                         faceR(thisF,fr_Area_d)  = faceR(thisF,fr_Area_u)
@@ -963,6 +1006,7 @@ module face
                         if (eDepth(eup) .ge. normDepth) then 
                             !% --- use normal depth when deep drawdown
                             faceR(thisF,fr_Depth_u) = normDepth
+                            !print *, 'HERE GGG'
                             faceR(thisF,fr_Area_u)  = geo_area_from_depth_singular   &
                                     (eUp, normDepth, setting%ZeroValue%Area)
                         else
@@ -985,6 +1029,7 @@ module face
                         else
                             if (eDepth(eup) .ge. normDepth) then 
                                 faceR(thisF,fr_Depth_u) = normDepth
+                                !print *, 'HERE HHH'
                                 faceR(thisF,fr_Area_u)  = geo_area_from_depth_singular   &
                                     (eUp, normDepth, setting%ZeroValue%Area)
                             else
@@ -1240,6 +1285,7 @@ module face
 
                 ! print *, 'Q after interp '
                 ! print *, faceR(2,fr_Flowrate)
+                ! print *, 'Q up, dn ',faceR(elemI(136,ei_Mface_uL),fr_Flowrate),faceR(elemI(136,ei_Mface_uL),fr_Flowrate)
 
             if (setting%Limiter%Flowrate%UseLocalVolumeYN) then
                 !% --- compute volume-based limits on flowrate
@@ -1248,15 +1294,35 @@ module face
 
             ! print *, 'Q after limiter '
             ! print *, faceR(2,fr_Flowrate)
+            ! print *, 'Q up, dn ',faceR(elemI(136,ei_Mface_uL),fr_Flowrate),faceR(elemI(136,ei_Mface_uL),fr_Flowrate)
 
             !% --- calculate the velocity in faces and put limiter
             call face_velocities (facePackCol, .true.)
+
+            ! print *, 'Q after velocities'
+            ! print *, 'Q up, dn ',faceR(elemI(136,ei_Mface_uL),fr_Flowrate),faceR(elemI(136,ei_Mface_uL),fr_Flowrate)
              
         end if
 
         !print *, 'in face interp after' elemR()
 
+        ! print *,'Face interpolation interior ZZZ'
+        ! print *, 'up, dn   ',elemI(136,ei_Mface_uL), elemI(136,ei_Mface_dL)
+        ! print *, 'check    ',faceI(elemI(136,ei_Mface_uL),fi_Melem_dL), faceI(elemI(136,ei_Mface_dL),fi_Melem_uL)
+        ! print *, 'Eupup    ',faceI(elemI(136,ei_Mface_uL),fi_Melem_uL)
+        ! print *, 'Edndn    ',faceI(elemI(136,ei_Mface_dL),fi_Melem_dL)
+        ! print *, 'Q up, dn ',faceR(elemI(136,ei_Mface_uL),fr_Flowrate),faceR(elemI(136,ei_Mface_uL),fr_Flowrate)
+        ! print *, 'Qelem    ', elemR(135,er_Flowrate), elemR(136,er_Flowrate), elemR(137,er_Flowrate)
+        ! print *, 'Length   ', elemR(135,er_Length), elemR(136,er_Length), elemR(137,er_Length)
+        ! print *, 'W uQ     ', elemR(135,er_InterpWeight_uQ), elemR(136,er_InterpWeight_uQ), elemR(137,er_InterpWeight_uQ)
+        ! print *, 'W dQ     ', elemR(135,er_InterpWeight_dQ), elemR(136,er_InterpWeight_dQ), elemR(137,er_InterpWeight_dQ)
+
+        ! print *, ' '
+        ! print *, 'link # ',elemI(135,ei_link_Gidx_SWMM), elemI(136,ei_link_Gidx_SWMM),elemI(137,ei_link_Gidx_SWMM)
+        ! print *, 'link L ',link%R(1,lr_Length), link%R(1,lr_ElementLength)
+        ! print *, 'link N ',link%I(1,li_N_element), link%I(1,li_N_elementUp), link%I(1,li_N_elementDn)
         
+        !stop 5098273
 
         !% --- reset all the hydraulic jump interior faces
         if (.not. skipJump) then
@@ -1426,6 +1492,12 @@ module face
         !% --- cycle interpolation through each type in the set.
 
         do ii=1,size(fset)
+
+            ! if (ii == 1) then 
+            !     if (fset(ii) == fr_Flowrate) then 
+            !         print *, thisP
+            !     end if
+            ! end if
 
             faceR(thisP,fset(ii)) = &
                 (+elemR(eup(thisP),eset(ii)) * elemR(edn(thisP),eWup) &
@@ -1915,7 +1987,7 @@ module face
             integer, pointer    :: Npack        !% expected number of packed rows in faceP.
             integer, pointer    :: thisP, eup, edn, BUpIdx, BDnIdx
             real(8), pointer    :: dt, fFlow, LocalVolumeFactor
-            real(8), pointer    :: eFlowLat(:)
+           ! real(8), pointer    :: eFlowLat(:)
             logical, pointer    :: isGhostUp, isGhostDn
         !%-------------------------------------------------------------------
         !% Preliminaries   

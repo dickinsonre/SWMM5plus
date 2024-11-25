@@ -239,13 +239,13 @@ int DLLEXPORT api_finalize()
 {
     int ii;
 
-     //printf("\n in api finalize \n");
+   //  printf("\n in api finalize \n");
 
     swmm_end();
 
-    //printf(" ------------------\n");
-    //printf("Fout.mode %d, %d %d \n",Fout.mode,SCRATCH_FILE,SAVE_FILE);
-    //printf(" ------------------\n");
+    printf(" ------------------\n");
+    printf("Fout.mode %d, %d %d \n",Fout.mode,SCRATCH_FILE,SAVE_FILE);
+    printf(" ------------------\n");
 
     // NOTE -- because we always initialize with
     // an *.out file name, the Fout.mode is SAVE_FILE
@@ -254,6 +254,8 @@ int DLLEXPORT api_finalize()
 
     swmm_close();
 
+   // printf("\n after swmm close \n")
+
     // frees double variables in API
     for (ii = 0; ii < NUM_API_DOUBLE_VARS; ii++)
     {
@@ -261,6 +263,7 @@ int DLLEXPORT api_finalize()
             free(api->double_vars[ii]);
     }
 
+  //  printf("\n after freeing  \n")
     // // frees integer variables in API --- these do not exist brh20211217
     // for (i = 0; i < NUM_API_INT_VARS; i++)
     // {
@@ -270,6 +273,8 @@ int DLLEXPORT api_finalize()
 
     free(api);
 
+  //  printf("\n before return \n ")
+    
     return 0;
 }
 

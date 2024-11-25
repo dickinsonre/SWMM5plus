@@ -12,6 +12,7 @@ module utility_deallocate
 
     use define_indexes
     use define_globals
+    use define_keys
     use define_settings, only: setting
     use utility_crash, only: util_crashpoint
 
@@ -88,14 +89,77 @@ contains
                 write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
         !%-------------------------------------------------------------------        
 
+        if (this_image() .ne. oneI ) return
+
+        deallocate(isPbase_TF, stat=deallocation_status, errmsg=emsg)
+        call util_deallocate_check(deallocation_status, emsg,'isPbase_TF')
+
         deallocate(adjacent_links, stat=deallocation_status, errmsg=emsg)
         call util_deallocate_check(deallocation_status, emsg,'adjacent_links')
 
         deallocate(elem_per_image, stat=deallocation_status, errmsg=emsg)
         call util_deallocate_check(deallocation_status, emsg, 'elem_per_image')
 
-        deallocate(image_full, stat=deallocation_status, errmsg=emsg)
-        call util_deallocate_check(deallocation_status, emsg, 'image_full')
+        deallocate(image_full_TF, stat=deallocation_status, errmsg=emsg)
+        call util_deallocate_check(deallocation_status, emsg, 'image_full_TF')
+
+
+        !% --- Additional arrays that depend on partitioning method
+        select case (setting%Partition%Method)
+            case (BQuick) 
+                !call util_count_node_types(N_nBCup, N_nBCdn, N_nJm, N_nStorage, N_nJ2, N_nJ1)
+
+                deallocate(bipqkI, stat=deallocation_status, errmsg=emsg)
+                call util_deallocate_check(deallocation_status, emsg, 'bipqkI')
+
+                deallocate(bipqkR, stat=deallocation_status, errmsg=emsg)
+                call util_deallocate_check(deallocation_status, emsg, 'bipqkR')
+
+                deallocate(bipqkYN, stat=deallocation_status, errmsg=emsg)
+                call util_deallocate_check(deallocation_status, emsg, 'bipqkYN')
+
+
+
+
+                ! deallocate(B_nodeI, stat=deallocation_status, errmsg=emsg)
+                ! call util_deallocate_check(deallocation_status, emsg, 'B_nodeI')
+
+                ! deallocate(B_nodeR, stat=deallocation_status, errmsg=emsg)
+                ! call util_deallocate_check(deallocation_status, emsg, 'B_nodeR')
+
+                ! deallocate(B_roots, stat=deallocation_status, errmsg=emsg)
+                ! call util_deallocate_check(deallocation_status, emsg, 'B_roots')
+
+                ! deallocate(totalweight_visited_node_TF, stat=deallocation_status, errmsg=emsg)
+                ! call util_deallocate_check(deallocation_status, emsg, 'totalweight_visited_node_TF')
+
+                ! deallocate(totalweight_added_node_TF, stat=deallocation_status, errmsg=emsg)
+                ! call util_deallocate_check(deallocation_status, emsg, 'totalweight_added_node_TF')
+
+                ! deallocate(totalweight_computed_node_TF, stat=deallocation_status, errmsg=emsg)
+                ! call util_deallocate_check(deallocation_status, emsg, 'totalweight_computed_node_TF')
+                
+                ! deallocate(totalweight_used_node_TF, stat=deallocation_status, errmsg=emsg)
+                ! call util_deallocate_check(deallocation_status, emsg, 'totalweight_used_node_TF')
+
+                ! deallocate(partitioned_node_TF, stat=deallocation_status, errmsg=emsg)
+                ! call util_deallocate_check(deallocation_status, emsg, 'partitioned_node_TF')
+
+                ! deallocate(partitioned_link_TF, stat=deallocation_status, errmsg=emsg)
+                ! call util_deallocate_check(deallocation_status, emsg, 'partitioned_link_TF')
+
+                ! deallocate(weight_range, stat=deallocation_status, errmsg=emsg)
+                ! call util_deallocate_check(deallocation_status, emsg, 'weight_range')
+
+                ! deallocate(accounted_for_link_TF, stat=deallocation_status, errmsg=emsg)
+                ! call util_deallocate_check(deallocation_status, emsg, 'accounted_for_link_TF')
+
+                ! deallocate(phantom_link_tracker, stat=deallocation_status, errmsg=emsg)
+                ! call util_deallocate_check(deallocation_status, emsg, 'phantom_link_tracker')
+
+            case default
+                !% --- no others neede
+        end select
 
         !%-------------------------------------------------------------------
         !% Closing
@@ -322,8 +386,8 @@ contains
             deallocate(output_static_typeUnits_elemR,stat=deallocation_status, errmsg=emsg)
             call util_deallocate_check(deallocation_status, emsg, 'output_static_typeUnits_elemR')
 
-            deallocate(output_static_elem,stat=deallocation_status, errmsg=emsg)
-            call util_deallocate_check(deallocation_status, emsg, 'output_static_elem')
+            deallocate(output_static_elemR,stat=deallocation_status, errmsg=emsg)
+            call util_deallocate_check(deallocation_status, emsg, 'output_static_elemR')
 
         end if 
         

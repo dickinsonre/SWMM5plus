@@ -28,22 +28,27 @@ module weir_elements
     public :: weir_toplevel
     public :: weir_set_setting
     ! public :: weir_upstream_geometry
+    public :: weir_geometry_update
+
+    integer :: printIdx = 223
+    integer :: stepcut  = 5345 ! 10590
 
     contains
 !%==========================================================================
 !% PUBLIC
 !%==========================================================================
 !%
-    subroutine weir_toplevel  (eIdx)
+    subroutine weir_toplevel  (eIdx, computeDQDH)
         !%----------------------------------------------------------------------
         !% Description:
         !% Computes diagnostic flow and head delta across a weir.
         !% Also computes dQ/dH for a weir adjacent to a JB junction
         !%----------------------------------------------------------------------
             integer, intent(in) :: eIdx !% eIdx must be a single element ID
+            logical, intent(in) :: computeDQDH
             integer, pointer    :: iupf, idnf
             real(8)             :: HeadStore, FlowrateStore
-            character(64) :: subroutine_name = 'weir_toplevel'
+            ! character(64) :: subroutine_name = 'weir_toplevel'
         !%----------------------------------------------------------------------
         !% Aliases:
             iupf    => elemI(eIdx,ei_Mface_uL)
@@ -52,70 +57,124 @@ module weir_elements
         !% Preliminaries:
         !%----------------------------------------------------------------------
 
-        !% --- if is JB is upstream of weir, compute the weir flowrate for
-        !%     head increase of magnitude delta
-        if (elemYN(eIdx,eYN_isElementDownstreamOfJB)) then 
-            !print *, 'in isElementDownstreamOfJB'
-            !% --- temporary storage
-            HeadStore     = faceR(iupf,fr_Head_d)
-            FlowrateStore = elemR(eIdx,er_Flowrate)
-            !% --- upstream perturbation of head
-            faceR(iupf,fr_Head_d) = faceR(iupf,fr_Head_d) + setting%Weir%delta
-            !% --- compute weir flow at delta increment for upstream head
-            call weir_compute (eIdx, .true.)
-            !% --- temporary store of the flowrate for later dQdH compute
-            elemSR(eIdx,esr_Weir_dQdH_upstream) = elemR(eIdx,er_Flowrate)
-            !% --- reverse temporary storage
-            faceR(iupf,fr_Head_d)   = HeadStore
-            elemR(eIdx,er_Flowrate) = FlowrateStore
-        end if
+        if (computeDQDH) then
 
-        !% --- if is JB is downstream, compute the weir flowrate for head increase of delta
-        if (elemYN(eIdx,eYN_isElementUpstreamOfJB)) then 
-            !print *, 'in isElementUpstreamOfJB'
-            !% --- temporary storage
-            HeadStore     = faceR(idnf,fr_Head_u)
-            FlowrateStore = elemR(eIdx,er_Flowrate)
-            !% --- downstream perturbation of head
-            faceR(idnf,fr_Head_u) = faceR(idnf,fr_Head_u) + setting%Weir%delta
-            !% --- compute weir flow at delta increament for lower downstream head
-            call weir_compute (eIdx, .true.)
-            !% --- temporary store of the flowrate forlater dQdH compute
-            elemSR(eIdx,esr_Weir_dQdH_downstream) = elemR(eIdx,er_Flowrate)
-            !% --- reverse temporary storage
-            faceR(idnf,fr_Head_u)   = HeadStore
-            elemR(eIdx,er_Flowrate) = FlowrateStore
-        end if
+            !% --- if is JB is upstream of weir, compute the weir flowrate for
+            !%     head increase of magnitude delta
+            if (elemYN(eIdx,eYN_isElementDownstreamOfJB)) then 
+                !print *, 'in isElementDownstreamOfJB'
+                !% --- temporary storage
+                HeadStore     = faceR(iupf,fr_Head_d)
+                FlowrateStore = elemR(eIdx,er_Flowrate)
+                !% --- upstream perturbation of head
+                faceR(iupf,fr_Head_d) = faceR(iupf,fr_Head_d) + setting%Weir%delta
+                !% --- compute weir flow at delta increment for upstream head
+                call weir_compute (eIdx, .true.)
+                !% --- temporary store of the flowrate for later dQdH compute
+                elemSR(eIdx,esr_Weir_dQdH_upstream) = elemR(eIdx,er_Flowrate)
+                !% --- reverse temporary storage
+                faceR(iupf,fr_Head_d)   = HeadStore
+                elemR(eIdx,er_Flowrate) = FlowrateStore
 
+                ! if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then  
+                !     print *, ' '
+                !     print *, 'in weir toplevel A: Q for dQdH Downstream of JB'
+                !     !print *, 'weir Q before Delta ',FlowrateStore
+                !     print *, 'weir Q after Delta  ',elemSR(eIdx,esr_Weir_dQdH_upstream) 
+                !     print *, ' '
+                ! end if
+
+            end if
+
+            !% --- if is JB is downstream, compute the weir flowrate for head increase of delta
+            if (elemYN(eIdx,eYN_isElementUpstreamOfJB)) then 
+                !print *, 'in isElementUpstreamOfJB'
+                !% --- temporary storage
+                HeadStore     = faceR(idnf,fr_Head_u)
+                FlowrateStore = elemR(eIdx,er_Flowrate)
+                !% --- downstream perturbation of head
+                faceR(idnf,fr_Head_u) = faceR(idnf,fr_Head_u) + setting%Weir%delta
+                !% --- compute weir flow at delta increament for lower downstream head
+                call weir_compute (eIdx, .true.)
+                !% --- temporary store of the flowrate forlater dQdH compute
+                elemSR(eIdx,esr_Weir_dQdH_downstream) = elemR(eIdx,er_Flowrate)
+                !% --- reverse temporary storage
+                faceR(idnf,fr_Head_u)   = HeadStore
+                elemR(eIdx,er_Flowrate) = FlowrateStore
+
+                !if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then  
+                    ! print *, ' '
+                    ! print *, 'in weir toplevel A: Q for dQdH Downstream of JB'
+                    ! !print *, 'weir Q before Delta ',FlowrateStore
+                    ! print *, 'weir Q after Delta  ',elemSR(eIdx,esr_Weir_dQdH_downstream) 
+                    ! print *, ' '
+                !end if
+            end if
+
+        end if
+       ! print *, 'in weir toplevel 000  ', elemR(223,er_Head)
         !% --- compute standard weir flow
         call weir_compute (eIdx, .false.)
 
-        !% --- compute dQdH for an upstream JB element
-        !%     esr_Weir_dQdH_upstream  stores the delta perturbed flowrate
-        if (elemYN(eIdx,eYN_isElementDownstreamOfJB)) then 
-            elemSR(eIdx,esr_Weir_dQdH_upstream)                                 &
-             =  (elemSR(eIdx,esr_Weir_dQdH_upstream) - elemR(eIdx,er_Flowrate)) &
-                / setting%Weir%delta
-        end if
+        ! print *, 'in weir toplevel AAA  ', elemR(223,er_Flowrate)
 
-        !% --- compute dQdH for a downstream JB element
-        !%     esr_Weir_dQdH_downstream  stores the delta perturbed flowrate
-        if (elemYN(eIdx,eYN_isElementUpstreamOfJB)) then 
-            elemSR(eIdx,esr_Weir_dQdH_downstream)                                 &
-             =  (elemSR(eIdx,esr_Weir_dQdH_downstream) - elemR(eIdx,er_Flowrate)) &
-                / setting%Weir%delta
-        end if
+        if (computeDQDH) then
+            ! if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then  
+            !     print *, ' '
+            !     print *, 'in weir toplevel B: Downstream of JB'
+            !     print *, 'flowrate computed   ',elemR(eIdx,er_Flowrate)
+            !     print *, 'flowrate with delta ',elemSR(eIdx,esr_Weir_dQdH_upstream) 
+            !     print *, 'difference          ',elemSR(eIdx,esr_Weir_dQdH_upstream)- elemR(eIdx,er_Flowrate) 
+            !     !print *, ' '
+            !     ! print *, 'in weir toplevel B: Upstream of JB'
+            !     ! print *, 'flowrate          ',elemR(eIdx,er_Flowrate), elemSR(eIdx,esr_Weire_dQdH_downstream) 
+            !     ! print *, 'difference ',elemSR(eIdx,esr_Weir_dQdH_downstream)- elemR(eIdx,er_Flowrate) 
+            !     !print *, ' '
+            ! end if
+
+            !% --- compute dQdH for an upstream JB element
+            !%     esr_Weir_dQdH_upstream  stores the delta perturbed flowrate
+            if (elemYN(eIdx,eYN_isElementDownstreamOfJB)) then 
+                elemSR(eIdx,esr_Weir_dQdH_upstream)                                 &
+                =  (elemSR(eIdx,esr_Weir_dQdH_upstream) - elemR(eIdx,er_Flowrate)) &
+                    / setting%Weir%delta
+            end if
+
+                ! if ((setting%Time%Step .ge. stepCut) .and. (eIdx == printIdx)) then  
+                !     print *, 'dQdH up             ',elemSR(eIdx,esr_Weir_dQdH_upstream)
+
+                ! end if
+
+            !% --- compute dQdH for a downstream JB element
+            !%     esr_Weir_dQdH_downstream  stores the delta perturbed flowrate
+            if (elemYN(eIdx,eYN_isElementUpstreamOfJB)) then 
+                elemSR(eIdx,esr_Weir_dQdH_downstream)                                 &
+                =  (elemSR(eIdx,esr_Weir_dQdH_downstream) - elemR(eIdx,er_Flowrate)) &
+                    / setting%Weir%delta
+            end if
+
+        endif
 
         !% --- limit weirflow change for stability
         call common_flowchange_limiter_singular (eIdx)
 
+        ! print *, 'in weir toplevel BBB  ', elemR(223,er_Flowrate)
+
         !% --- update velocity from flowrate and area
         call common_velocity_from_flowrate_singular (eIdx)
+
+        ! print *, 'in weir toplevel CCC  ', elemR(223,er_Flowrate)
 
         !% --- compute downstream energy head
         call common_outflow_energyhead_singular &
             (eIdx, esr_Weir_NominalDownstreamHead, esi_Weir_FlowDirection)
 
+            ! print *, 'in weir toplevel DDD  ', elemR(223,er_Head)
+
+        ! print *, ' '
+        ! print *, 'WEIR COMPUTE FLOWRATE ',elemR(223,er_Flowrate)
+        ! print *, 'dQDH up, down', elemSR(eIdx,esr_Weir_dQdH_upstream), elemSR(eIdx,esr_Weir_dQdH_downstream)
+        ! print *, ''
 
     end subroutine weir_toplevel    
 !%
@@ -143,6 +202,8 @@ module weir_elements
             (eIdx, esr_Weir_Zcrest, esr_Weir_NominalDownstreamHead, esi_Weir_FlowDirection)
 
             ! print *, 'Flow Direction ',elemSI(eIdx,esi_Weir_FlowDirection)
+            ! print *, ' '
+            ! print *, 'in weir compute'
             ! print *, 'Head           ',elemR(eIdx,er_Head)
             ! print *, 'NominalDS head ',elemSR(eIdx,esr_Weir_NominalDownstreamHead)
             ! print *, 'is surcharged  ',elemYN(eIdx,eYN_isSurcharged)
@@ -150,12 +211,14 @@ module weir_elements
 
         !% --- find flow through weirs
         call weir_flow (eidx) 
-        
+
+        !% --- limit weir flow for stability
+        !%     Note, this is applied for both delta and regular computation
+        !%     so that dQdH is consistent
+        call common_flowchange_limiter_singular (eIdx)
+
         !% --- functions below are not needed in the dQdH computation
         if (.not. isdelta) then
-
-            !% --- limit weir flow for stability
-            call common_flowchange_limiter_singular (eIdx)
 
             !% --- update weir geometry from head
             call weir_geometry_update (eIdx)
@@ -168,6 +231,7 @@ module weir_elements
             (eIdx, esr_Weir_NominalDownstreamHead, esi_Weir_FlowDirection)
 
         end if
+
     end subroutine weir_compute
 !%
 !%==========================================================================
@@ -227,7 +291,7 @@ module weir_elements
     !     logical             :: useNodeValues
     ! !%------------------------------------------------------------------ 
 
-    !     thisLink => elemI(eIdx,ei_link_Gidx_BIPquick)
+    !     thisLink => elemI(eIdx,ei_link_Gidx_SWMM)
     !     upNode   => link%I(thisLink,li_Mnode_u)
     !     upJM     => node%I(upNode,ni_elem_idx)
         
@@ -458,7 +522,7 @@ module weir_elements
             logical, pointer    :: hasFlapGate
 
             real(8) :: CrestLength, SubCorrectionTriangular, SubCorrectionRectangular
-            real(8) :: FlowRect, FlowTriang, ratio, dQlimit, dH
+            real(8) :: FlowRect, FlowTriang, ratio,  dH
         !%------------------------------------------------------------------
         !% Aliases:
             SpecificWeirType      => elemSI(eIdx,esi_Weir_SpecificType)

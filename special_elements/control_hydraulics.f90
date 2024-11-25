@@ -53,7 +53,7 @@ contains
         !%------------------------------------------------------------------
         !% Declarations:
             integer, intent(in) :: istep
-            character(64) :: subroutine_name = 'control_update'
+            ! character(64) :: subroutine_name = 'control_update'
         !%------------------------------------------------------------------
 
         !% --- store monitoring element data across all images
@@ -92,7 +92,7 @@ contains
         !%------------------------------------------------------------------
             integer :: nRules, nPremise, nThenAction, nElseAction, ii
             integer, pointer :: thisElem
-            character(64) :: subroutine_name = 'control_init_monitoring_and_action_from_EPASWMM'
+            ! character(64) :: subroutine_name = 'control_init_monitoring_and_action_from_EPASWMM'
         !%------------------------------------------------------------------
         !%------------------------------------------------------------------
         !% --- get the number of locations in link, node arrays that are
@@ -145,7 +145,7 @@ contains
             integer :: ii
             real(8), target :: rdummy
             integer, pointer :: Eidx
-            character(64) :: subroutine_name = 'control_update_monitor_across_images'
+            ! character(64) :: subroutine_name = 'control_update_monitor_across_images'
         !%------------------------------------------------------------------
         !%------------------------------------------------------------------
         rdummy = nullvalueR
@@ -215,7 +215,7 @@ contains
             real(8), pointer :: tDepth, tHead, tVolume, tInflow, tFlow
             real(8), pointer :: tSetting, tTimeLastSet
             integer, pointer :: LinkNodeNum, linknodesimType
-            character(64) :: subroutine_name = 'control_update_EPASWMM_monitor_data'
+            ! character(64) :: subroutine_name = 'control_update_EPASWMM_monitor_data'
         !%------------------------------------------------------------------
 
         do ii=1,N_MonitorPoint
@@ -253,7 +253,7 @@ contains
             integer :: ii
             integer, pointer :: Eidx, Lidx
             real(8), pointer :: targetsetting(:), timelastset(:)
-            character(64) :: subroutine_name = 'control_update_actions'
+            ! character(64) :: subroutine_name = 'control_update_actions'
         !%------------------------------------------------------------------
         !% Aliases:
             targetsetting => elemR(:,er_TargetSetting)
@@ -293,7 +293,7 @@ contains
             integer, pointer :: Eidx, elemType, hasChanged
             real(8), pointer :: thisSetting, targetSetting, timeLastSet
             logical, pointer :: isClosedConduit
-            character(64) :: subroutine_name = 'control_update_setting'
+            ! character(64) :: subroutine_name = 'control_update_setting'
         !%------------------------------------------------------------------
 
         !% --- cycle through the action points (few)
@@ -426,7 +426,7 @@ contains
             integer :: ii
             integer, pointer :: Eidx, elemType, hasChanged, dface
             real(8), pointer :: thisSetting
-            character(64) :: subroutine_name = 'control_update_element_values'
+            ! character(64) :: subroutine_name = 'control_update_element_values'
         !%------------------------------------------------------------------
 
         !% --- cycle through the action points    
@@ -461,7 +461,7 @@ contains
 
                 case (weir)
                     if (hasChanged == oneI) then 
-                        call weir_toplevel(Eidx)
+                        call weir_toplevel(Eidx,.false.)
                     else
                         !% no change 
                     end if
@@ -516,7 +516,7 @@ contains
             integer :: npoint
             integer, allocatable :: location(:), linknodesimType(:), attribute(:)
             integer, allocatable :: irank(:)
-            character(64) :: subroutine_name = 'control_init_monitor_points'
+            ! character(64) :: subroutine_name = 'control_init_monitor_points'
         !%------------------------------------------------------------------
 
         ! print *, ' '
@@ -658,7 +658,7 @@ contains
             integer :: isThen
             integer, allocatable :: location(:), linknodesimType(:), attribute(:)
             integer, allocatable :: irank(:)
-            character(64) :: subroutine_name = 'control_init_action_points'
+            ! character(64) :: subroutine_name = 'control_init_action_points'
         !%------------------------------------------------------------------
         if (nRules < 1) return
 
@@ -806,49 +806,75 @@ contains
         !%------------------------------------------------------------------
         !% Declarations
             integer :: ii, NelemIdx, elemStart, elemEnd
-            integer, pointer :: linknodesimType(:), LNidx(:), eIdx(:)
-            integer, pointer :: nodeType(:), numElement(:)
-            integer, pointer :: monitorImage(:), linkImage(:), nodeImage(:)
-            integer, pointer :: Lidx, Nidx
-            character(64) :: subroutine_name = 'control_init_monitor_elements'
+            integer, pointer :: Lidx, Nidx, thisMonitorImage
+            integer          :: numElement
+            logical          :: isUp
+
+            ! character(64) :: subroutine_name = 'control_init_monitor_elements'
         !%------------------------------------------------------------------
         !% Aliases
-            linknodesimType => monitorI(:,mi_linknodesimType)
-            LNidx  => monitorI(:,mi_linknode_idx)
-            eIdx   => monitorI(:,mi_elem_idx)
-            monitorImage => monitorI(:,mi_image)
-            numElement   => link%I(:,li_N_element)
-            nodeType     => node%I(:,ni_node_type)
-            linkImage    => link%I(:,li_P_image)
-            nodeImage    => node%I(:,ni_P_image)
         !%------------------------------------------------------------------
 
         !% --- cycle through the monitoring points    
         do ii=1,N_MonitorPoint
             monitorI(ii,mi_idx) = ii
+            thisMonitorImage    => monitorI(ii,mi_image)
 
             !% --- each point is either associated with a link or node
-            select case (linknodesimType(ii))
+            select case (monitorI(ii,mi_linknodesimType))
             case (1) !% is link
-                Lidx => LNidx(ii) !% --- EPA-SWMM link index
-                monitorImage(ii) = linkImage(Lidx)
-                if (numElement(Lidx) == 1) then
+                Lidx => monitorI(ii,mi_linknode_idx) !% --- EPA-SWMM link index
+                
+                !% --- get the image the monitoring link is on
+                if (link%YN(Lidx,lYN_isImageConnection)) then
+                    !% --- for link that connects two partitions, use the up or
+                    !%     down depending on which has more elements
+                    if ((link%I(Lidx,li_N_elementUp)) .ge. (link%I(Lidx,li_N_elementDn))) then
+                        thisMonitorImage = link%I(Lidx,li_P_imageUp)
+                        numElement       = link%I(Lidx,li_N_elementUp)
+                        isUp             = .true.
+                    else
+                        thisMonitorImage = link%I(Lidx,li_P_imageDn)
+                        numElement       = link%I(Lidx,li_N_elementDn)
+                        isUp             = .false.
+                    end if
+                else
+                    !% --- if not a connection, then up and dn are the same
+                    thisMonitorImage = link%I(Lidx,li_P_imageUp)
+                    numElement       = link%I(Lidx,li_N_element)
+                    isUp             = .true.
+                end if
+
+                if (numElement == 1) then
                     !% --- only one element in link, so use that as monitor element
-                    eIdx(ii)  = link%I(Lidx,li_first_elem_idx)[monitorImage(ii)]
+                    monitorI(ii,mi_elem_idx)  = link%I(Lidx,li_up_first_elem_idx)[thisMonitorImage]
                 else
                     !% --- choose the central element 
                     !%     note that integer division gives bias to the
                     !%     smaller of two central values (upstream) if an even number
                     !%     of elements
-                    elemStart = link%I(Lidx,li_first_elem_idx)[monitorImage(ii)]
-                    elemEnd   = link%I(Lidx,li_last_elem_idx)[monitorImage(ii)]
-                    eIdx(ii)  = (elemStart + elemEnd) / twoI
+                    if (link%YN(Lidx,lYN_isImageConnection)) then
+                        !% --- use one side of a link connecting images
+                        if (isUp) then 
+                            elemStart = link%I(Lidx,li_up_first_elem_idx)[thisMonitorImage]
+                            elemEnd   = link%I(Lidx,li_up_last_elem_idx) [thisMonitorImage]
+                        else
+                            elemStart = link%I(Lidx,li_dn_first_elem_idx)[thisMonitorImage]
+                            elemEnd   = link%I(Lidx,li_dn_last_elem_idx) [thisMonitorImage]
+                        end if
+                    else
+                        elemStart = link%I(Lidx,li_up_first_elem_idx)[thisMonitorImage]
+                        elemEnd   = link%I(Lidx,li_dn_last_elem_idx) [thisMonitorImage]
+                    end if
+                    monitorI(ii,mi_elem_idx)  = (elemStart + elemEnd) / twoI
                 end if
-            case (0) !% is node
-                Nidx => LNidx(ii)
 
-                monitorImage(ii) = nodeImage(Nidx)
-                select case (nodeType(Nidx))
+            case (0) !% is node
+                Nidx => monitorI(ii,mi_linknode_idx)
+
+                thisMonitorImage = node%I(Nidx,ni_P_image)
+
+                select case (node%I(Nidx,ni_node_type))
 
                     case (nJ1,nBCup)
                         !% --- connect monitor for node to the first element of downstream link
@@ -857,35 +883,66 @@ contains
                             print *, 'CODE ERROR unexpected nullvalue for link index'
                             call util_crashpoint(598723)
                         else
-                            eIdx(ii) = link%I(Lidx,li_first_elem_idx)[monitorImage(ii)]
+                            if (link%I(Lidx,li_P_imageUp) .ne. thisMonitorImage) then
+                                print *, 'CODE ERROR: monitor point at an nJ1 or nBCup'
+                                print *, 'that has a different image than its downstream link'
+                                print *, 'which should not occur'
+                                call util_crashpoint(6109783)
+                            else
+                                monitorI(ii,mi_elem_idx) = link%I(Lidx,li_up_first_elem_idx)[thisMonitorImage]
+                            end if
                         end if
 
-                    case (nJ2, nBCdn)
+                    case (nBCdn)
                         !% --- connect monitor for node to the last element of upstream link
                         Lidx => node%I(Nidx,ni_N_link_u)
                         if (Lidx == nullvalueI) then
                             print *, 'CODE ERROR unexpected nullvalue for link index'
                             call util_crashpoint(98273)
                         else
-                            eIdx(ii) = link%I(Lidx,li_last_elem_idx)[monitorImage(ii)]
+                            if (link%I(Lidx,li_P_imageDn) .ne. thisMonitorImage) then
+                                print *, 'CODE ERROR: monitor point at an nBCdn'
+                                print *, 'that has a different image than its upstream link'
+                                print *, 'which should not occur'
+                                call util_crashpoint(6109781)
+                            else
+                                monitorI(ii,mi_elem_idx) = link%I(Lidx,li_dn_last_elem_idx)[thisMonitorImage]
+                            end if
+                        end if
+
+                    case (nJ2)    
+                        !% --- connect monitor for node to the last element of upstream link
+                        Lidx => node%I(Nidx,ni_N_link_u)
+                        if (Lidx == nullvalueI) then
+                            print *, 'CODE ERROR unexpected nullvalue for link index'
+                            call util_crashpoint(98273)
+                        else
+                            if (link%I(Lidx,li_P_imageDn) .ne. thisMonitorImage) then
+                                print *, 'CODE ERROR: monitor point at an nJ2'
+                                print *, 'that has a different image than its upstream link'
+                                print *, 'which should not occur'
+                                call util_crashpoint(6109786)
+                            else
+                                monitorI(ii,mi_elem_idx) = link%I(Lidx,li_dn_last_elem_idx)[thisMonitorImage]
+                            end if
                         end if
 
                     case (nJM,nStorage)
-                        NelemIdx = node%I(Nidx,ni_elem_idx)[monitorImage(ii)]
+                        NelemIdx = node%I(Nidx,ni_elem_idx)[thisMonitorImage]
                         if (NelemIdx== nullvalueI) then
                             print *, 'CODE ERROR unexpected nullvalue for node index'
                             call util_crashpoint(429933)
                         else
-                            eIdx(ii) = NelemIdx
+                            monitorI(ii,mi_elem_idx) = NelemIdx
                         end if
 
                     case default
-                        print *, 'CODE ERROR Unexpected case default, ni_node_type of ',trim(reverseKey(nodeType(Nidx)))
+                        print *, 'CODE ERROR Unexpected case default, ni_node_type of ',trim(reverseKey(node%I(Nidx,ni_node_type)))
                         call util_crashpoint(72109872)
                 end select
 
             case default
-                print *, 'CODE ERROR Unexpected case default, monitor(:,mi_linknodesimType) unsupported value of ',linknodesimType(ii)
+                print *, 'CODE ERROR Unexpected case default, monitor(:,mi_linknodesimType) unsupported value of ',monitorI(ii,mi_linknodesimType)
                 call util_crashpoint(58723)
             end select
 
@@ -913,35 +970,64 @@ contains
         !%------------------------------------------------------------------
         !% Declarations:
             integer :: ii
-            integer, pointer :: eIdx(:), Lidx, actionImage(:), linkImage(:)
-            integer, pointer :: numElement(:), elemStart(:), elemEnd(:)
-            character(64) :: subroutine_name = 'control_init_action_elements'
+            integer, pointer :: Lidx, actionImage
+            integer          :: numElement, elemStart, elemEnd
+            logical          :: isUp
+            ! character(64)    :: subroutine_name = 'control_init_action_elements'
         !%------------------------------------------------------------------
         !% Aliases
-            eIdx         => actionI(:,ai_elem_idx)
-            actionImage  => actionI(:,ai_image)
-            numElement   => link%I(:,li_N_element)
-            elemStart    => link%I(:,li_first_elem_idx)
-            elemEnd      => link%I(:,li_last_elem_idx)
-            linkImage    => link%I(:,li_P_image)
         !%------------------------------------------------------------------
 
         !% --- cycle through the action points
         do ii=1,N_ActionPoint
+            actionImage  => actionI(ii,ai_image)  !% --- to be assigned
 
             !% --- get the link for this action point
             Lidx => actionI(ii,ai_link_idx)
 
             !% --- store the image that this link is partitioned to
-            actionImage(ii) = linkImage(Lidx)
+            if (link%YN(Lidx,lYN_isImageConnection)) then
+                if ((link%I(Lidx,li_N_elementUp)) .ge. (link%I(Lidx,li_N_elementDn))) then
+                    actionImage = link%I(Lidx,li_P_imageUp)
+                    numElement  = link%I(Lidx,li_N_elementUp)
+                    isUp        = .true.
+                else
+                    actionImage = link%I(Lidx,li_P_imageDn)
+                    numElement  = link%I(Lidx,li_N_elementDn)
+                    isUp        = .false.
+                end if
+            else
+                actionImage = link%I(Lidx,li_P_imageUp)
+                numElement  = link%I(Lidx,li_N_element)
+                isUp        = .true.
+            end if
+
+             !% --- choose the central element 
+            !%     note that integer division gives bias to the
+            !%     smaller of two central values (upstream) if an even number
+            !%     of elements
+
+            if (link%YN(Lidx,lYN_isImageConnection)) then
+                !% --- use one side of a link connecting images
+                if (isUp) then 
+                    elemStart = link%I(Lidx,li_up_first_elem_idx)[actionImage]
+                    elemEnd   = link%I(Lidx,li_up_last_elem_idx) [actionImage]
+                else
+                    elemStart = link%I(Lidx,li_dn_first_elem_idx)[actionImage]
+                    elemEnd   = link%I(Lidx,li_dn_last_elem_idx) [actionImage]
+                end if
+            else
+                elemStart = link%I(Lidx,li_up_first_elem_idx)[actionImage]
+                elemEnd   = link%I(Lidx,li_dn_last_elem_idx) [actionImage]
+            end if
 
             !% --- find the element on this link to use
-            if (numElement(Lidx) == 1) then
+            if (numElement == 1) then
                 !% --- only one element in link, so use that as action element
-                eIdx(ii) = elemStart(Lidx)
+                actionI(ii,ai_elem_idx) = elemStart
             else
                 !% --- choose central element
-                eIdx(ii) = (elemStart(Lidx) + elemEnd(Lidx)) / twoI
+                actionI(ii,ai_elem_idx) = (elemStart + elemEnd) / twoI
             end if
 
         end do

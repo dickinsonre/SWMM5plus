@@ -249,6 +249,9 @@
         enumerator :: DynamicSlot
         enumerator :: SplitDynamicSlot
 
+        !% data types for partition ordering
+        enumerator :: DefaultOrder
+
         !% keys for report time processing
         enumerator :: InSeconds
         enumerator :: InMinutes
@@ -261,7 +264,7 @@
         enumerator :: MaximumValue
         enumerator :: SingleValue
 
-        !% keys for output FeatureType
+        !% keys for output FeatureType and output Static elem
         enumerator :: LinkOut
         enumerator :: NodeOut
         enumerator :: NodeElemOut
@@ -329,6 +332,16 @@
         enumerator :: entrappedAirpocket
         enumerator :: upReleaseAirpocket
         enumerator :: dnReleaseAirpocket
+
+        !% --- assignment keys for tracking link partitioning
+        enumerator :: lUnassigned 
+        enumerator :: lAssignedUp 
+        enumerator :: lAssignedDn 
+        enumerator :: lAssignedAll
+
+        !% --- assignment keys for tracking node partitioning
+        enumerator :: nUnassigned 
+        enumerator :: nAssigned
  
         !% last items for bookkeeping
         enumerator :: SWMM_FlowUnits_CFS

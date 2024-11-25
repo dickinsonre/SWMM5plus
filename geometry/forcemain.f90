@@ -36,8 +36,8 @@ module forcemain
         !% for face mains that have a free surface.
         !%------------------------------------------------------------------
         !% Declarations:
-            integer, pointer :: thisPackCol, Npack, thisP(:)
-            character(64)    :: subroutine_name = 'forcemain_ManningsN'
+            integer, pointer :: thisPackCol, Npack
+            ! character(64)    :: subroutine_name = 'forcemain_ManningsN'
         !%------------------------------------------------------------------
         !% Preliminaries:
             if (.not. setting%Solver%ForceMain%AllowForceMainTF) return
@@ -93,7 +93,7 @@ module forcemain
             real(8), parameter  :: HWslopeExp = 0.04d0
             real(8), parameter  :: HWhydradExp = 0.03667d0
             real(8), parameter  :: DWhydradExp = 0.1667d0 !% (1/6)
-            character(64) :: subroutine_name = 'fm_equivalent_manningsN'
+            ! character(64) :: subroutine_name = 'fm_equivalent_manningsN'
         !%------------------------------------------------------------------
         !% Preliminaries
             if (Npack < 1) return
@@ -141,7 +141,7 @@ module forcemain
             real(8), parameter  :: eCoef = 1.08108d0 !% roughness multiplier in SI (4/3.7)
             real(8), parameter  :: rCoef = 5.74d0  !% Reynolds number coef
             real(8), parameter  :: rExpon = 0.9d0  !% Reynolds number exponent
-            character(64) :: subroutine_name = 'fm_dw_friction'
+            ! character(64) :: subroutine_name = 'fm_dw_friction'
         !%--------------------------------------------------------------------
         !% Preliminaries
             if (Npack < 1) return

@@ -26,7 +26,7 @@ module runge_kutta2
     use rk2_lowlevel
     use culvert_elements, only: culvert_toplevel  !% NOT WORKING AS OF 20230912
     use pack_mask_arrays
-    use preissmann_slot
+    !use preissmann_slot
     use adjust
     use diagnostic_elements
     use air_entrapment
@@ -53,18 +53,18 @@ module runge_kutta2
         !% single RK2 step for explicit time advance of SVE
         !%------------------------------------------------------------------
         !% Declarations:
-            integer          :: istep, ii, kk
-            integer, pointer :: Npack, thisP(:), fup, fdn, tempP(:)
+            integer          :: istep
+            integer, pointer :: Npack, thisP(:),  tempP(:)
 
             integer          :: thisDiag
 
             logical          :: isConservativeTF(2)
             
             real(8), pointer :: grav, dt
-            real(8)          :: volume1, volume2, inflowVolume, outflowVolume
-            real(8)          :: totalvolume, sumlocaldiff, localcons
+            !real(8)          :: volume1, volume2, inflowVolume, outflowVolume
+            !real(8)          :: totalvolume, sumlocaldiff, localcons
             
-            character(64) :: subroutine_name = 'rk2_toplevel_ETM'
+            !character(64) :: subroutine_name = 'rk2_toplevel_ETM'
         !%------------------------------------------------------------------
         !% Preliminaries
         !% --- reset the overflow counter for this time level
@@ -82,6 +82,7 @@ module runge_kutta2
 
             ! print *, ' '
             ! print *, 'volume at start of RK   ', sum(elemR(tempP,er_Volume_N0)), sum(elemR(tempP,er_Volume))
+            ! print *, ' '
 
             ! print *, 'JB 616 flowrate ',elemR(616,er_Flowrate)
             ! stop 66987
@@ -92,14 +93,22 @@ module runge_kutta2
         !%     for preliminaries
         istep = zeroI
 
-            ! call util_utest_CLprint('AAAA start RK2 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
+        ! if (setting%Time%Step .ge. 117000) then
+        !     print *, ' '
+        !     print *, '******************************************'
+        !     print *, ' NEW STEP '
+        !     print *, '******************************************'
+        !     print *, ' '
+        ! end if
 
+        ! call util_utest_CLprint('AAAA start RK2 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
+        
         !% --- Preliminary values for JM/JB elements
         !%     Note, this must be called even if no JM/JB on this image because 
         !%     the faces require synchronizing.
         call junction_preliminaries ()
 
-            ! call util_utest_CLprint('BBBB after junction preliminaries')
+            ! ! ! ! call util_utest_CLprint('BBBB after junction preliminaries')
         
         !%==================================  
         !% --- RK2 SOLUTION
@@ -108,23 +117,23 @@ module runge_kutta2
             !% --- Half-timestep advance on CC for U and UVolume
             call rk2_step_CC (istep)  
 
-                ! call util_utest_CLprint('CCC after rk2_step_CC')
+                ! ! call util_utest_CLprint('CCC after rk2_step_CC')
 
             !% --- Update all CC aux variables
             !%     Note, these updates CANNOT depend on face values
             !%     Through geometry, this sets Preissmann Slot variables
             call update_auxiliary_variables_CC (                   &
                 ep_CC, ep_CC_Open_Elements, ep_CC_Closed_Elements, &
-                .true., .false., dummyIdx)
+                .true., .false., dummy_elem_idx)
 
-                ! call util_utest_CLprint('DDDD after update auxiliary CC')
+               ! ! call util_utest_CLprint('DDDD after update auxiliary CC')
 
             !% --- zero and small depth adjustment for elements
             
-            call adjust_element_toplevel (CC,isConservativeTF(istep))
+            call adjust_element_toplevel (CC)
             
                 ! print *, 'istep ',istep
-                ! call util_utest_CLprint('EEEE after adjust element toplevel CC')
+                ! ! call util_utest_CLprint('EEEE after adjust element toplevel CC')
 
             !% --- JUNCTION 1st Step setup, 2nd Step compute
             if (N_nJM > 0) then 
@@ -138,11 +147,13 @@ module runge_kutta2
                         thisP => elemP(1:Npack, ep_JB)
                         call update_interpweights_JB (thisP, Npack, .true.)
 
-                        ! call util_utest_CLprint('FFF after update interpweights JB')
+                        ! ! ! ! call util_utest_CLprint('FFF after update interpweights JB')
 
                     end if
                 else if (istep == 2) then 
-                    ! ! call util_utest_CLprint('TTTT before junction second step')
+
+                    ! call util_utest_CLprint('TTTT before junction second step')
+
                     !% --- conservative storage advance for junction, second step
                     ! print *, 'going into junction 2nd step'
                     call junction_second_step ()
@@ -167,7 +178,7 @@ module runge_kutta2
                 end if
             end if  
 
-            ! call util_utest_CLprint('FFF2 before face interpolation')
+            ! ! call util_utest_CLprint('FFF2 before face interpolation')
 
             !% --- interpolate all data to faces
             !%     NOTE: in 1st iter, the diag elements have time n values, this should get
@@ -191,19 +202,21 @@ module runge_kutta2
                     call util_crashpoint(698734)
                 end if
                 !call diagnostic_push_adjacent_elemdata_to_face (thisDiag)
-                ! ! call util_utest_CLprint('HHH0 after push')
+                ! ! ! ! call util_utest_CLprint('HHH0 after push')
 
-                !% --- update flowrates for diagnostic elements adjacent to CC
-                call diagnostic_by_type (thisDiag, istep)  
+                !% --- update flowrates for diagnostic element
+                !%     in step 1 this is Diag not JB adjacent
+                !%     .true. indicates compute dQdH
+                call diagnostic_by_type (thisDiag, istep,.true.)  
 
                 ! call util_utest_CLprint('HHH1 after diagnostic')
 
                 !% --- push the diagnostic flowrate data to faces -- true is upstream, false is downstream
                 call face_push_elemdata_to_face (thisDiag, fr_Flowrate, er_Flowrate, elemR, .true.)
                 call face_push_elemdata_to_face (thisDiag, fr_Flowrate, er_Flowrate, elemR, .false.)
-                !call face_interpolation(fp_Diag_IorS, .true., .true., .true., .false., .true.)
+                ! call face_interpolation(fp_Diag_IorS, .true., .true., .true., .false., .true.)
 
-                ! call util_utest_CLprint('HHH2 after push')
+                ! ! ! ! call util_utest_CLprint('HHH2 after push')
             end if
             !% --- face sync
             !%     sync all the images first. then copy over the data between
@@ -220,6 +233,16 @@ module runge_kutta2
                 !% --- update face velocities after sync changes areas and flowrates
                 call face_update_velocities (fp_Diag_IorS)
             end if
+
+            ! ! call util_utest_CLprint('HHH3 after push')
+
+            !% --- testing 20241111
+            if (N_nJM > 0) then 
+                call face_pull_facedata_to_JBelem (ep_JM, fr_Flowrate,   er_Flowrate, elemR, .true., .false.)
+                call face_pull_facedata_to_JBelem (ep_JM, fr_Velocity_d, er_Velocity, elemR, .true., .false.)
+                call face_pull_facedata_to_JBelem (ep_JM, fr_Head_d,     er_Head,     elemR, .true., .false.)
+            end if
+    
  
             ! call util_utest_CLprint('HHH after ALL diagnostic')
 
@@ -258,17 +281,19 @@ module runge_kutta2
             call face_shared_face_sync (fp_noBC_IorS, [fr_flowrate,fr_Velocity_d,fr_Velocity_u])
             sync all
 
-            !  call util_utest_CLprint('OOOO before adjust Vfilter')
+            ! ! call util_utest_CLprint('OOOO before adjust Vfilter')
 
             !% --- Filter flowrates to remove grid-scale checkerboard
             !% 20240209brh moved before junction first step
-            call adjust_Vfilter (istep)
+            call adjust_Vfilter ()
 
-            ! call util_utest_CLprint('QQQQ after V filter')
+            ! ! ! ! ! ! call util_utest_CLprint('QQQQ after V filter')
 
             !% --- JUNCTION -- first step compute
             if (istep == 1) then 
-                ! ! call util_utest_CLprint('PPPP before junction first step')
+                
+                ! call util_utest_CLprint('PPPP before junction first step')
+                
                 !% --- Junction first step RK estimate
                 !%     Note that this must be called in every image, including
                 !%     those that do not have junctions as it contains a sync
@@ -276,7 +301,6 @@ module runge_kutta2
 
                 ! call util_utest_CLprint('RRRR after junction first step')
 
-                ! print *, 'volume after junction 1 ', sum(elemR(tempP,er_Volume_N0)), sum(elemR(tempP,er_Volume))
             end if
 
             if (istep == 1) then 
@@ -284,25 +308,29 @@ module runge_kutta2
                 !%    in second step
                 call rk2_store_conservative_fluxes (ALL) 
 
-                ! call util_utest_CLprint('SSSS after 1st step cons fluxes')
+                ! ! ! ! ! ! call util_utest_CLprint('SSSS after 1st step cons fluxes')
             else 
                 !%  --- no action 
             end if
 
-            ! call util_utest_CLprint('XXXX before air entrapment')
+            ! ! ! ! ! ! call util_utest_CLprint('XXXX before air entrapment')
 
             !% Air entrapment modeling
             if (setting%AirTracking%UseAirTrackingYN) then
                 call air_entrapment_toplevel (istep)
             end if 
 
-            ! call util_utest_CLprint('YYYY after air entrapment, one step finished')
+            ! if (setting%Time%Step > 10595) then
+            !     print *, ''
+            !     print *, 'STEP HERE ',istep
+            ! end if
+            ! call util_utest_CLprint('YYYY one step finished')
 
         end do
 
         ! print *, 'volume at end           ', sum(elemR(tempP,er_Volume_N0)), sum(elemR(tempP,er_Volume))
-
-        ! call util_utest_CLprint('ZZZZ end RK2')
+        ! print *, ' '
+        ! ! ! ! ! call util_utest_CLprint('ZZZZ end RK2')
 
     end subroutine rk2_toplevel
 !%
@@ -331,17 +359,17 @@ module runge_kutta2
             thisP => elemP(1:Npack,thisPackCol)
             elemR(thisP,er_SourceContinuity) = zeroR
 
-            ! call util_utest_CLprint('inside aaaa --------------------')
+            ! ! ! ! ! ! call util_utest_CLprint('inside aaaa --------------------')
 
             !% --- Compute net flowrates for CC as source termo
             call ll_continuity_netflowrate_CC (er_SourceContinuity, thisPackCol, Npack)
 
-            ! call util_utest_CLprint('inside aaaa2 --------------------')
+            ! ! ! ! ! ! call util_utest_CLprint('inside aaaa2 --------------------')
 
             !% --- Solve for new volume
             call ll_continuity_volume_CC (er_Volume, thisPackCol, Npack, istep)
 
-            ! call util_utest_CLprint('inside bbbb --------------------')
+            ! ! ! ! ! ! call util_utest_CLprint('inside bbbb --------------------')
 
             !% --- adjust extremely small volumes that might be been introduced
             !%     this needs to be done before momentum so that the volume is
@@ -352,7 +380,7 @@ module runge_kutta2
 
         end if  
 
-        ! call util_utest_CLprint('inside cccc --------------------')
+        ! ! ! ! ! ! call util_utest_CLprint('inside cccc --------------------')
 
         !% --- MOMENTUM
         thisPackCol => col_elemP(ep_CC_Q)
@@ -362,18 +390,18 @@ module runge_kutta2
             !% --- momentum K source terms for different methods for ETM
             call ll_momentum_Ksource_CC (er_Ksource, thisPackCol, Npack)
 
-            ! call util_utest_CLprint('inside dddd --------------------')
+            ! ! ! ! ! ! call util_utest_CLprint('inside dddd --------------------')
 
             !% --- Common source for momentum on channels and conduits for ETM
             call ll_momentum_source_CC (er_SourceMomentum, thisPackCol, Npack)
 
-            ! call util_utest_CLprint('inside eeee --------------------')
+            ! ! ! ! ! ! call util_utest_CLprint('inside eeee --------------------')
 
             !% --- Common Gamma for momentum on channels and conduits for  ETM
             !%     Here for all channels and conduits, assuming CM roughness
             call ll_momentum_gammaCM_CC (er_GammaM, thisPackCol, Npack)
 
-            ! call util_utest_CLprint('inside ffff --------------------')
+            ! ! ! ! ! ! call util_utest_CLprint('inside ffff --------------------')
 
             !% --- handle force mains as Gamma terms
             !%     These overwrite the gamma from the CM roughness above
@@ -390,36 +418,36 @@ module runge_kutta2
                 if (nFMpack > 0) call ll_momentum_gammaFM_CC (er_GammaM, FMPackCol, nFMpack, DarcyWeisbach)
             end if
 
-            ! call util_utest_CLprint('inside jjjj --------------------')
+            ! ! ! ! ! ! call util_utest_CLprint('inside jjjj --------------------')
 
             !% --- add minor loss term to gamma for all conduits
             call ll_minorloss_friction_gamma_CC (er_GammaM, thisPackCol, Npack)   
 
-            ! call util_utest_CLprint('inside kkkk --------------------')
+            ! ! ! ! ! ! call util_utest_CLprint('inside kkkk --------------------')
 
             !% --- Advance flowrate to n+1/2 for conduits and channels with ETM
             call ll_momentum_solve_CC (er_Velocity, thisPackCol, Npack, istep)
 
-            ! call util_utest_CLprint('inside llll --------------------')
+            ! ! ! ! ! ! call util_utest_CLprint('inside llll --------------------')
 
             !% --- velocity for ETM time march
             call ll_momentum_velocity_CC (er_Velocity, thisPackCol, Npack)
 
-            ! call util_utest_CLprint('inside mmmm --------------------')
+            ! ! ! ! ! ! call util_utest_CLprint('inside mmmm --------------------')
 
             !% --- prevent backflow through flapgates
             call ll_enforce_flapgate_CC (er_Velocity, thisPackCol, Npack)
 
-            ! call util_utest_CLprint('inside nnnn --------------------')
+            ! ! ! ! ! ! call util_utest_CLprint('inside nnnn --------------------')
 
             !% --- enforce zero velocity on elements that began as ZeroDepth
             call ll_enforce_zerodepth_velocity (er_Velocity, thisPackCol, Npack)
 
-            ! call util_utest_CLprint('inside oooo --------------------')
+            ! ! ! ! ! ! call util_utest_CLprint('inside oooo --------------------')
 
         end if
 
-        ! !! ! ! call util_utest_CLprint('inside cccc --------------------')
+        ! !! ! ! ! ! ! ! ! call util_utest_CLprint('inside cccc --------------------')
         
     end subroutine rk2_step_CC
 !%

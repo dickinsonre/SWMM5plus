@@ -37,7 +37,7 @@ contains
         !%-----------------------------------------------------------------
         !% Declarations
             integer, intent(in) :: istep
-            integer             :: ii, jj
+            !integer             :: ii, jj
         !%------------------------------------------------------------------
         !% find the airpocket in the network 
         if (setting%AirTracking%StaticAirPocket) then
@@ -63,7 +63,7 @@ contains
             call airpockets_junction (istep)
             !% --- add the pressure head to CC elements adjacent to junctions
             !%     and update airR arrays
-            call airpockets_update_air_from_JM (istep)
+            call airpockets_update_air_from_JM ()
         end if
 
         !% pack the faces those are needed to be interpolated
@@ -141,7 +141,7 @@ contains
                     ! print *,  airR (ii,jj,airR_outflow),airR (ii,jj,airR_inflow),airR (ii,jj,airR_dvdt)
     
                     !% calculate air outflow rate form an airpocket if any vent is present
-                    call airpocket_air_mass_outflow (ii, jj, istep)
+                    call airpocket_air_mass_outflow (ii, jj)
 
                     ! print *, 'mass outflow ',airR(ii,jj,airR_mass_flowrate)
                     ! print *, 'after mass outflow '
@@ -418,7 +418,7 @@ contains
         !% Description:
         !% Find air Pockets in an link
         !%------------------------------------------------------------------
-            integer          :: ii, jj, kk, startIdx, endIdx, airPocketIdx, nElem
+            integer          :: ii, jj,  startIdx, endIdx, airPocketIdx, nElem
             integer, pointer :: cIdx(:), eIdx(:), fUp(:), fDn(:) , max_airpockets
             integer, pointer :: JBupIdx, JBdnIdx
             logical, pointer :: conAir(:), elemSur(:), fBlocked(:)
@@ -545,7 +545,7 @@ contains
                             if (startIdx == oneI) then
                                 airI(ii,airPocketIdx,airI_type) = upReleaseAirpocket
                                 !% --- set the Upp JB as connecting to an air pocket  
-                                if (JBupIdx .ne. nullvalueI) then 
+                                if ((JBupIdx .ne. nullvalueI) .and. (JBupIdx .ne. dummy_elem_idx)) then 
                                     elemSI(JBupIdx,esi_JB_AirPocket_Exists) = oneI
                                     elemSI(JBupIdx,esi_JB_air_pocket_index) = airPocketIdx
                                     elemYN(JBupIdx,eYN_hasAirPocket) = .true.
@@ -559,7 +559,7 @@ contains
                             else if (endIdx == nElem) then
                                 airI(ii,airPocketIdx,airI_type) = dnReleaseAirpocket
                                 !% --- set the Dn JB as connecting to an air pocket  
-                                if (JBdnIdx .ne. nullvalueI) then 
+                                if ((JBdnIdx .ne. nullvalueI) .and. (JBdnIdx .ne. dummy_elem_idx)) then 
                                     elemSI(JBdnIdx,esi_JB_AirPocket_Exists) = oneI
                                     elemSI(JBdnIdx,esi_JB_air_pocket_index) = airPocketIdx
                                     elemYN(JBdnIdx,eYN_hasAirPocket) = .true.
@@ -944,12 +944,12 @@ contains
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine airpocket_air_mass_outflow (sc_Idx, aIdx, istep)
+    subroutine airpocket_air_mass_outflow (sc_Idx, aIdx)
         !%------------------------------------------------------------------
         !% Description:
         !%   calculates the air outflow rate for airpocket with release
         !%------------------------------------------------------------------
-            integer, intent (in) :: sc_Idx, aIdx, istep
+            integer, intent (in) :: sc_Idx, aIdx
             real(8)              :: ExpansionFactor, ratio, areaOpening
             integer, pointer     :: pocketType, elemStartIdx, elemEndIdx
             real(8), pointer     :: massOutflow, absHead, dt, kappa, atmHead, airDensity
@@ -1192,7 +1192,7 @@ contains
             real(8), pointer     :: airVolume, massOutflow, airMass, airMass_N0
             real(8), pointer     :: airDensity_N0, dvdt, airDensity, dt, rho_a, crk
             logical, pointer     :: isAirPocket, collapsed, JunctionAirPocket
-            real                 :: dRho
+            !real                 :: dRho
         !%------------------------------------------------------------------
         !% Aliases
             pocketType    => airI(sc_Idx,aIdx,airI_type)
@@ -1532,7 +1532,7 @@ contains
             integer          :: s1, JBidx, eStart, eEnd, firstElem, lastElem
             integer, pointer :: JBupIdx, JBdnIdx
             integer, pointer :: cIdx(:), eIdx(:), fUp(:), fDn(:), max_airpockets
-            logical, pointer :: conAir(:), elemSur(:), fBlocked(:), StaticAirPocket
+            logical, pointer :: conAir(:), elemSur(:), fBlocked(:)
             logical          :: possibleAirPocket, contigious_pocket
         !%------------------------------------------------------------------
         ! Aliases
@@ -2164,13 +2164,13 @@ contains
 !%==========================================================================
 !%==========================================================================
 !%
-    subroutine airpockets_update_air_from_JM (istep)
+    subroutine airpockets_update_air_from_JM ()
         !%------------------------------------------------------------------
         !% Description:
         !% add the air data from JM to airR and CC
         !%------------------------------------------------------------------
         !% Declarations
-            integer, intent(in)  :: istep
+            !integer, intent(in)  :: istep
             integer              :: mm, JMidx,ii, JBidx, sc_idx, aIdx
             integer, pointer     :: Npack, thisJM(:)
             real(8), pointer     :: elemHead(:), hasAirPocket(:), AirHead(:)

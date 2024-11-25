@@ -11,11 +11,16 @@
         },
         "LocalVolume" : {
             "FailureThreshold" : 1.0e-14
-        }
+        },
+        "File" : {
+            "BIPquick"     : true,
+            "partitioning" : true
+        },
+        "StopOnWarning" : false
     },
     "Discretization" : {
-        "NominalElemLength" : 30.00,
-        "SmallElementHandling" : "EquivalentOrifice"
+        "NominalElemLength" : 20.00,
+        "SmallElementHandling" : "AllowSmallLinks"
     },
     "Junction" : {
         "ForceInfiniteExtraDepth" : false
@@ -24,5 +29,10 @@
         "CommandLine" : {
             "interval" : 1000
         }
+    },
+    "Partition" : {
+        "MinElementsPerImage" : 200,
+        "WindowUp" : 0.05,
+        "WindowDn" : 0.05
     }
 }

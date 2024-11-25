@@ -198,6 +198,9 @@ contains
                                     if ((interval_counter > 0) .and. setting%Output%Warning) then
                                         call util_print_warning("Warning (bc_step): The flow boundary condition for node " &
                                         // trim(node%Names(nidx)%str) // " has smaller time intervals than the present model time step")
+
+                                        setting%Debug%WarningTripped = .true.
+
                                     end if
                                 else 
                                     print *, 'CODE ERROR unexpected else'
@@ -285,6 +288,10 @@ contains
                                     if ((interval_counter > 0) .and. setting%Output%Warning) then
                                         call util_print_warning("Warning (bc_step): The head boundary condition for node " &
                                         // trim(node%Names(nidx)%str) // " has smaller time intervals than the present model time step")
+
+                                        if (setting%Debug%StopOnWarning) then
+                                            call util_crashpoint(998734)
+                                        end if
                                     end if
                                 end if
                             end if
@@ -342,7 +349,7 @@ contains
             integer             :: ii
             integer, pointer    ::  NN, bc_level
             real(8)             :: new_inflow_time
-            real(8)             :: tdummy
+            !real(8)             :: tdummy
             real(8), pointer    :: timeEnd, timeEndEpoch
             character(64)       :: subroutine_name = "bc_fetch_flow"
         !%-------------------------------------------------------------------
@@ -563,7 +570,7 @@ contains
         !% the boundary condition to get the corresponding value.
         !%-------------------------------------------------------------------
         !% Declarations:
-            real(8) :: thisDepth, smallDepth
+            real(8) :: thisDepth
             real(8), pointer :: tnow, headValue(:), zbottom
             integer :: ii,  lower_idx
             integer :: thisBCtype = BCHead
@@ -650,8 +657,11 @@ contains
             real(8), intent(in)    :: TimeSeries(:,:,:)
             real(8), intent(in)    :: tnow
             integer, intent(in)    :: bc_idx, lower_idx, upper_idx, thisBCtype
+            logical :: isdebug = .false.
             character(64) :: subroutine_name = 'bc_interpolate_timeseries'
         !%------------------------------------------------------------------
+
+        if (isdebug) print *, thisBCtype
 
         !% --- error checking
         if (lower_idx <= 0) then 

@@ -732,7 +732,7 @@ contains
             integer, intent(inout) :: attributeL, attributeR
             integer, intent(inout) :: thisPremiseLevel, success
             integer, intent(in)    :: rIdx
-            character(65) :: subroutine_name = "interface_controls_get_premise_data"
+            ! character(65) :: subroutine_name = "interface_controls_get_premise_data"
         !%---------------------------------------------------------------------
         !%---------------------------------------------------------------------
 
@@ -774,7 +774,7 @@ contains
             integer, intent(inout) :: attribute
             integer, intent(inout) :: thisActionLevel, success
             integer, intent(in)    :: rIdx, isThen
-            character(65) :: subroutine_name = "interface_controls_get_action_data"
+            ! character(65) :: subroutine_name = "interface_controls_get_action_data"
         !%---------------------------------------------------------------------
         !%---------------------------------------------------------------------
 
@@ -811,7 +811,7 @@ contains
             real(8), intent(in) :: Depth, Head, Volume, Inflow, Flow
             real(8), intent(in) :: StatusSetting, TimeLastSet
             real(8) :: TimeLastSetEpoch
-            character(65) :: subroutine_name = 'interface_controls_transfer_monitor_data'
+            ! character(65) :: subroutine_name = 'interface_controls_transfer_monitor_data'
         !%---------------------------------------------------------------------
         !%---------------------------------------------------------------------
         call load_api_procedure("api_controls_transfer_monitor_data")
@@ -901,14 +901,12 @@ contains
         !%    EPA-SWMM. It also updates the number of objects in the SWMM model, i.e.,
         !%    number of links, nodes, and tables, and defines the start and end
         !%    simulation times.
-        !%----------------------------------------------------------------------
-            integer :: ppos, num_args, error
+        !%---------------------------------------------------------------------
+        !% Declarations
+            integer :: error
             character(64) :: subroutine_name = 'interface_init'
-        
-        !% Preliminaries:
-            if (setting%Debug%File%interface)  &
-                write(*,"(A,i5,A)") '*** enter ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
         !%------------------------------------------------------------------
+    
         setting%File%inp_file = trim(setting%File%inp_file) // c_null_char
         setting%File%rpt_file = trim(setting%File%rpt_file) // c_null_char
         setting%File%out_file = trim(setting%File%out_file) // c_null_char
@@ -1034,6 +1032,8 @@ contains
             call load_api_procedure("api_get_object_name")
             errstat = ptr_api_get_object_name(ii-1, link%Names(ii)%str, API_LINK)
 
+            link%Names(ii)%str = adjustl(link%Names(ii)%str)
+
             if (errstat /= 0) then
                 write(*, "(A,i2,A)") "API ERROR : ", errstat, " [" // subroutine_name // "]"
                 !stop 
@@ -1045,6 +1045,8 @@ contains
         do ii = 1, setting%SWMMinput%N_node
             call load_api_procedure("api_get_object_name")
             errstat = ptr_api_get_object_name(ii-1, node%Names(ii)%str, API_NODE)
+
+            node%Names(ii)%str = adjustl(node%Names(ii)%str)
 
             if (errstat /= 0) then
                 write(*, "(A,i2,A)") "API ERROR : ", errstat, " [" // subroutine_name // "]"
@@ -2395,7 +2397,7 @@ contains
         !% EPA-SWMM
         !%---------------------------------------------------------------------
         !% Declarations
-            integer :: error, ii, jj
+            integer :: error, ii
         !%---------------------------------------------------------------------
 
         call load_api_procedure("api_get_transect_table")
@@ -2430,7 +2432,7 @@ contains
             real(8) :: interface_get_table_attribute
 
             real(c_double), target :: table_value
-            character(64) :: thisposition
+           ! character(64) :: thisposition
             character(64) :: subroutine_name = 'interface_get_table_attribute'
         !%------------------------------------------------------------------
 
@@ -2504,10 +2506,10 @@ contains
         !%    necessary. Fortran indexes always start from 1, whereas C indexes
         !%    start from 0.
         !%------------------------------------------------------------------
-            integer :: table_idx, table_type, error
+            integer :: table_idx,  error
             integer :: interface_get_num_table_entries
             integer(c_int), target :: table_entries
-            character(64) :: thisposition
+            !character(64) :: thisposition
             character(64) :: subroutine_name = 'interface_get_num_table_entries'
         !%------------------------------------------------------------------
 
@@ -2756,16 +2758,16 @@ contains
 !%=============================================================================
 !%=============================================================================
 !%
-    function interface_reset_timeseries_to_start(bc_idx) result(tstart)    
+    integer function interface_reset_timeseries_to_start(bc_idx) result(tidx)    
         !%---------------------------------------------------------------------
         !% Description:
         !% resets the current entry point for the time series associated with
         !% the bc_idx
         !%---------------------------------------------------------------------
             integer, intent(in) :: bc_idx
-            real(8)             :: tstart
+            !real(8)             :: tstart
             integer             :: tseries_idx, nidx, error
-            real(8)             :: tdata(2)
+            !real(8)             :: tdata(2)
         !%---------------------------------------------------------------------
 
         !% --- get the node index
@@ -2777,6 +2779,8 @@ contains
         call load_api_procedure("api_reset_timeseries_to_start")
         error = ptr_api_reset_timeseries_to_start(tseries_idx-1)
         print *, 'after api_reset_timeseries...'
+
+        tidx = tseries_idx
 
     end function interface_reset_timeseries_to_start
 !%
@@ -2796,7 +2800,7 @@ contains
         !% Declarations:
             integer, intent(in) :: bc_idx
             real(8), intent(in) :: tnow, timemaxEpoch
-            real(8)             :: tnext, t1, t2, tnextp
+            real(8)             :: tnext,  tnextp
             integer             :: tseries_idx, success
             integer             :: year, month, day, hours, minutes, seconds
             integer, pointer    :: nidx, nres
@@ -2887,7 +2891,7 @@ contains
         !%---------------------------------------------------------------------
             integer, intent(in) :: bc_idx
             real(8), intent(in) :: tnow, timemaxEpoch
-            real(8)             :: tnext, t1, t2, tnextp
+            real(8)             :: tnext
             integer             :: tseries_idx, success
             integer             :: year, month, day, hours, minutes, seconds
             integer, pointer    :: nidx
@@ -3060,10 +3064,11 @@ contains
         !%---------------------------------------------------------------------
             integer, intent(in) :: node_idx, result_type
             real(8), intent(in) :: node_result
-            integer             :: error
-            character(64)       :: subroutine_name = "interface_update_nodeResult"
+            !integer             :: error
+            ! character(64)       :: subroutine_name = "interface_update_nodeResult"
+            logical :: isdebug = .false.
         !%----------------------------------------------------------------------
-
+            if (isdebug) print *, node_idx, result_type, node_result
         print *, 'OBSOLETE/WRONG CODE (needs unit conversion)'
         stop 209873
 
@@ -3088,9 +3093,12 @@ contains
         !%---------------------------------------------------------------------
             integer, intent(in) :: link_idx, result_type
             real(8), intent(in) :: link_result
-            integer             :: error
-            character(64)       :: subroutine_name = "interface_update_linkResult"
+            !integer             :: error
+            ! character(64)       :: subroutine_name = "interface_update_linkResult"
+            logical :: isdebug = .false.
         !%----------------------------------------------------------------------
+
+        if (isdebug) print *, link_idx, result_type, link_result
 
         print *, 'OBSOLETE/WRONG CODE (needs unit conversion)'
         stop 20987322
@@ -3688,25 +3696,20 @@ contains
         !%
         if ((any(thisWarning)) .and. (this_image() == 1) ) then
             write(*,'(A)') ' '
-            write(*,'(A)') ' '
-            write(*,'(A)') ' *******************************************************************'
-            write(*,'(A)') ' **                          WARNING'
-            write(*,'(A)') ' ** The following from the SWMM *.inp file values or code defaults  '
-            write(*,'(A)') ' ** are ignored or changed in SWMM5+ due to present code limitations.'
+            write(*,'(A)') 'NOTE: The following from the SWMM *.inp file values or code defaults  '
+            write(*,'(A)') 'are ignored or alterned in SWMM5+.'
             do ii=1,nset
                 if (thisWarning(ii)) then
-                    write(*,"(A,A,A,A)") ' **    ',trim(thisVariable(ii)),'--',trim(thisProblem(ii))
+                    write(*,"(A,A,A,A)") '    ',trim(thisVariable(ii)),'--',trim(thisProblem(ii))
                 end if
             end do
-            write(*,'(A)') '*******************************************************************'
-            write(*,*) ' '
         end if
 
         if ((any(thisFailure)) .and. (this_image() == 1) ) then
             write(*,'(A)') ' '
             write(*,'(A)') ' '
             write(*,'(A)') ' *******************************************************************'
-            write(*,'(A)') ' **                   FATAL INPUT FILE FAILURE'
+            write(*,'(A)') ' **                FATAL INPUT FILE CONFIGURATION'
             write(*,'(A)') ' ** The following from the SWMM *.inp file values or code defaults  '
             write(*,'(A)') ' ** cannot be used in SWMM5+ due to present code limitations.'
             do ii=1,nset
@@ -3719,11 +3722,6 @@ contains
             call util_crashpoint(559874)
         end if
 
-
-        !%----------------------------------------------------------------------
-        !% closing
-            if (setting%Debug%File%interface)  &
-                write(*,"(A,i5,A)") '*** leave ' // trim(subroutine_name) // " [Processor ", this_image(), "]"
 
     end subroutine interface_get_SWMM_setup    
 !%

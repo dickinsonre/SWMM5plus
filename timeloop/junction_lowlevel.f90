@@ -42,7 +42,7 @@ module junction_lowlevel
     public :: lljunction_main_dryingfix
 
     public :: lljunction_main_update_intermediate
-    public :: lljunction_main_update_final
+   !public :: lljunction_main_update_final
 
     public :: lljunction_main_dQdHoverflow
     ! public :: lljunction_main_dQdHstorage
@@ -67,10 +67,10 @@ module junction_lowlevel
     public :: lljunction_push_adjacent_elemdata_to_face
 
 
-    integer :: printJM = 51
-    integer :: printJB = 53
+    integer :: printJM =  112 !101
+    integer :: printJB =  113 !103
     
-    integer :: stepCut = 580
+    integer :: stepCut = 5345 !11642 !10595 !0
     contains
 !%==========================================================================
 !% PUBLIC
@@ -84,25 +84,31 @@ module junction_lowlevel
         !% become stuck.
         !%-----------------------------------------------------------------
         !% Declarations:
-            integer, pointer :: JBidx, JMidx, NpackJB, NpackJM, thisJB(:), thisJM(:)
-            integer, pointer :: fidx
-            real(8), pointer :: HeadJM, HeadAdj
-            real(8), pointer :: DepthAdj, ZbottomJB, Ke
-            real(8), pointer :: VelocityJM, VelocityAdj, grav
-            real(8), pointer :: BlendingFactor, ReverseDhFactor
-            real(8), pointer :: EnergyHeadAdj, VolChangeLimit, NetOutFlowrateJM
-            real(8) :: deltaH, deltaE, bsign, eFlowrate, eVelocity, VelHead
+            integer, pointer :: thisJB(:), thisJM(:)
+            integer :: NpackJB, NpackJM
+            integer :: JBidx, JMidx, fidx
+
+            !real(8), pointer :: HeadJM
+            !real(8), pointer :: DepthAdj
+            real(8) :: grav
+            real(8) :: BlendingFactor, ReverseDhFactor
+            !real(8), pointer :: VolChangeLimit, NetOutFlowrateJM
+
+            real(8) :: HeadAdj, EnergyHeadAdj, VelocityAdj
+            real(8) :: HeadJM, VelocityJM, ZbottomJB, Ke
+
+            real(8) ::  deltaE, bsign, eFlowrate, eVelocity, VelHead
             real(8) :: deltaEjmZ, deltaEAdjZ, VelHeadJM, EnergyHeadJM
-            integer :: ii, tBidx
+            integer :: ii
             logical :: isOutflow, isUpstream
 
         !%------------------------------------------------------------------
         !% Aliases
-            NpackJB => npack_elemP(ep_JB)
-            NpackJM => npack_elemP(ep_JM)
-            grav  => setting%Constant%gravity
-            BlendingFactor => setting%Junction%BlendingFactor
-            ReverseDhFactor=> setting%Junction%ReverseDhFactor
+            NpackJB = npack_elemP(ep_JB)
+            NpackJM = npack_elemP(ep_JM)
+            grav  = setting%Constant%gravity
+            BlendingFactor  = setting%Junction%BlendingFactor
+            ReverseDhFactor = setting%Junction%ReverseDhFactor
         !%------------------------------------------------------------------
         !% Preliminaries
             if (NpackJM < 1) return   
@@ -111,11 +117,16 @@ module junction_lowlevel
         thisJB => elemP(1:NpackJB,ep_JB)
         thisJM => elemP(1:NpackJM,ep_JM)
 
-    !    print *, 'in lljunction branch velocity'
+        ! print *, 'in lljunction branch velocity'
+        ! print *, 'thisJB ',thisJB
 
         !% --- cycle through branches
         do ii=1,NpackJB 
-            JBidx => thisJB(ii)
+            JBidx = thisJB(ii)
+
+            ! print *, ' '
+            ! print *, '-------------------------------------------------------'
+            ! print *, 'JBidx ',ii, JBidx
 
             if (elemSI(JBidx,esi_JB_Exists) .ne. oneI) cycle 
 
@@ -132,9 +143,9 @@ module junction_lowlevel
             
 
                 if (elemSI(JBidx,esi_JB_IsUpstream) == oneI) then 
-                    fidx => elemI(JBidx,ei_Mface_uL)
+                    fidx = elemI(JBidx,ei_Mface_uL)
                 else
-                    fidx => elemI(JBidx,ei_Mface_dL)
+                    fidx = elemI(JBidx,ei_Mface_dL)
                 end if
                 elemR(JBidx,er_Flowrate) = faceR(fidx,fr_Flowrate)
 
@@ -147,22 +158,21 @@ module junction_lowlevel
                 cycle !% --- skip the remainder of this loop
             end if
 
-            JMidx            => elemSI(JBidx,esi_JB_Main_Index)
+            JMidx            = elemSI(JBidx,esi_JB_Main_Index)
 
-            HeadJM           => elemR (JMidx,er_Head)
-            EnergyHeadJM     =  elemR (JMidx,er_EnergyHead) !% use = so it can be changed for in/out flow
-            VelocityJM       => elemR (JMidx,er_Velocity)           
+            HeadJM           = elemR (JMidx,er_Head)
+            EnergyHeadJM     = elemR (JMidx,er_EnergyHead) !% use = so it can be changed for in/out flow
+            VelocityJM       = elemR (JMidx,er_Velocity)           
             
-            ZbottomJB        => elemR (JBIdx,er_Zbottom)
-            Ke               => elemSR(JBidx,esr_JB_Kfactor)
-
-
+            ZbottomJB        = elemR (JBidx,er_Zbottom)
+            Ke               = elemSR(JBidx,esr_JB_Kfactor)
 
             VelHeadJM  = (VelocityJM**2) / (twoR * grav) !% always > 0
             
             ! if ((JBidx == printJB) .and. (setting%Time%Step .ge. stepCut)) then 
-            !     print *, 'velJM, velHeadJM ', VelocityJM, VelHeadJM 
-            !     print *, 'Kfactor          ',Ke
+                ! print *, 'JMidx            ',JMidx
+                ! print *, 'velJM, velHeadJM ', VelocityJM, VelHeadJM 
+                ! print *, 'Kfactor          ',Ke
 
             ! end if
 
@@ -172,7 +182,7 @@ module junction_lowlevel
                 isUpstream = .true.
                 bsign = +oneR
                 !% --- upstream branch
-                fidx => elemI(JBidx,ei_Mface_uL)
+                fidx = elemI(JBidx,ei_Mface_uL)
                 !% --- use face adjacent velocity to determine in/outflow
                 if (faceR(fidx,fr_Velocity_Adjacent_to_JB) .le. zeroR) then 
                     isOutflow = .true. 
@@ -183,11 +193,12 @@ module junction_lowlevel
                 else
                     isOutflow = .false.
                 end if
+
             else
                 isUpstream = .false.
                 bsign = -oneR
                 !% --- downstream branch
-                fidx => elemI(JBidx,ei_Mface_dL)
+                fidx = elemI(JBidx,ei_Mface_dL)
                 !% --- use face adjacent velocity to determine in/outflow
                 if (faceR(fidx,fr_Velocity_Adjacent_to_JB) .ge. zeroR) then 
                     isOutflow = .true. 
@@ -199,25 +210,27 @@ module junction_lowlevel
                     isOutflow = .false.
                 end if
             endif
-            HeadAdj       => faceR(fidx,fr_Head_Adjacent_to_JB)
-            EnergyHeadAdj => faceR(fidx,fr_EnergyHead_Adjacent_to_JB)
-            VelocityAdj   => faceR(fidx,fr_Velocity_Adjacent_to_JB)
+
+            HeadAdj       = faceR(fidx,fr_Head_Adjacent_to_JB)
+            EnergyHeadAdj = faceR(fidx,fr_EnergyHead_Adjacent_to_JB)
+            VelocityAdj   = faceR(fidx,fr_Velocity_Adjacent_to_JB)
 
             deltaE     = EnergyHeadJM  - EnergyHeadAdj 
             deltaEjmZ  = EnergyHeadJM  - ZbottomJB
             deltaEAdjZ = EnergyHeadAdj - ZbottomJB
 
             ! if ((JBidx == printJB) .and. (setting%Time%Step .ge. stepCut)) then 
-            !     print *, 'deltaE    ', deltaE
-            !     print *, 'deltaEjmZ ', deltaEjmZ 
-            !     print *, 'deltaEAdjZ', deltaEAdjz
+                ! print *, 'fidx      ',fidx
+                ! print *, 'deltaE    ', deltaE
+                ! print *, 'deltaEjmZ ', deltaEjmZ 
+                ! print *, 'deltaEAdjZ', deltaEAdjz
             ! end if
 
             ! if ((setting%Time%Step > stepCut) .and. (JMidx .eq. printJM))  then 
-            !     print *, ' JBidx ', JBidx, ' ; bsign ',bsign
-            !     print *, ' is Out ',isOutflow, ';  isUpstream ',isUpstream
-            !     print *, deltaE, deltaEjmZ, deltaEAdjZ
-            !     print *, ' '
+                ! print *, ' JBidx ', JBidx, ' ; bsign ',bsign
+                ! print *, ' is Out ',isOutflow, ';  isUpstream ',isUpstream
+                ! print *, deltaE, deltaEjmZ, deltaEAdjZ
+                ! print *, ' '
             ! end if   
 
             !print *, 'is outflow ',isOutflow
@@ -284,6 +297,13 @@ module junction_lowlevel
                     ! end if
                 end if
             else
+                ! if (JBidx == 102) then 
+                !     print *, 'JBidx in branch velocity ',102, ' ',isOutflow 
+                !     print *, 'deltaEAdjZ  ',deltaEAdjZ
+                !     print *, 'HeadJM      ',HeadJM
+                !     print *, 'ZbottomJB   ',ZbottomJB
+                ! end if
+
                 !% --- inflow
                 if (deltaEAdjZ .le. zeroR) then 
                     !% --- adjacent energy head below branch bottom, so no inflow possible
@@ -308,6 +328,16 @@ module junction_lowlevel
                         else
                             !% --- retain VelHead 
                         end if
+
+                        !if (JBidx == 102) then 
+                            ! print *, ' '
+                            ! print *, 'JBidx in branch velocity ',102, ' ',isOutflow 
+                            ! print *, 'deltaEAdjZ  ',deltaEAdjZ
+                            ! print *, 'HeadAdj     ',HeadAdj
+                            ! print *, 'HeadJM      ',HeadJM
+                            ! print *, 'ZbottomJB   ',ZbottomJB
+                            ! print *, 'VelHead     ',VelHead
+                        !end if
                     else
                         !% --- HeadJM < Zbottom so a waterfall connection from adjacent inward
                         !%     >0 implies inflow
@@ -320,10 +350,37 @@ module junction_lowlevel
                 end if
             end if
 
+            !if (JBidx == 102) then 
+                ! print *, 'JBidx ',JBidx
+                ! print *, 'VelHead ',VelHead 
+                ! print *, 'bsign    ',bsign
+                ! print *, 'sqrt     ',sqrt(abs(VelHead) * twoR * grav)
+                ! print *, 'sign     ',sign(oneR,VelHead)
+                ! print *, '         ',- bsign * sign(oneR,VelHead) * sqrt(abs(VelHead) * twoR * grav) 
+                ! print *, '         ',elemR(JBidx,er_AreaVelocity) , elemR(JBidx,er_Area)
+                ! print *, '         ',elemR(JBidx,er_Velocity)
+            !end if
             !% --- velocity and flowrate implied by energy arguments
             eVelocity = - bsign * sign(oneR,VelHead) * sqrt(abs(VelHead) * twoR * grav)  
+
+           ! if (JBidx == 102) then 
+                ! print *, 'eVelocity ',eVelocity 
+                ! print *, 'eflowrate ',eVelocity * elemR(JBidx,er_AreaVelocity)
+            !end if
+
             eFlowrate = eVelocity * elemR(JBidx,er_AreaVelocity)  
 
+
+            !if (JBidx == 102) then 
+               ! testeFlowrate = eVelocity * elemR(JBidx,er_AreaVelocity)  
+                !print *, 'bsign         ',bsign 
+                ! print *, 'sign(...)     ',sign(oneR,VelHead)
+                ! print *, 'abs(VelHead ) ',abs(VelHead)
+                ! print *, 'sqrt ()       ',sqrt(abs(VelHead) * twoR * grav) 
+                ! print *, - bsign * sign(oneR,VelHead) * sqrt(abs(VelHead) * twoR * grav) 
+               !print *, 'eVelocity ',eVelocity 
+               !print *, 'testeFlowrate '
+            !end if
             ! if ((setting%Time%Step > stepCut) .and. (JMidx .eq. printJM))  then 
             !     print *, 'eVel, eFlow AA',eVelocity, eFlowrate
             ! end if
@@ -358,7 +415,7 @@ module junction_lowlevel
             ! end if
 
         end do
-
+        
         !% --- compute the new total inflow and outflow rates
         call lljunction_main_totalFlowrates ()
 
@@ -904,12 +961,12 @@ module junction_lowlevel
             real(8), pointer :: fA, fH, fQ, fZ
             real(8), pointer :: Ladj, Tadj, Hadj, headJM
             real(8), pointer ::  crk, dt, grav
-            real(8), pointer :: VelAdj , FrAdj, Dadj, ZBadj
-            real(8)          :: bsign, denominator
+            real(8), pointer :: VelAdj , FrAdj, Dadj !, ZBadj
+            !real(8)          ::  denominator
             logical          :: isInflow, isDownstreamJB
             integer          :: ii
 
-            real(8) :: tempfactor !% used for experiments only 20230425
+            !real(8) :: tempfactor !% used for experiments only 20230425
             integer :: istep=oneI  !% Required dQ/dH used prior to RK
         !%------------------------------------------------------------------
         !% Aliases
@@ -979,7 +1036,11 @@ module junction_lowlevel
             !     print *, elemSI(JBidx,esi_JB_Diag_adjacent)
             ! end if
 
+            ! print *, ' '
             ! print *, 'in lljunction_branch_dQdH'
+            ! if (JBidx == printJB) then 
+            !     print *, 'JBidx is CC adjacent',JBidx, elemSI(JBidx,esi_JB_CC_adjacent) 
+            ! end if
             ! print *, 'JBidx, JMidx ',JBidx, JMidx
             ! print *, elemSI(JBidx,esi_JB_CC_adjacent)
             ! print *, elemSI(JBidx,esi_JB_Diag_adjacent)
@@ -988,7 +1049,6 @@ module junction_lowlevel
             if (elemSI(JBidx,esi_JB_CC_adjacent) == oneI) then 
 
                 if (isDownstreamJB) then 
-
                     !% --- downstream branch
                     if ((FrAdj .le. -oneR) .or. (elemR(JBidx,er_FroudeNumber) .le. -oneR)) then 
                         !% --- supercritical inflow
@@ -1068,6 +1128,11 @@ module junction_lowlevel
             !% --- Diagnostic element adjacent to JB
             elseif (elemSI(JBidx,esi_JB_Diag_adjacent) == oneI) then 
 
+                ! print *, 'face crest'
+                ! print *, faceR(201,fr_Zcrest_Adjacent_to_JB)
+                ! print *, faceR(202,fr_Zcrest_Adjacent_to_JB)
+        !stop 59875
+
                 ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
                 !     print *, ' '
                 !     print *, ' in diagnostic of lljunction_branch_dQdH'
@@ -1078,15 +1143,32 @@ module junction_lowlevel
                     !%    diagnostic branch (either in or out flow)
                     elemSR(JBidx,esr_JB_dQdHjm) = zeroR
                     !cycle
+
+                    ! if (JBidx == printJB) then 
+                    !     print *, 'fidx ',fidx
+                    !     print *, elemR(JMidx,er_Head), faceR(fidx,fr_Zcrest_Adjacent_to_JB)
+                    !     print *, 'dqdH AAA ',elemSR(JBidx,esr_JB_dQdHjm)
+                    ! end if
+
                 else
                     !% --- use the dQdH of the adjacent diagnostic element
                     !%     note that these are defined for diagnostic elements
                     !%     based on the change in Q of the diagnostic element.
                     if (isDownstreamJB) then 
                         elemSR(JBidx,esr_JB_dQdHjm) = faceR(fidx,fr_dQdH_Adjacent_to_JB)
+                        ! if (JBidx == printJB) then 
+                        !     print *, 'dqdH BBB ',elemSR(JBidx,esr_JB_dQdHjm) 
+                        ! end if
                     else
                         elemSR(JBidx,esr_JB_dQdHjm) = faceR(fidx,fr_dQdH_Adjacent_to_JB)
+                        ! if (JBidx == printJB) then 
+                        !     print *, 'dqdH CCC ',elemSR(JBidx,esr_JB_dQdHjm)
+                        ! end if
                     end if
+
+                    ! if (JBidx == printJB) then 
+                    !     print *, 'dqdH DDD ',elemSR(JBidx,esr_JB_dQdHjm)
+                    ! end if
                     !cycle
                 end if
                 ! print *, 'bsign ',bsign, faceR(fidx,fr_dQdH_Adjacent_to_JB)
@@ -1146,12 +1228,12 @@ module junction_lowlevel
         !%------------------------------------------------------------------
             integer, intent(in) :: JMidx,idir
             real(8), dimension(max_branch_per_node) :: Qdir
-            integer :: kk
+            integer :: kk  !% note, this is reported by compiler as not used, but is actually needed
         !%------------------------------------------------------------------
 
         Qdir = zeroR
         do concurrent (kk=1:max_branch_per_node)
-            if ((abs(elemR(JMidx+kk,er_Flowrate))               > zeroR) .and. &
+            if ((abs(elemR(JMidx+kk,er_Flowrate))   > zeroR) .and. &
                 (elemSI(JMidx+kk,esi_JB_Exists)     == oneI) .and. &
                 (elemSI(JMidx+kk,esi_JB_CanModifyQ) == oneI)         ) then
 
@@ -1243,7 +1325,7 @@ module junction_lowlevel
         !%-----------------------------------------------------------------  
 
             print *, 'obsolete?  20230927'
-            stop 2098734
+            stop 209873477
             
         if (isUpstreamYN) then 
             !% --- pointer to the downstream JB face for CC upstream of JB
@@ -1301,7 +1383,7 @@ module junction_lowlevel
         !%     index provided. Although this is inefficient, there should not be
         !%     that many elements in the upstream/downstream of junction sets.
         do mm=1,Npack
-            call update_auxiliary_variables_CC (dummyIdx, dummyIdx, dummyIdx, &
+            call update_auxiliary_variables_CC (dummy_elem_idx, dummy_elem_idx, dummy_elem_idx, &
                 .false., .true., thisCC(mm))
         end do
 
@@ -1328,7 +1410,7 @@ module junction_lowlevel
             integer, pointer :: fup(:), fdn(:)
 
             integer :: kk
-            real(8) :: dQoverflow, MinHeadForOverflow
+            real(8) :: dQoverflow !, MinHeadForOverflow
             !%, OverflowDepth, PondedHead
 
             real(8), dimension(max_branch_per_node) :: dQ, dH, areaQ
@@ -1338,6 +1420,7 @@ module junction_lowlevel
             logical, dimension(max_branch_per_node) :: bFixYN
 
             logical :: repeatYN
+            logical :: isdebug = .false.
         !%------------------------------------------------------------------
         !% Alias:
             Qoverflow     => elemSR(JMidx,esr_JM_OverflowPondingRate)
@@ -1350,6 +1433,8 @@ module junction_lowlevel
             fdn       => elemI(:,ei_Mface_dl)
             pi        => setting%Constant%pi
         !%------------------------------------------------------------------
+
+        if (isdebug) print *, QnetIn, QnetOut
 
         repeatYN = .true.
 
@@ -1409,7 +1494,7 @@ module junction_lowlevel
                     AinPonded =  PondedDepth * elemSR(JMidx,esr_JM_OverflowOrifice_Length)
                 case default 
                     print *, 'CODE ERROR unexpected case default: Overflow with No overflow Type'
-                    print *, 'JMidx ',JMIdx, ' ',trim(node%Names(elemI(JMidx,ei_node_Gidx_Bipquick))%str)
+                    print *, 'JMidx ',JMIdx, ' ',trim(node%Names(elemI(JMidx,ei_node_Gidx_SWMM))%str)
                     print *, 'Qoverflow ', Qoverflow 
                     print *, 'Head      ', elemR(JMidx,er_Head)
                     call util_crashpoint(77987233)
@@ -1702,11 +1787,17 @@ module junction_lowlevel
 
             real(8), parameter :: localEpsilon = 1.0d-6
             integer :: kk
+
+            logical :: isdebug = .false.
         !%------------------------------------------------------------------
         !% Aliases
             Qstorage    => elemSR(JMidx,esr_JM_StorageRate) !% positive is increasing storage
         !%------------------------------------------------------------------   
             
+        if (isdebug) print *, isCrossingIntoSurcharge, isCrossingOutofSurcharge
+        if (isdebug) print *, Hbound
+        if (isdebug) print *, istep
+
         !% --- if zero net flow, then storage and flowrates do not change.
         !%     Set storage rate to zero, volume to old volume, and
         !%     DeltaQ to zero. No need to do anything to flowrates
@@ -1740,13 +1831,19 @@ module junction_lowlevel
         !% --- compute net dQdH of branches
         dQdHbranches = lljunction_main_sumBranches(JMidx,esr_JB_dQdHjm, elemSR)
 
+
+        if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
+            ! print *, 'JMidx, dQdHbranches ',JMidx, dQdHbranches 
+            !print *, printJM+1, elemSR(printJM+1,esr_JB_dQdHjm),' ; ',printJM+2, elemSR(printJM+2,esr_JB_dQdHjm)
+            do kk=1,max_branch_per_node
+                if (elemSI(printJM+kk,esi_JB_Exists) .ne. oneI) cycle 
+                !print *, 'dQdHjm', printJM+kk, elemSR(printJM+kk,esr_JB_dQdHjm)
+            end do
+        end if
+
         ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then 
-        !     print *, 'JMidx, dQdHbranches ',JMidx, dQdHbranches 
-        !     !print *, printJM+1, elemSR(printJM+1,esr_JB_dQdHjm),' ; ',printJM+2, elemSR(printJM+2,esr_JB_dQdHjm)
-        !     do kk=1,max_branch_per_node
-        !         if (elemSI(printJM+kk,esi_JB_Exists) .ne. oneI) cycle 
-        !         print *, printJM+kk, elemSR(printJM+kk,esr_JB_dQdHjm)
-        !     end do
+        !     print *, 'divisor components'
+        !     print *, dQdHstorage, dQdhbranches, dQdHoverflow
         ! end if
 
         !% --- divisor
@@ -2006,9 +2103,12 @@ module junction_lowlevel
         !% --- net flowrate (Qnet > 0 is net inflow)
         Qnet = QnetBranches + Qoverflow + Qlateral 
 
-        ! if (printJM == JMidx) then 
+        ! if ((setting%Time%Step > stepcut) .and. &
+        !         (JMidx == printJM)) then 
         !     print *, ' '
         !     print *, 'Qnet here ', Qnet 
+        !     print *, 'QnetBranches, overflow, lateral'
+        !     print *, QnetBranches, Qoverflow, Qlateral
         !     print *, ' '
         ! end if
         
@@ -2035,12 +2135,18 @@ module junction_lowlevel
 
             real(8), pointer    :: Qstorage(:), Qoverflow(:)
             real(8)             :: QnetBranches
+
+            logical :: isdebug = .false.
         !%------------------------------------------------------------------
         !% Aliases
             Qstorage    => elemSR(:,esr_JM_StorageRate)
             !% --- note that Qoverflow includes ponding rate
             Qoverflow   => elemSR(:,esr_JM_OverflowPondingRate) !% negative is outflow
         !%------------------------------------------------------------------
+
+        if (isdebug) print *, isCrossingIntoOverflowOrPonding, isCrossingOutofOverflowOrPonding
+        if (isdebug) print *, isCrossingIntoSurcharge, isCrossingOutofSurcharge
+        if (isdebug) print *, MinHeadForOverflow
 
         !% --- update JM head and depth
         elemR(JMidx,er_Head)  = elemR(JMidx,er_Head)  + dH
@@ -2059,6 +2165,7 @@ module junction_lowlevel
         end if
 
         ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then
+        !     print *, ' '
         !     print *, 'dQdH ',elemSR(printJB,esr_JB_dQdHjm), dH
         ! end if
 
@@ -2067,8 +2174,9 @@ module junction_lowlevel
         call lljunction_branch_update_DeltaQ (JMidx,dH)  
 
         ! if ((setting%Time%Step > stepCut) .and. (JMidx == printJM)) then
-            !  print *, 'JBidx, DeltaQ ',JMidx+1, elemR(JMidx+1,er_DeltaQ)
-            !  print *, 'JBidx, DeltaQ ',JMidx+2, elemR(JMidx+2,er_DeltaQ)
+        !      print *, 'JBidx, DeltaQ ',JMidx+1, elemR(JMidx+1,er_DeltaQ)
+        !      print *, 'JBidx, DeltaQ ',JMidx+2, elemR(JMidx+2,er_DeltaQ)
+        !      print *, ' '
         ! end if
 
         !% --- update the flowrates using DeltaQ
@@ -2118,42 +2226,42 @@ module junction_lowlevel
 !%==========================================================================
 !%==========================================================================
 !% 
-    subroutine lljunction_main_update_final &
-        (JMidx, istep)
-        !%------------------------------------------------------------------
-        !% Description
-        !% Top level computation of dH in first step of junction solution
-        !%------------------------------------------------------------------
-        !% Declarations
-            integer, intent(in) :: JMidx, istep
-            real(8), pointer    :: Qoverflow(:)
-            real(8), pointer    :: dt, crk(:)
-        !%------------------------------------------------------------------
-        !% Aliases
-            !% --- note that Qoverflow includes ponding rate
-            Qoverflow   => elemSR(:,esr_JM_OverflowPondingRate) !% negative is outflow
-            dt          => setting%Time%Hydraulics%Dt
-            crk         => setting%Solver%crk2
-        !%------------------------------------------------------------------   
+    ! subroutine lljunction_main_update_final &
+    !     (JMidx)
+    !     !%------------------------------------------------------------------
+    !     !% Description
+    !     !% Top level computation of dH in first step of junction solution
+    !     !%------------------------------------------------------------------
+    !     !% Declarations
+    !         integer, intent(in) :: JMidx
+    !         real(8), pointer    :: Qoverflow(:)
+    !         real(8), pointer    :: dt, crk(:)
+    !     !%------------------------------------------------------------------
+    !     !% Aliases
+    !         !% --- note that Qoverflow includes ponding rate
+    !         Qoverflow   => elemSR(:,esr_JM_OverflowPondingRate) !% negative is outflow
+    !         dt          => setting%Time%Hydraulics%Dt
+    !         crk         => setting%Solver%crk2
+    !     !%------------------------------------------------------------------   
  
-        !% --- update the overflow volume based on rate and time step
-        select case (elemSI(JMidx,esi_JM_OverflowType))
-            case (OverflowWeir,OverflowOrifice)
-                !% --- volume overflow (out is negative flowrate, gives positive overflow volume)
-                !elemR(JMidx,er_VolumeOverflow) = -Qoverflow(JMidx)  * dt * crk(istep)
-                elemR(JMidx,er_VolumeOverflow) = -Qoverflow(JMidx)  * dt 
-            case (PondedWeir,PondedOrifice)
-                !elemR(JMidx,er_VolumePonded)   = -Qoverflow(JMidx)  * dt * crk(istep)
-                elemR(JMidx,er_VolumePonded)   = -Qoverflow(JMidx)  * dt 
-            case (NoOverflow)
-                !% no action
-            case default
-                print *, elemSI(JMidx,esi_JM_OverflowType), trim(reverseKey(elemSI(JMidx,esi_JM_OverflowType)))
-                print *, 'CODE ERROR unexpected case default'
-                call util_crashpoint(397894)
-        end select
+    !     !% --- update the overflow volume based on rate and time step
+    !     select case (elemSI(JMidx,esi_JM_OverflowType))
+    !         case (OverflowWeir,OverflowOrifice)
+    !             !% --- volume overflow (out is negative flowrate, gives positive overflow volume)
+    !             !elemR(JMidx,er_VolumeOverflow) = -Qoverflow(JMidx)  * dt * crk(istep)
+    !             elemR(JMidx,er_VolumeOverflow) = -Qoverflow(JMidx)  * dt 
+    !         case (PondedWeir,PondedOrifice)
+    !             !elemR(JMidx,er_VolumePonded)   = -Qoverflow(JMidx)  * dt * crk(istep)
+    !             elemR(JMidx,er_VolumePonded)   = -Qoverflow(JMidx)  * dt 
+    !         case (NoOverflow)
+    !             !% no action
+    !         case default
+    !             print *, elemSI(JMidx,esi_JM_OverflowType), trim(reverseKey(elemSI(JMidx,esi_JM_OverflowType)))
+    !             print *, 'CODE ERROR unexpected case default'
+    !             call util_crashpoint(397894)
+    !     end select
 
-    end subroutine lljunction_main_update_final   
+    ! end subroutine lljunction_main_update_final   
 !%    
 !%==========================================================================
 !%==========================================================================
@@ -2587,15 +2695,6 @@ module junction_lowlevel
             OverflowDepth = max(WaterHead - MinHeadForOverflowPonding, zeroR)                   
         end if
 
-        ! if ((setting%Time%Step > 54165) .and. (JMidx == 109)) then 
-        !     print *, 'overflow depth: ',OverFlowDepth
-        ! end if
-        ! if (printJM == JMidx) then 
-        !     print *, ' '
-        !     print *, 'OverflowDepth, ExternalPondedDepth', OverflowDepth, ExternalPondedHead
-        !     print *, ' '
-        ! end if
-
     end subroutine lljunction_main_overflow_conditions
 !%
 !%========================================================================== 
@@ -2701,7 +2800,7 @@ module junction_lowlevel
             real(8), pointer       :: OverflowDepth, ExternalPondedDepth, Storage_Plan_Area
             real(8), pointer       :: VolumePondedTotal, MinHeadForOverflowPonding
             real(8), pointer       :: ExternalPondedArea, ExternalPondedHeadDiff
-            real(8)                :: tempOverflow, WaterHead 
+            real(8)                :: tempOverflow
 
             real(8), pointer    :: dt, crk
         !%------------------------------------------------------------------  
@@ -3274,7 +3373,7 @@ module junction_lowlevel
             integer, intent(in) :: thisColP  !% should be only JM elements
 
             integer, pointer :: Npack
-            integer :: mm, ii, kk, rr, JMidx, nInflow
+            integer :: mm, ii, kk, JMidx, nInflow
 
             real(8), dimension(max_branch_per_node) :: inVelocity, inFlow
             real(8) :: weightedVelocity, massVelocity, totalQin
@@ -3443,8 +3542,8 @@ module junction_lowlevel
         !% head max/min
         !%-----------------------------------------------------------------
         !% Declarations
-            integer, pointer :: Npack, JMidx, fidx
-            integer          :: ii, mm, JBidx
+            integer, pointer :: Npack, JMidx !, fidx
+            integer          :: mm !, JBidx
             real(8), pointer :: dt, Zbottom, Hmax, Hmin
             real(8)          :: VolMin, VolMax
         !%-----------------------------------------------------------------
@@ -3457,7 +3556,7 @@ module junction_lowlevel
         !%-----------------------------------------------------------------
 
         do mm=1,Npack 
-            JMidx => elemP(mm,ep_JM)
+            JMidx => elemP(mm,ep_JM)    
             Zbottom => elemR(JMidx,er_Zbottom)
 
             Hmin => elemSR(JMidx,esr_JM_HeadMin)
@@ -3478,7 +3577,7 @@ module junction_lowlevel
                 !% --- maximum (negative) JM inflow volume in time step includes any
                 !%     lateral outflow from the JM
                 elemSR(JMidx,esr_JM_VolumeInflowLimit)    &
-                    = VolMax - elemR(JBidx,er_Volume) - &
+                    = VolMax - elemR(JMidx,er_Volume) - &
                         - min(elemR(JMidx,er_FlowrateLateral) * dt, zeroR)
             else
                 elemSR(JMidx,esr_JM_VolumeOutflowLimit) = zeroR

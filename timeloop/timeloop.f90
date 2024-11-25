@@ -65,7 +65,7 @@ contains
             logical          :: doHydraulicsStepYN, doHydrologyStepYN
             real(8), pointer :: dtTol
             integer(kind=8)  :: cval, crate, cmax
-            character(64)    :: subroutine_name = 'timeloop_toplevel'
+            !character(64)    :: subroutine_name = 'timeloop_toplevel'
         !%--------------------------------------------------------------------
         !% Preliminaries
         !%--------------------------------------------------------------------
@@ -183,7 +183,7 @@ contains
             logical, intent(in)    :: inSpinUpYN
             real(8), pointer :: nextHydrologyTime, nextHydraulicsTime, nextControlRuleTime
             real(8), pointer :: lastHydrologyTime, lastHydraulicsTime, lastControlRuleTime, dtTol
-            character(64)    :: subroutine_name = "tl_initialize_loop"    
+            !character(64)    :: subroutine_name = "tl_initialize_loop"    
         !%------------------------------------------------------------------
         !% Aliases  
             nextControlRuleTime => setting%Time%ControlRule%NextTime
@@ -463,6 +463,22 @@ contains
                     - setting%Time%WallClock%HydraulicsStart
             end if
 
+            if (setting%Debug%WarningTripped) then 
+                if (setting%Debug%StopOnWarning) then 
+                    print *, ' '
+                    print *, 'WARNING FLAGS OCCURRED ON IMAGE ',this_image()
+                    print *, 'Code stopped because setting.Debug.StopOnWarning = true'
+                    call util_crashpoint(6209873)
+                else
+                    !% --- continue
+                    ! print *, ' '
+                    print *, 'WARNING FLAGS OCCURRED ON IMAGE ',this_image()
+                    print *, 'Code continues because setting.Debug.StopOnWarning = false'
+                    !% --- reset flag
+                    setting%Debug%WarningTripped = .false.
+                end if
+            end if
+
             !% --- check for crash conditions
             call util_crashstop(63978)
     
@@ -571,13 +587,16 @@ contains
         !% --- call the RK2 time march
         call rk2_toplevel ()
 
-       ! print *, 'out of rk2_toplevel'
+    !     print *, ' '
+    !    print *, 'out of rk2_toplevel'
+    !    print *, ' '
 
         !% --- accumulate artificial inflow
         elemR(:,er_VolumeArtificialInflowTotal) = elemR(:,er_VolumeArtificialInflowTotal) &
                                                  +elemR(:,er_VolumeArtificialInflow)
 
         !% --- add non-conservation in this step to accumulator
+        !print *, 'calling util global volume balance'
         call util_global_volume_balance () 
         call util_local_volume_balance(.false.)
 
@@ -977,7 +996,7 @@ contains
             logical, intent(in) :: inSpinUpYN
             logical, pointer    :: matchHydrologyStep, useHydrology
 
-            real(8)             :: oldDT, oldCFL, cflJM
+            real(8)             :: oldDT, oldCFL
             real(8), pointer    :: newDT, timeNow
             real(8), pointer    :: nextHydraulicsTime, lastHydraulicsTime
 
@@ -2024,7 +2043,7 @@ contains
             ! print *, ' '
             ! print *, 'in CFL_JM ', setting%Time%Step, Qnet
             ! print *, reverseKey(elemI(JMidx,ei_elementType))
-            ! print *, trim(node%Names(elemI(JMidx,ei_node_Gidx_BIPquick))%str)
+            ! print *, trim(node%Names(elemI(JMidx,ei_node_Gidx_SWMM))%str)
 
             if (Qnet > (zeroR + setting%Eps%Velocity) ) then 
                 !% --- handle net inflow

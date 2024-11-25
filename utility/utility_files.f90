@@ -181,10 +181,10 @@ contains
         !% Builds and checks for valid paths to the input, settings, project, and csv files
         !%------------------------------------------------------------------
         !% Declarations
-            integer :: ierr, ios, ireturn, i1, i2
+            integer :: ierr, ireturn, i1, i2
             character(len=256) :: this_purpose
             character(len=256) :: infile_path, project_path, setting_path
-            character(len=256) :: default_path, library_path, thisfile
+            character(len=256) :: default_path, library_path
             character(len=8) :: fext
             character(64) :: subroutine_name = "util_file_setup_input_paths_and_files"
         !%------------------------------------------------------------------
@@ -238,8 +238,7 @@ contains
         ireturn = 0
         fext = '.inp'
         call util_file_check_if_file_exist ( &
-            setting%File%UnitNumber%inp_file, setting%File%inp_file, &
-            this_purpose, ireturn, fext)
+            setting%File%inp_file, this_purpose, ireturn, fext)
 
         !% --- store the kernel of the input file name for use with output file names
         i1 = scan(setting%File%inp_file, '/', back=.true.)
@@ -273,8 +272,7 @@ contains
             ireturn = 0
             fext = '.json'
             call util_file_check_if_file_exist ( &
-                setting%File%UnitNumber%setting_file, setting%File%setting_file, &
-                this_purpose, ireturn, fext)
+                setting%File%setting_file, this_purpose, ireturn, fext)
             if (ireturn == 0) setting%JSON_FoundFileYN = .true.
         end if 
 
@@ -336,9 +334,9 @@ contains
         !% initializes the output file path and filenames
         !%------------------------------------------------------------------
         !% Declarations:
-            integer :: istat, ireturn, ierr, kk, lc
+            integer :: istat, ireturn,  kk, lc
             logical :: isfolder = .false.
-            character(len=256) :: cmsg, default_path, output_path, this_purpose, temppath
+            character(len=256) :: cmsg, default_path, output_path, this_purpose
         !%------------------------------------------------------------------
 
         output_path = trim(setting%File%output_folder)
@@ -687,9 +685,9 @@ contains
         !% Declarations:
             character(len=256), intent(in) :: thisfolder, this_purpose
             integer, intent(inout) :: ireturn
-            character(len=256) :: cwd_path  !% current working directory path
+            !character(len=256) :: cwd_path  !% current working directory path
             character(len=256) :: cmsg
-            integer :: ierr, istat
+            integer ::  istat
             logical :: folder_exist
         !%------------------------------------------------------------------
 
@@ -716,6 +714,7 @@ contains
                                 call util_crashpoint(559228)
                             else
                                 write(*,"(A)") '...code is continuing using default directories at command line or project folder'
+                                setting%Debug%WarningTripped = .true.
                             end if
                         end if
                     end if
@@ -746,7 +745,7 @@ contains
 !%==========================================================================
 !%
     subroutine util_file_check_if_file_exist  &
-        (thisunit, thisfilename, thispurpose, ireturn, fext)
+        (thisfilename, thispurpose, ireturn, fext)
         !%------------------------------------------------------------------
         !% Description:
         !% Checks to see if file exists by attempting to open and assigning new unit number
@@ -758,8 +757,8 @@ contains
             character(len=256), intent(in) :: thisfilename, thispurpose
             character(len=8), intent(in) :: fext
             integer, intent(inout) :: ireturn
-            integer, intent(in) :: thisunit
-            integer :: ios
+            !integer, intent(in) :: thisunit
+            !integer :: ios
             logical :: file_exist
         !%------------------------------------------------------------------
 

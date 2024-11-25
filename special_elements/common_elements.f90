@@ -185,13 +185,18 @@ module common_elements
         !%------------------------------------------------------------------
         !% Declarations:
             integer, intent(in) :: eIdx !% must be a single diagnostic element
-            integer, pointer    :: fup, fdn
+            integer, pointer    :: fup, fdn, eup, edn
             real(8), pointer    :: Flowrate, FlowrateN0, dt, FlowVolumeLimitFactor
             real(8)             :: dQlimit, dH
         !%------------------------------------------------------------------
         !% Aliases
             fup        => elemI(eIdx,ei_Mface_uL)
             fdn        => elemI(eIdx,ei_Mface_dL)
+            !% --- note, we can use eup and edn because eIdx must be a diagnostic
+            !%     element, which, by definition, cannot be in a partitioning
+            !%     split link.
+            eup        => faceI(fup ,fi_Melem_uL)
+            edn        => faceI(fdn ,fi_Melem_dL)
             Flowrate   => elemR (eIdx,er_Flowrate)
             FlowrateN0 => elemR (eIdx,er_Flowrate_N0)
             dt         => setting%Time%Hydraulics%Dt
@@ -209,6 +214,9 @@ module common_elements
         !% --- get the head difference across the diagnostic element
         dH  =  faceR(fup,fr_Head_d) - faceR(fdn,fr_Head_u)
 
+        ! print *, 'heads      ',faceR(fup,fr_Head_d), faceR(fdn,fr_Head_u)
+        ! print *, 'limiter dH ',dH
+
         !% --- the increase in downstream flowrate or negative magnitude increase of upstream flowrate 
         !%     that would eliminate a fraction of the upstream (or downstream) volume associated with 
         !%     the head difference across the element
@@ -216,38 +224,41 @@ module common_elements
             if (FlowrateN0 .ge. zeroR) then 
                 !% --- downstream flow
                 !%     limit the acceleration of the inflow into the diagnostic element
-                dQlimit = FlowVolumeLimitFactor  * dH * faceR(fup,fr_Length_Adjacent_to_JB) * faceR(fup,fr_Topwidth_Adjacent_to_JB) / dt
+                !dQlimit = FlowVolumeLimitFactor  * dH * faceR(fup,fr_Length_Adjacent_to_JB) * faceR(fup,fr_Topwidth_Adjacent_to_JB) / dt
+                dQlimit = FlowVolumeLimitFactor * dH * elemR(eup,er_Length) * elemR(eup,er_Topwidth) / dt
+
+                ! print *, 'factor ',FlowVolumeLimitFactor
+                ! !print *, 'geomet ', faceR(fup,fr_Length_Adjacent_to_JB), faceR(fup,fr_Topwidth_Adjacent_to_JB)
+                ! print *, 'geom     ',elemR(eup,er_Length), elemR(eup,er_Topwidth)
+                ! print *, 'dQlimit1 ',dQlimit
             else
                 !% --- reverse flow
                 !%     limit the deceleration of the reverse inflow into the diagnostic element to zero flow
                 dQlimit = -FlowrateN0
+                ! print *, 'dQlimit2 ',dQlimit
             end if
         elseif (dH < zeroR) then 
             if (FlowrateN0 .le. zeroR) then 
                 !% --- reverse flow
                 !%     limit the acceleration of the reverse inflow into the diagnostic element
-                dQlimit = FlowVolumeLimitFactor * dH * faceR(fdn,fr_Length_Adjacent_to_JB) * faceR(fdn,fr_Topwidth_Adjacent_to_JB) / dt
+                !dQlimit = FlowVolumeLimitFactor * dH * faceR(fdn,fr_Length_Adjacent_to_JB) * faceR(fdn,fr_Topwidth_Adjacent_to_JB) / dt
+                dQlimit = FlowVolumeLimitFactor * dH * elemR(edn,er_Length) * elemR(edn,er_Topwidth) / dt
+                ! print *, 'dQlimit3 ',dQlimit
             else 
                 !% --- downstream flow
                 !%     limit the deceleration of the downstream flow into the diagnostic element to zero
                 dQlimit = -FlowrateN0
+                !print *, 'dQlimit4 ',dQlimit
             end if
         else !% dH == 0
             if (FlowrateN0 .ge. zeroR) then 
                 dQlimit = -FlowrateN0
+                !print *, 'dQlimit5 ',dQlimit
             else
                 dQlimit = FlowrateN0
+                !print *, 'dQlimit6 ',dQlimit
             end if
         end if
-
-       ! dQlimit = FlowVolumeLimitFactor * dH * faceR(fup,fr_Length_Adjacent_to_JB) * faceR(fup,fr_Topwidth_Adjacent_to_JB) / dt
-
-        ! if ((setting%Time%Step > stepCut) .and. (eIdx == printIdx)) then
-        !     print *, ' '
-        !     print *, '    in common element correction '
-        !     print *, '    dH, dQlimit ',dH, dQlimit
-        !     print *, '    FlowrateN0  ',FlowrateN0
-        ! end if
 
         if (dH > zeroR) then 
             if ((Flowrate - FlowrateN0) > dQlimit) then 
@@ -290,10 +301,10 @@ module common_elements
             end if
         end if
 
-        ! if ((setting%Time%Step > stepCut) .and. (eIdx == printIdx)) then
+        ! ! if ((setting%Time%Step > stepCut) .and. (eIdx == printIdx)) then
         !     print *, '    Flowrate    ',Flowrate
-        !     print *, ' '
-        ! end if
+        ! !     print *, ' '
+        ! ! end if
 
     end subroutine common_flowchange_limiter_singular
 !%

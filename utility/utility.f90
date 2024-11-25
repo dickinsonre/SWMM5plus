@@ -1,6 +1,6 @@
 module utility
     !%==========================================================================
-    !% SWMM5+ release, version 1.0.0
+    !% SWMM5+ release, version 1.0.0 
     !% 20230608
     !% Hydraulics engine that links with EPA SWMM-C
     !% June 8, 2023
@@ -31,7 +31,6 @@ module utility
     public :: util_sign_with_ones_or_zero
     public :: util_print_warning
     public :: util_linspace
-
     public :: util_read_blankline_or_EOF 
     
     public :: util_global_volume_balance
@@ -45,7 +44,12 @@ module utility
 
     public :: util_unique_rank
 
+    public :: util_quicksort_low2high
+    public :: util_quicksort_high2low
+    
     public :: util_kinematic_viscosity_from_temperature
+
+    public :: util_first_and_last_elem_of_link
 
     integer :: printJM =261
     integer :: stepCut = 76116
@@ -105,23 +109,22 @@ module utility
         !% structure
         !% -----------------------------------------------------------------
 
-        if (setting%Junction%InfiniteExtraDepthValue .le. zeroR) then 
+        if ((setting%Junction%InfiniteExtraDepthValue .le. zeroR) .and. (this_image() == 1)) then 
             print *, 'USER CONFIGURATION ERROR'
             print *, 'setting%Junction%InfiniteExtraDepthValue <= 0.0 is not allowed'
             call util_crashpoint(559872)
         end if
 
-        if (setting%Discretization%MinLinkLength           &
-            < (  setting%Discretization%NominalElemLength  &
-             * setting%Discretization%MinElementPerLink)     ) then
+        if ((setting%Discretization%MinLinkLength           &
+            < (  setting%Discretization%NominalElemLength   &
+               * setting%Discretization%MinElementPerLink)     ) .and. (this_image() == 1)) then
             print *, ' '
-            print *, 'NOTE: setting.Discretization.MinLinkLength defined by settings.f90'
-            print *, 'defaults or in *.json file is ', setting%Discretization%MinLinkLength
+            print *, 'NOTE: the setting.Discretization.MinLinkLength defined by defaults'
+            print *, 'in settings.f90 or in *.json file is ', setting%Discretization%MinLinkLength,','
             print *, 'which is smaller than the minimum link length required based on' 
             print *, 'the implied minimum link of (NominalElemLength)(MinElementPerLink).' 
             print *, 'The larger implied minimum of ', setting%Discretization%NominalElemLength * setting%Discretization%MinElementPerLink
             print *, 'is used for discretization.'
-            print *, ' '
         end if
 
         !% --- set the minimum link length allowed for normal discretization
@@ -185,7 +188,7 @@ module utility
         outLinkPipe  = zeroI
 
         if (isJMidx) then
-            inNode = elemI(JMorNode,ei_node_Gidx_BIPquick)
+            inNode = elemI(JMorNode,ei_node_Gidx_SWMM)
         else
             inNode = JMorNode
         end if
@@ -272,22 +275,32 @@ module utility
 !%==========================================================================
 !%
     subroutine util_count_node_types &
-        (N_nBCup, N_nBCdn, N_nJm, N_nStorage, N_nJ2, N_nJ1)
+        (N_nBCup, N_nBCdn, N_nJm, N_nStorage, N_nJ2, N_nJ1, N_nExtraDownstream)
         !%------------------------------------------------------------------
         !% Description:
         !% This subroutine uses the vectorized count() function to search 
         !% the array for number of instances of each node type
         !%------------------------------------------------------------------
         !% Declarations
-            integer, intent(in out) :: N_nBCup, N_nBCdn, N_nJm, N_nStorage, N_nJ2, N_nJ1
+            integer, intent(in out) :: N_nBCup, N_nBCdn, N_nJm, N_nStorage
+            integer, intent(in out) :: N_nJ2, N_nJ1, N_nExtraDownstream
             integer :: ii
        !%------------------------------------------------------------------
-        N_nBCup = count(node%I(:, ni_node_type) == nBCup)
-        N_nBCdn = count(node%I(:, ni_node_type) == nBCdn)
-        N_nJm = count(node%I(:, ni_node_type) == nJM)
+        N_nBCup    = count(node%I(:, ni_node_type) == nBCup)
+        N_nBCdn    = count(node%I(:, ni_node_type) == nBCdn)
+        N_nJm      = count(node%I(:, ni_node_type) == nJM)
         N_nStorage = count(node%I(:, ni_node_type) == nStorage)
-        N_nJ2 = count(node%I(:, ni_node_type) == nJ2)
-        N_nj1 = count(node%I(:, ni_node_type) == nJ1)
+        N_nJ2      = count(node%I(:, ni_node_type) == nJ2)
+        N_nj1      = count(node%I(:, ni_node_type) == nJ1)
+
+        !% --- count downstream branches of nodes that have more than one
+        !%     downstream branch. These are possible connections across
+        !%     processors
+        N_nExtraDownstream = zeroI
+        do ii=1,N_node
+            if (node%I(ii,ni_N_link_d) < oneI) cycle
+            N_nExtraDownstream = N_nExtraDownstream + node%I(ii,ni_N_link_d) - oneI
+        end do
 
     end subroutine util_count_node_types
 !%
@@ -431,8 +444,8 @@ module utility
             real(8) :: volume1, volume2, totalvolume
             real(8) :: latInflowVolume, bcInflowVolume, bcOutflowVolume, globalDiff
             real(8) :: overflowVolume, pondingVolume, VolumeArtificialInflow
-            real(8) :: nonconservation_scale, dVolume
-            integer :: ii
+            !real(8) :: nonconservation_scale, dVolume
+            !integer :: ii
         !%------------------------------------------------------------------
         !% Preliminaries:
             if (.not. setting%Debug%GlobalVolume%useVolumeBalanceTF) return
@@ -440,6 +453,10 @@ module utility
         !% Aliases:
             dt      => setting%Time%Hydraulics%Dt
         !%------------------------------------------------------------------
+
+            ! print *, ' '
+            ! print *, 'in utility global volume balance '
+            ! print *, ' '
 
         !% --- initialize
         setting%Debug%GlobalVolume%LatestValue = zeroR
@@ -463,7 +480,7 @@ module utility
         ! if (setting%Time%Step .ge. 120910) then 
         !     print *, ' '
         !     print *, ' step ',setting%Time%Step
-        !     print *, 'Net inflow from bounds   ' , bcInflowVolume
+            ! print *, 'Net inflow from bounds   ' , bcInflowVolume
         ! end if
 
         !% --- get all outfall outflows (+ is outflow)
@@ -474,7 +491,7 @@ module utility
         end if
 
         ! if (setting%Time%Step .ge. 120910) then 
-        !     print *, 'Net outflow from faces   ',bcOutflowVolume
+            ! print *, 'Net outflow from faces   ',bcOutflowVolume
         ! end if
 
         Npack => npack_elemP(ep_CCJM)
@@ -489,34 +506,35 @@ module utility
             latInflowVolume = sum(elemR(thisP,er_FlowrateLateral)) * dt
 
             ! if (setting%Time%Step .ge. 120911) then 
-            !     print *, 'Net inflow with lateral  ', latInflowVolume
+                ! print *, 'Net inflow with lateral  ', latInflowVolume
             ! end if
 
             !% --- overflowing (lost) volume
             overflowVolume = sum(elemR(thisP,er_VolumeOverFlow))
 
             ! if (setting%Time%Step .ge. 120910) then 
-            !     print *, 'Net overflow             ',overflowVolume
+                ! print *, 'Net overflow             ',overflowVolume
             ! end if
 
             !% --- ponded (stored) volume
             pondingVolume = sum(elemR(thisP,er_VolumePonded))
 
             ! if (setting%Time%Step .ge. 120910) then 
-            !     print *, 'Net  ponding             ',pondingVolume
+                ! print *, 'Net  ponding             ',pondingVolume
             ! end if
 
             VolumeArtificialInflow = sum(elemR(thisP,er_VolumeArtificialInflow))
 
             ! if (setting%Time%Step .ge. 120910) then 
-            !     print *, 'Artificial inflow       ',VolumeArtificialInflow   
+                ! print *, 'Artificial inflow       ',VolumeArtificialInflow   
             ! end if
 
         end if
 
         ! if (setting%Time%Step .ge. 120910) then 
-        !     print *, 'Net volume change        ',volume2 - volume1
-        !     print *, '                          _________________'
+            ! print *, 'Net volume change        ',volume2 - volume1
+            ! print *, '    _________________'        
+            ! print *, 'volumes ', volume2, volume1           
         ! end if
 
         !% --- create sum of volume change for CCJM
@@ -637,8 +655,8 @@ module utility
             integer, pointer :: thisColCC, thisColJM, thisColDiag, npack, thisP(:)
 
             integer, pointer :: fdn(:), fup(:), BranchExists(:), fBarrels(:)
-            integer          :: ii, kk, mm
-            real(8)          :: Qbranches, relativeConservation, VolNorm
+            integer          :: ii
+            real(8)          :: relativeConservation, VolNorm
             logical          :: iserrorTF, foundErrorTF
         !%------------------------------------------------------------------
         !% Preliminaries:
@@ -872,7 +890,7 @@ module utility
             real(8), intent(inout) :: volume_nonconservation
             integer, pointer       :: npack, thisP(:), thisCol
             real(8), save          :: vstore[*]
-            integer :: ii
+            !integer :: ii
         !%------------------------------------------------------------------
         !% Preliminaries:
         !%------------------------------------------------------------------
@@ -932,7 +950,7 @@ module utility
             integer, intent(inout)     :: elemInLink(:)
             integer, intent(inout)     :: thislink_idx, thislink_image
             integer, intent(inout)     :: nElemInLink
-            integer ::  ii, jj
+            integer ::  ii
         !%-------------------------------------------------------------------
         elemInLink = 0
         thislink_idx = 0
@@ -942,9 +960,9 @@ module utility
         if (this_image() == 1) then
             do ii = 1,size(link%I,dim=1)
                 if (link%Names(ii)%str == thislinkname) then
-                    write(*,"(A,A,A,i8,A,i6)")'link name ', trim(link%Names(ii)%str), ';  linkIdx= ', ii, ' On image = ',link%I(ii,li_P_image)
+                    write(*,"(A,A,A,i8,A,i6)")'link name ', trim(link%Names(ii)%str), ';  linkIdx= ', ii, ' On image = ',link%I(ii,li_P_imageUp)
                     thislink_idx = ii
-                    thislink_image = link%I(ii,li_P_image)
+                    thislink_image = link%I(ii,li_P_imageUp)
                 end if
             end do
         end if
@@ -976,7 +994,7 @@ module utility
     subroutine util_find_elements_in_junction_node &
         (thisnodename, thisnode_idx, thisnode_image, elemJM_idx)
         !%------------------------------------------------------------------
-        !% Description:
+        !% Description: 
         !% Given the node name, this finds the node index, the image on
         !% which it is an element, and the JM element index
         !%
@@ -985,7 +1003,7 @@ module utility
             character(*), intent(in)   :: thisnodename
             integer, intent(inout)     :: thisnode_idx, thisnode_image
             integer, intent(inout)     :: elemJM_idx
-            integer ::  ii, jj
+            integer ::  ii
         !%------------------------------------------------------------------
         !% Preliminaries:
         !%------------------------------------------------------------------
@@ -1409,6 +1427,80 @@ module utility
         !% Closing:
     end subroutine util_unique_rank        
 !%
+!%==========================================================================
+!%==========================================================================
+!%
+    recursive subroutine util_quicksort_low2high(aSort, aIdx, first, last)
+        !%------------------------------------------------------------------
+        !% Description
+        !% Calls quicksort_high2low and inverts array
+        !%------------------------------------------------------------------
+        !% Declarations
+            real(8), intent(inout) :: aSort(:) !% array to be sorted
+            integer, intent(inout) :: aIdx(:)  !% indexes of sorted position
+            integer, intent(in)    :: first, last
+        !%------------------------------------------------------------------
+        !% Preliminaries
+        !%------------------------------------------------------------------
+        
+        call util_quicksort_high2low(aSort, aIdx, first, last)
+
+        aSort = aSort(last:first:-1)
+        aIdx  = aIdx (last:first:-1)
+
+    end subroutine util_quicksort_low2high
+!%
+!%==========================================================================
+!%==========================================================================
+!%
+    recursive subroutine util_quicksort_high2low(aSort, aIdx, first, last)
+        !%------------------------------------------------------------------
+        !% Description
+        !% Standard quicksort algorithm for high to low
+        !% sorts on aSort, returns sorted index aIdx
+        !%------------------------------------------------------------------
+        !% Declarations
+            real(8), intent(inout) :: aSort(:) !% array to be sorted
+            integer, intent(inout) :: aIdx(:)  !% indexes of sorted position
+            integer, intent(in)    :: first, last
+            real(8)                :: tempR, center
+            integer                :: tempI, left, right
+        !%------------------------------------------------------------------
+        !% Preliminaries
+        !%------------------------------------------------------------------
+
+        center = aSort((first+last)/2)
+        left   = first
+        right  = last
+
+        !% --- cycle until left >= right
+        do 
+            !% --- check for already ordered below pivot
+            do while (aSort(left) .gt. center)
+                left = left+1
+            end do
+            !% --- check for already ordered above pivot
+            do while (center .gt. aSort(right))
+                right = right-1
+            end do
+            !% --- 
+            if (left .ge. right) exit
+            !% --- swap left and right
+            tempR = aSort(left)
+            tempI = aIdx(left)
+            aSort(left)  = aSort(right) 
+            aIdx(left)   = aIdx(right)
+            aSort(right) = tempR
+            aIdx(right)  = tempI
+            left  = left+1 
+            right = right-1
+        end do
+
+        if (first   < left-1) call util_quicksort_high2low(aSort, aIdx, first,  left-1)
+        if (right+1 < last)   call util_quicksort_high2low(aSort, aIdx, right+1,last)
+
+    end subroutine util_quicksort_high2low
+!%
 !%========================================================================== 
 !%==========================================================================
 !%
@@ -1481,6 +1573,63 @@ module utility
         end do
   
     end function util_kinematic_viscosity_from_temperature
+!%
+!%========================================================================== 
+!%==========================================================================
+!%   
+    subroutine util_first_and_last_elem_of_link &
+        (thisLink, firstElem, lastElem, nTotalElemInLink, isUpNode, isDnNode)
+        !%------------------------------------------------------------------
+        !% Descriptions
+        !% provides information on the first/last elements of a link
+        !% associated with this_image().  If this is not a connection
+        !% link between images, then first/last are the first and last
+        !% element indexes of the full link and the isUpNode and isDnNode
+        !% are both true (i.e., both ends connect to a valid node)
+        !% If the link is a connection link, then this returns the
+        !% first and last elements associated with this_image(), i.e.
+        !% either the upper portion if li_P_imageUp matches this_image()
+        !% or the lower portion of li_P_imageDn matches this_image()
+        !% The isNodeUp is only true for the upper section and the
+        !% isNodeDn is only true for the lower section.
+        !% The nTotalElemInLink are the sum of elements in both upper
+        !% and lower sections.
+        !%------------------------------------------------------------------
+        !% Declarations:
+            integer, intent(in)    :: thisLink 
+            integer, intent(inout) :: firstelem, lastElem, nTotalElemInLink 
+            logical, intent(inout) :: isUpNode, isDnNode
+        !%------------------------------------------------------------------
+        !%------------------------------------------------------------------
+
+        if (link%YN(thisLink,lYN_isImageConnection)) then 
+            if     (link%I(thisLink,li_P_imageUp) .eq. this_image()) then 
+                firstelem = link%I(thisLink,li_up_first_elem_idx)
+                lastelem  = link%I(thisLink,li_up_last_elem_idx)
+                isUpNode = .true. 
+                isDnNode = .false.
+            elseif (link%I(thisLink,li_P_imageDn) .eq. this_image()) then 
+                firstelem = link%I(thisLink,li_dn_first_elem_idx)
+                lastelem  = link%I(thisLink,li_dn_last_elem_idx)
+                isUpNode = .false. 
+                isDnNode = .true.
+            else
+                !% --- link not on this image
+                return 
+            end if
+            nTotalElemInLink = link%I(thisLink,li_N_elementUp) &
+                                + link%I(thisLink,li_N_elementDn)
+        else 
+            !% --- link is not a connection link
+            firstelem = link%I(thisLink,li_up_first_elem_idx)
+            lastelem  = link%I(thisLink,li_dn_last_elem_idx)
+            isUpNode = .true.
+            isDnNode = .true.
+            nTotalElemInLink = link%I(thisLink,li_N_element)
+        end if
+
+
+    end subroutine util_first_and_last_elem_of_link
 !%
 !%==========================================================================
 !% END OF MODULE
